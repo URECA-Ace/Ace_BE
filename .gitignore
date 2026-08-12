@@ -41,3 +41,6 @@ out/
 .project
 .classpath
 src/main/resources/application.properties
+
+### Docker ###
+.env
