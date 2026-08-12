@@ -89,7 +89,24 @@ services:
       start_period: 30s
     networks:
       - ace-net
-
+  restore:
+    image: alpine
+    volumes:
+      - mysql-data:/volume
+      - ./dump:/backup
+    profiles: ["restore"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        FILE=$$(ls -t /backup/*.tar.gz | head -n1)
+        if [ -z "$$FILE" ]; then
+          echo "복원할 tar.gz 파일이 dump 폴더에 없습니다."
+          exit 1
+        fi
+        echo "복원 파일: $$FILE"
+        rm -rf /volume/*
+        tar xzf "$$FILE" -C /volume
+        echo "복원 완료"
 volumes:
   mysql-data:
   redis-data:

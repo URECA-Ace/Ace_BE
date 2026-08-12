@@ -24,6 +24,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.kafka:spring-kafka'
+	implementation 'net.datafaker:datafaker:2.7.0'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.mysql:mysql-connector-j'
@@ -55,4 +56,8 @@ tasks.register('installGitHooks', Copy) {
 // 2. Java 컴파일이 실행될 때마다 installGitHooks Task를 먼저 실행하도록 의존성 설정
 tasks.named('compileJava') {
     dependsOn 'installGitHooks'
+}
+
+tasks.named('bootRun') {
+	systemProperty 'generate.dummy', System.getProperty('generate.dummy')
 }

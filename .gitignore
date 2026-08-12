@@ -44,3 +44,4 @@ src/main/resources/application.properties
 
 ### Docker ###
 .env
+dump/ace_mysql_volume_20260812.tar.gz
