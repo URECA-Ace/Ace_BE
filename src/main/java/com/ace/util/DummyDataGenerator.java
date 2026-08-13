@@ -28,6 +28,7 @@ public class DummyDataGenerator implements CommandLineRunner {
 	private static final int EVENT_COUNT = 30;
 	private static final int ISSUE_PER_EVENT = 100_000; // 30 * 100,000 = 3,000,000
 	private static final int BATCH_SIZE = 2000;
+	private static final long RANDOM_SEED = 20260813L;
 
 	private static final String[] STATUSES = {"ISSUED", "ISSUED", "ISSUED", "USED", "USED", "CANCELED", "EXPIRED"};
 	// 비율: ISSUED 3/7, USED 2/7, CANCELED 1/7, EXPIRED 1/7 정도로 대충 분산
@@ -36,10 +37,32 @@ public class DummyDataGenerator implements CommandLineRunner {
 	public void run(String... args) {
 		if (!"true".equals(System.getProperty("generate.dummy"))) return;
 
+		assertTargetTablesAreEmpty();
 		Long couponId = generateCoupon();
 		List<Long> eventIds = generateCouponEvents(couponId);
-		generateUsers();
-		generateCouponIssues(eventIds);
+		long firstUserId = generateUsers();
+		generateCouponIssues(eventIds, firstUserId);
+	}
+
+	private void assertTargetTablesAreEmpty() {
+		Map<String, Object> counts = jdbcTemplate.queryForMap("""
+				SELECT
+				  (SELECT COUNT(*) FROM coupon) AS coupon_count,
+				  (SELECT COUNT(*) FROM coupon_event) AS event_count,
+				  (SELECT COUNT(*) FROM user) AS user_count,
+				  (SELECT COUNT(*) FROM coupon_issue) AS issue_count,
+				  (SELECT COUNT(*) FROM coupon_history) AS history_count
+				""");
+
+		boolean hasExistingData = counts.values().stream()
+				.mapToLong(value -> ((Number) value).longValue())
+				.anyMatch(count -> count > 0);
+
+		if (hasExistingData) {
+			throw new IllegalStateException(
+					"더미데이터 생성을 중단합니다. 대상 테이블이 비어 있지 않습니다: " + counts
+			);
+		}
 	}
 
 	// 1. 쿠폰 1건
@@ -100,7 +123,7 @@ public class DummyDataGenerator implements CommandLineRunner {
 	}
 
 	// 3. 유저 100만
-	private void generateUsers() {
+	private long generateUsers() {
 		String sql = "INSERT INTO user (email, name, phone, created_at) VALUES (?, ?, ?, ?)";
 		List<Object[]> batch = new ArrayList<>(BATCH_SIZE);
 		Faker faker = new Faker(new Locale("ko"));
@@ -120,10 +143,18 @@ public class DummyDataGenerator implements CommandLineRunner {
 		}
 		if (!batch.isEmpty()) jdbcTemplate.batchUpdate(sql, batch);
 		log.info("user 생성 완료");
+		Long firstUserId = jdbcTemplate.queryForObject(
+				"SELECT MIN(user_id) FROM user",
+				Long.class
+		);
+		if (firstUserId == null) {
+			throw new IllegalStateException("생성된 사용자 ID를 확인할 수 없습니다.");
+		}
+		return firstUserId;
 	}
 
 	// 4. 쿠폰 발급 이력 300만
-	private void generateCouponIssues(List<Long> eventIds) {
+	private void generateCouponIssues(List<Long> eventIds, long firstUserId) {
 		String sql = """
             INSERT INTO coupon_issue
             (event_id, user_id, issue_sequence, request_id, status, issued_at, valid_from, valid_to, used_at, canceled_at, created_at, message_id)
@@ -131,12 +162,15 @@ public class DummyDataGenerator implements CommandLineRunner {
             """;
 
 		List<Object[]> batch = new ArrayList<>(BATCH_SIZE);
-		Random random = new Random();
+		Random random = new Random(RANDOM_SEED);
 		int total = 0;
 
-		for (Long eventId : eventIds) {
+		for (int eventIndex = 0; eventIndex < eventIds.size(); eventIndex++) {
+			Long eventId = eventIds.get(eventIndex);
 			for (int seq = 1; seq <= ISSUE_PER_EVENT; seq++) {
-				long userId = random.nextInt(USER_COUNT) + 1;
+				// 이벤트 안에서는 사용자 ID가 겹치지 않도록 하여 1인 1매 제약을 만족한다.
+				long userOffset = ((long) eventIndex * ISSUE_PER_EVENT + seq - 1) % USER_COUNT;
+				long userId = firstUserId + userOffset;
 				String status = STATUSES[random.nextInt(STATUSES.length)];
 
 				LocalDateTime issuedAt = LocalDateTime.now().minusDays(random.nextInt(30));
