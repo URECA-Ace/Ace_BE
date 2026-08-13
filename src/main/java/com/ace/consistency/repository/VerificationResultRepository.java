@@ -1,6 +1,8 @@
 package com.ace.consistency.repository;
 
 import com.ace.consistency.common.VerificationResult;
+import com.ace.consistency.entity.VerificationResultEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -12,6 +14,5 @@ import java.util.List;
  * 건드릴 필요가 없다.
  */
 @Repository
-public interface VerificationResultRepository {
-	void saveAll(List<VerificationResult> results);
+public interface VerificationResultRepository extends JpaRepository<VerificationResultEntity, Long> {
 }

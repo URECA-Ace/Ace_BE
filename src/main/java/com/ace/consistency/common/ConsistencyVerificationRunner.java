@@ -1,5 +1,6 @@
 package com.ace.consistency.common;
 
+import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -59,7 +60,7 @@ public class ConsistencyVerificationRunner {
 				.map(check -> runSingleCheck(check, scope, triggerType))
 				.toList();
 
-		resultRepository.saveAll(results);
+		resultRepository.saveAll(results.stream().map(VerificationResultEntity::from).toList());
 
 		long failCount = results.stream().filter(r -> !r.isPass()).count();
 		if (failCount > 0) {
@@ -99,7 +100,7 @@ public class ConsistencyVerificationRunner {
 				return VerificationResult.pass(check.getName(), triggerType, scope, executedAt, duration);
 			} else {
 				log.warn("Check {} FAILED. scope={}, diff={}", check.getName(), scope, outcome.getDiffDetail());
-				return VerificationResult.fail(check.getName(), triggerType, scope, outcome.getDiffDetail(),
+				return VerificationResult.fail(check.getName(), triggerType, scope, outcome.getViolationCount(), outcome.getDiffDetail(),
 						executedAt, duration);
 			}
 		} catch (Exception ex) {

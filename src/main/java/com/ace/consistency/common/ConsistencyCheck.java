@@ -59,14 +59,15 @@ public interface ConsistencyCheck {
 	@AllArgsConstructor(access = AccessLevel.PRIVATE)
 	class CheckOutcome {
 		private final boolean pass;
+		private final int violationCount;
 		private final Map<String, Object> diffDetail;
 
 		public static CheckOutcome pass() {
-			return new CheckOutcome(true, Collections.emptyMap());
+			return new CheckOutcome(true, 0, Collections.emptyMap());
 		}
 
-		public static CheckOutcome fail(Map<String, Object> diffDetail) {
-			return new CheckOutcome(false, Map.copyOf(diffDetail));
+		public static CheckOutcome fail(int violationCount, Map<String, Object> diffDetail) {
+			return new CheckOutcome(false, violationCount, Map.copyOf(diffDetail));
 		}
 	}
 

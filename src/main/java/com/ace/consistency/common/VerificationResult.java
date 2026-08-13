@@ -1,10 +1,7 @@
 package com.ace.consistency.common;
 
-import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.ToString;
+import com.ace.consistency.entity.VerificationResultEntity;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -34,6 +31,7 @@ public final class VerificationResult {
 	private final TriggerType triggerType;
 	private final Scope scope;
 	private final Status status;
+	private final int violationCount;
 	private final Map<String, Object> diffDetail; // 불일치 상세 (예: {"eventId":123,"expected":10000,"actual":10007})
 	private final String errorMessage;             // ERROR 상태일 때만 값 존재
 	private final LocalDateTime executedAt;
@@ -42,21 +40,22 @@ public final class VerificationResult {
 	public static VerificationResult pass(String checkName, TriggerType triggerType, Scope scope,
 										  LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.PASS,
-				Collections.emptyMap(), null, executedAt, durationMillis);
+				0, Collections.emptyMap(), null, executedAt, durationMillis);
 	}
 
 	public static VerificationResult fail(String checkName, TriggerType triggerType, Scope scope,
+										  int violationCount,
 										  Map<String, Object> diffDetail,
 										  LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.FAIL,
-				Map.copyOf(diffDetail), null, executedAt, durationMillis);
+				violationCount, Map.copyOf(diffDetail), null, executedAt, durationMillis);
 	}
 
 	public static VerificationResult error(String checkName, TriggerType triggerType, Scope scope,
 										   Throwable cause,
 										   LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.ERROR,
-				Collections.emptyMap(), describe(cause), executedAt, durationMillis);
+				0, Collections.emptyMap(), describe(cause), executedAt, durationMillis);
 	}
 
 	private static String describe(Throwable cause) {
