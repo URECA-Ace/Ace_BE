@@ -1,0 +1,69 @@
+package com.ace.consistency.common;
+
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
+
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.Map;
+
+/**
+ * 모든 ConsistencyCheck의 실행 결과가 공통으로 따르는 표준 포맷.
+ * DB 저장(verification_result 테이블), Coupon State API 응답, 대시보드 노출에 동일하게 사용된다.
+ *
+ * 생성자를 private으로 감춰서, 항상 정적 팩토리 메서드(pass/fail/error)를 통해서만
+ * 만들어지도록 강제한다 (Status와 diffDetail/errorMessage 조합이 어긋나는 잘못된 상태를
+ * 만들 수 없게 하기 위함).
+ */
+@Getter
+@ToString
+@EqualsAndHashCode
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+public final class VerificationResult {
+
+	public enum Status {
+		PASS,
+		FAIL,
+		ERROR   // Check 실행 자체가 예외로 실패한 경우 (FAIL은 "정상 실행됐지만 불일치 발견"과 구분)
+	}
+
+	private final String checkName;
+	private final TriggerType triggerType;
+	private final Scope scope;
+	private final Status status;
+	private final Map<String, Object> diffDetail; // 불일치 상세 (예: {"eventId":123,"expected":10000,"actual":10007})
+	private final String errorMessage;             // ERROR 상태일 때만 값 존재
+	private final LocalDateTime executedAt;
+	private final long durationMillis;
+
+	public static VerificationResult pass(String checkName, TriggerType triggerType, Scope scope,
+										  LocalDateTime executedAt, long durationMillis) {
+		return new VerificationResult(checkName, triggerType, scope, Status.PASS,
+				Collections.emptyMap(), null, executedAt, durationMillis);
+	}
+
+	public static VerificationResult fail(String checkName, TriggerType triggerType, Scope scope,
+										  Map<String, Object> diffDetail,
+										  LocalDateTime executedAt, long durationMillis) {
+		return new VerificationResult(checkName, triggerType, scope, Status.FAIL,
+				Map.copyOf(diffDetail), null, executedAt, durationMillis);
+	}
+
+	public static VerificationResult error(String checkName, TriggerType triggerType, Scope scope,
+										   Throwable cause,
+										   LocalDateTime executedAt, long durationMillis) {
+		return new VerificationResult(checkName, triggerType, scope, Status.ERROR,
+				Collections.emptyMap(), describe(cause), executedAt, durationMillis);
+	}
+
+	private static String describe(Throwable cause) {
+		return cause.getClass().getSimpleName() + ": " + cause.getMessage();
+	}
+
+	public boolean isPass() {
+		return status == Status.PASS;
+	}
+}
