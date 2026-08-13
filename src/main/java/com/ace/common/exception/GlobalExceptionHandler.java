@@ -11,6 +11,9 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+
 import java.util.List;
 
 @RestControllerAdvice
@@ -122,6 +125,40 @@ public class GlobalExceptionHandler {
         return new FieldErrorDetail(
                 fieldError.getField(),
                 fieldError.getDefaultMessage()
+        );
+    }
+    
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(
+            ConstraintViolationException exception,
+            HttpServletRequest request
+    ) {
+        List<FieldErrorDetail> errors = exception
+                .getConstraintViolations()
+                .stream()
+                .map(this::toFieldErrorDetail)
+                .toList();
+
+        ErrorCode errorCode = ErrorCode.INVALID_REQUEST;
+
+        ErrorResponse response = ErrorResponse.of(
+                errorCode.getCode(),
+                errorCode.getMessage(),
+                request.getRequestURI(),
+                errors
+        );
+
+        return ResponseEntity
+                .status(errorCode.getHttpStatus())
+                .body(response);
+    }
+
+    private FieldErrorDetail toFieldErrorDetail(
+            ConstraintViolation<?> violation
+    ) {
+        return new FieldErrorDetail(
+                violation.getPropertyPath().toString(),
+                violation.getMessage()
         );
     }
 }
