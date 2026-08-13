@@ -1,5 +1,7 @@
 package com.ace.common;
 
+import static org.hamcrest.Matchers.nullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -27,7 +30,7 @@ import com.ace.common.exception.CouponException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
-@DisplayName("전역 예외 처리")
+@DisplayName("공통 응답 및 전역 예외 처리")
 class GlobalExceptionHandlerTest {
 
 	private MockMvc mockMvc;
@@ -40,16 +43,39 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	@DisplayName("성공 응답은 result=success 이고 error 가 null 이다")
+	void successEnvelope() throws Exception {
+		mockMvc.perform(get("/test/success"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.result").value("success"))
+				.andExpect(jsonPath("$.data.name").value("데이터 무제한 제공"))
+				.andExpect(jsonPath("$.data.sequence").value(4821))
+				.andExpect(jsonPath("$.error").value(nullValue()))
+				.andExpect(jsonPath("$.timestamp").exists())
+				.andExpect(jsonPath("$.path").value("/test/success"));
+	}
+
+	@Test
+	@DisplayName("데이터 없는 성공 응답도 같은 envelope 를 유지한다")
+	void successEnvelopeWithoutData() throws Exception {
+		mockMvc.perform(get("/test/success-empty"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.result").value("success"))
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.error").value(nullValue()));
+	}
+
+	@Test
 	@DisplayName("재고 소진은 409 SOLD_OUT 으로 응답한다")
 	void soldOut() throws Exception {
 		mockMvc.perform(get("/test/sold-out"))
 				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.code").value("SOLD_OUT"))
-				.andExpect(jsonPath("$.error").value("Conflict"))
-				.andExpect(jsonPath("$.message").value("재고가 모두 소진되었습니다."))
-				.andExpect(jsonPath("$.path").value("/test/sold-out"))
-				.andExpect(jsonPath("$.timestamp").exists());
+				.andExpect(jsonPath("$.result").value("error"))
+				.andExpect(jsonPath("$.data").value(nullValue()))
+				.andExpect(jsonPath("$.error.code").value("SOLD_OUT"))
+				.andExpect(jsonPath("$.error.message").value("재고가 모두 소진되었습니다."))
+				.andExpect(jsonPath("$.timestamp").exists())
+				.andExpect(jsonPath("$.path").value("/test/sold-out"));
 	}
 
 	@Test
@@ -57,7 +83,7 @@ class GlobalExceptionHandlerTest {
 	void alreadyIssued() throws Exception {
 		mockMvc.perform(get("/test/already-issued"))
 				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.code").value("ALREADY_ISSUED"));
+				.andExpect(jsonPath("$.error.code").value("ALREADY_ISSUED"));
 	}
 
 	@Test
@@ -65,7 +91,7 @@ class GlobalExceptionHandlerTest {
 	void duplicateKey() throws Exception {
 		mockMvc.perform(get("/test/duplicate-key"))
 				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.code").value("ALREADY_ISSUED"));
+				.andExpect(jsonPath("$.error.code").value("ALREADY_ISSUED"));
 	}
 
 	@Test
@@ -74,8 +100,8 @@ class GlobalExceptionHandlerTest {
 		// 409 로 응답하면 부하테스트에서 정상 흐름(재고 소진)에 묻혀 버그가 발견되지 않는다
 		mockMvc.perform(get("/test/fk-violation"))
 				.andExpect(status().isInternalServerError())
-				.andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
 	}
 
 	@Test
@@ -85,8 +111,8 @@ class GlobalExceptionHandlerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"requestId\":\"\"}"))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
-				.andExpect(jsonPath("$.message").value("requestId 는 필수입니다."));
+				.andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"))
+				.andExpect(jsonPath("$.error.message").value("requestId 는 필수입니다."));
 	}
 
 	@Test
@@ -94,7 +120,46 @@ class GlobalExceptionHandlerTest {
 	void typeMismatch() throws Exception {
 		mockMvc.perform(get("/test/events/abc"))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("INVALID_PARAMETER"));
+				.andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
+	}
+
+	@Test
+	@DisplayName("지원하지 않는 HTTP 메서드는 500 이 아니라 405 로 응답한다")
+	void methodNotAllowed() throws Exception {
+		mockMvc.perform(delete("/test/success"))
+				.andExpect(status().isMethodNotAllowed())
+				.andExpect(jsonPath("$.error.code").value("METHOD_NOT_ALLOWED"));
+	}
+
+	@Test
+	@DisplayName("깨진 JSON 본문은 500 이 아니라 400 MALFORMED_REQUEST 로 응답한다")
+	void malformedJson() throws Exception {
+		mockMvc.perform(post("/test/validate")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"requestId\":"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("MALFORMED_REQUEST"))
+				// 본문에 개인정보가 섞여 있을 수 있으므로 파싱 오류 상세를 노출하지 않는다
+				.andExpect(jsonPath("$.error.message").value("요청 본문을 읽을 수 없습니다."));
+	}
+
+	@Test
+	@DisplayName("지원하지 않는 Content-Type 은 500 이 아니라 415 로 응답한다")
+	void unsupportedMediaType() throws Exception {
+		mockMvc.perform(post("/test/validate")
+						.contentType(MediaType.TEXT_PLAIN)
+						.content("requestId=abc"))
+				.andExpect(status().isUnsupportedMediaType())
+				.andExpect(jsonPath("$.error.code").value("UNSUPPORTED_MEDIA_TYPE"));
+	}
+
+	@Test
+	@DisplayName("필수 파라미터 누락은 500 이 아니라 400 MISSING_PARAMETER 로 응답한다")
+	void missingParameter() throws Exception {
+		mockMvc.perform(get("/test/search"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("MISSING_PARAMETER"))
+				.andExpect(jsonPath("$.error.message").value("필수 파라미터가 없습니다: eventId"));
 	}
 
 	@Test
@@ -102,8 +167,8 @@ class GlobalExceptionHandlerTest {
 	void unhandledException() throws Exception {
 		mockMvc.perform(get("/test/boom"))
 				.andExpect(status().isInternalServerError())
-				.andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
 	}
 
 	@Test
@@ -111,8 +176,9 @@ class GlobalExceptionHandlerTest {
 	void masksPersonalInfoInMessage() throws Exception {
 		mockMvc.perform(get("/test/leaky"))
 				.andExpect(status().isNotFound())
-				.andExpect(jsonPath("$.code").value("ISSUE_NOT_FOUND"))
-				.andExpect(jsonPath("$.message").value("발급 내역 없음: use****@test.com / 010-****-5678"));
+				.andExpect(jsonPath("$.error.code").value("ISSUE_NOT_FOUND"))
+				.andExpect(jsonPath("$.error.message")
+						.value("발급 내역 없음: use****@test.com / 010-****-5678"));
 	}
 
 	@Test
@@ -120,25 +186,36 @@ class GlobalExceptionHandlerTest {
 	void responseStatusException() throws Exception {
 		mockMvc.perform(get("/test/response-status"))
 				.andExpect(status().isServiceUnavailable())
-				.andExpect(jsonPath("$.status").value(503))
-				.andExpect(jsonPath("$.code").value("SERVICE_UNAVAILABLE"))
-				.andExpect(jsonPath("$.message").value("일시적으로 이용할 수 없습니다."));
+				.andExpect(jsonPath("$.result").value("error"))
+				.andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"))
+				.andExpect(jsonPath("$.error.message").value("일시적으로 이용할 수 없습니다."));
 	}
 
 	@Test
 	@DisplayName("비표준 상태코드에서도 응답 포맷을 유지한다")
 	void nonStandardStatusCode() throws Exception {
+		// HttpStatus.valueOf(499) 는 IllegalArgumentException 을 던진다.
+		// 핸들러 안에서 터지면 응답 포맷을 우회하므로 resolve() 로 방어한다.
 		mockMvc.perform(get("/test/non-standard-status"))
 				.andExpect(status().is(499))
-				.andExpect(jsonPath("$.status").value(499))
-				.andExpect(jsonPath("$.code").value("HTTP_499"))
-				.andExpect(jsonPath("$.error").value("Error"))
-				.andExpect(jsonPath("$.message").value("클라이언트가 요청을 취소했습니다."))
+				.andExpect(jsonPath("$.result").value("error"))
+				.andExpect(jsonPath("$.error.code").value("HTTP_499"))
+				.andExpect(jsonPath("$.error.message").value("클라이언트가 요청을 취소했습니다."))
 				.andExpect(jsonPath("$.path").value("/test/non-standard-status"));
 	}
 
 	@RestController
 	static class TestController {
+
+		@GetMapping("/test/success")
+		ApiResponse<TestData> success() {
+			return ApiResponse.success(new TestData("데이터 무제한 제공", 4821));
+		}
+
+		@GetMapping("/test/success-empty")
+		ApiResponse<Void> successEmpty() {
+			return ApiResponse.success();
+		}
 
 		@GetMapping("/test/sold-out")
 		void soldOut() {
@@ -190,6 +267,14 @@ class GlobalExceptionHandlerTest {
 		@PostMapping("/test/validate")
 		void validate(@Valid @RequestBody TestRequest request) {
 		}
+
+		@GetMapping("/test/search")
+		void search(@RequestParam Long eventId) {
+			// eventId 누락 시 MissingServletRequestParameterException 발생
+		}
+	}
+
+	record TestData(String name, int sequence) {
 	}
 
 	record TestRequest(@NotBlank(message = "requestId 는 필수입니다.") String requestId) {
