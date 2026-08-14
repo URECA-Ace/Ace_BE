@@ -45,3 +45,11 @@ src/main/resources/application.properties
 ### Docker ###
 .env
 dump/*
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
+logs/
