@@ -1,9 +1,20 @@
 #!/bin/bash
 
 COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
 FIRST_LINE=$(head -n1 "$COMMIT_MSG_FILE")
 
 PATTERN="^(feat|fix|refactor|docs|test|chore|style): .+"
+MERGE_PATTERN="^Merge "
+
+# 머지 커밋은 검사하지 않음
+if [[ $FIRST_LINE =~ $MERGE_PATTERN ]]; then
+  exit 0
+fi
+
+if [[ "$COMMIT_SOURCE" == "merge" ]]; then
+  exit 0
+fi
 
 if [[ ! $FIRST_LINE =~ $PATTERN ]]; then
   echo "========================================================="
