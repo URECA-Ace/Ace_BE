@@ -11,7 +11,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -87,7 +86,7 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
-	@DisplayName("UNIQUE 제약 위반은 409 ALREADY_ISSUED 로 변환한다")
+	@DisplayName("쿠폰 발급 UNIQUE 제약 위반은 409 ALREADY_ISSUED 로 변환한다")
 	void duplicateKey() throws Exception {
 		mockMvc.perform(get("/test/duplicate-key"))
 				.andExpect(status().isConflict())
@@ -101,7 +100,24 @@ class GlobalExceptionHandlerTest {
 		mockMvc.perform(get("/test/fk-violation"))
 				.andExpect(status().isInternalServerError())
 				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."))
+				.andExpect(jsonPath("$.error.incidentId").isNotEmpty());
+	}
+
+	@Test
+	@DisplayName("request_id UNIQUE 제약 위반은 중복 요청으로 구분한다")
+	void duplicateRequestId() throws Exception {
+		mockMvc.perform(get("/test/duplicate-request-id"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("DUPLICATE_REQUEST"));
+	}
+
+	@Test
+	@DisplayName("발급 순번 UNIQUE 충돌은 저장 실패로 구분한다")
+	void duplicateIssueSequence() throws Exception {
+		mockMvc.perform(get("/test/duplicate-issue-sequence"))
+				.andExpect(status().isInternalServerError())
+				.andExpect(jsonPath("$.error.code").value("ISSUE_PERSIST_FAILED"));
 	}
 
 	@Test
@@ -168,7 +184,17 @@ class GlobalExceptionHandlerTest {
 		mockMvc.perform(get("/test/boom"))
 				.andExpect(status().isInternalServerError())
 				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."))
+				.andExpect(jsonPath("$.error.incidentId").isNotEmpty());
+	}
+
+	@Test
+	@DisplayName("5xx 비즈니스 예외도 상세 메시지를 응답에 노출하지 않는다")
+	void serverCouponExceptionDoesNotLeakMessage() throws Exception {
+		mockMvc.perform(get("/test/internal-coupon-error"))
+				.andExpect(status().isInternalServerError())
+				.andExpect(jsonPath("$.error.code").value("ISSUE_PERSIST_FAILED"))
+				.andExpect(jsonPath("$.error.message").value("발급 처리 중 오류가 발생했습니다."));
 	}
 
 	@Test
@@ -188,11 +214,11 @@ class GlobalExceptionHandlerTest {
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.result").value("error"))
 				.andExpect(jsonPath("$.error.code").value("SERVICE_UNAVAILABLE"))
-				.andExpect(jsonPath("$.error.message").value("일시적으로 이용할 수 없습니다."));
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
 	}
 
 	@Test
-	@DisplayName("비표준 상태코드에서도 응답 포맷을 유지한다")
+	@DisplayName("비표준 4xx 상태코드에서도 reason과 응답 포맷을 유지한다")
 	void nonStandardStatusCode() throws Exception {
 		// HttpStatus.valueOf(499) 는 IllegalArgumentException 을 던진다.
 		// 핸들러 안에서 터지면 응답 포맷을 우회하므로 resolve() 로 방어한다.
@@ -229,13 +255,26 @@ class GlobalExceptionHandlerTest {
 
 		@GetMapping("/test/duplicate-key")
 		void duplicateKey() {
-			throw new DuplicateKeyException("Duplicate entry for key 'uk_issue_user'");
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_issue_event_user'");
 		}
 
 		@GetMapping("/test/fk-violation")
 		void fkViolation() {
 			throw new DataIntegrityViolationException(
 					"Cannot add or update a child row: a foreign key constraint fails");
+		}
+
+		@GetMapping("/test/duplicate-request-id")
+		void duplicateRequestId() {
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_issue_request_id'");
+		}
+
+		@GetMapping("/test/duplicate-issue-sequence")
+		void duplicateIssueSequence() {
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_issue_event_sequence'");
 		}
 
 		@GetMapping("/test/response-status")
@@ -256,6 +295,12 @@ class GlobalExceptionHandlerTest {
 		@GetMapping("/test/boom")
 		void boom() {
 			throw new IllegalStateException("내부 상태 오류 - 응답에 노출되면 안 됨");
+		}
+
+		@GetMapping("/test/internal-coupon-error")
+		void internalCouponError() {
+			throw new CouponException(ErrorCode.ISSUE_PERSIST_FAILED,
+					"SQL failed for user1@test.com / 010-1234-5678");
 		}
 
 		@GetMapping("/test/leaky")

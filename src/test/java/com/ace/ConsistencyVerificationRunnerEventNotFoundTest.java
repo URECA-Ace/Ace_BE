@@ -6,11 +6,13 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
+import com.ace.coupon.service.CouponIssueService;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,10 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @SpringBootTest
 class ConsistencyVerificationRunnerEventNotFoundTest {
+
+	// Redis + Lua 기반 실제 구현체가 추가되기 전까지 전체 Context에서만 대체한다.
+	@MockitoBean
+	private CouponIssueService couponIssueService;
 
 	@Autowired
 	private ConsistencyVerificationRunner runner;
