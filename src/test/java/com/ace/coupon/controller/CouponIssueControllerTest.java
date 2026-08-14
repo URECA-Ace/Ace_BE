@@ -3,6 +3,7 @@ package com.ace.coupon.controller;
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
+import com.ace.coupon.dto.response.CouponIssueStatusResponse;
 import com.ace.coupon.enums.IssueRequestStatus;
 import com.ace.coupon.service.CouponIssueService;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -109,6 +111,37 @@ class CouponIssueControllerTest {
                 idempotencyKey
         );
     }
+
+	@Test
+	@DisplayName("requestId 상태 조회에 성공하면 Redis 판정 상태를 반환한다")
+	void findIssueStatus() throws Exception {
+		UUID requestId = UUID.randomUUID();
+		OffsetDateTime decidedAt = OffsetDateTime.parse("2026-08-13T15:30:00.123456+09:00");
+		given(couponIssueService.findStatus(EVENT_ID, requestId)).willReturn(
+				new CouponIssueStatusResponse(
+						requestId,
+						EVENT_ID,
+						USER_ID,
+						8271L,
+						1729L,
+						IssueRequestStatus.ACCEPTED,
+						decidedAt));
+
+		mockMvc.perform(get(
+						"/api/v1/events/{eventId}/issues/{requestId}",
+						EVENT_ID,
+						requestId))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.requestId").value(requestId.toString()))
+				.andExpect(jsonPath("$.data.eventId").value(EVENT_ID))
+				.andExpect(jsonPath("$.data.userId").value(USER_ID))
+				.andExpect(jsonPath("$.data.issueSequence").value(8271))
+				.andExpect(jsonPath("$.data.remainingStock").value(1729))
+				.andExpect(jsonPath("$.data.status").value("ACCEPTED"))
+				.andExpect(jsonPath("$.data.decidedAt").value(decidedAt.toString()));
+
+		verify(couponIssueService).findStatus(EVENT_ID, requestId);
+	}
 
     @Test
     @DisplayName("Idempotency-Key 헤더가 없으면 400을 반환한다")
