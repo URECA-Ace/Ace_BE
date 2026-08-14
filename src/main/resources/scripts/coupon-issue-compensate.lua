@@ -30,13 +30,15 @@ if not previous then
 end
 
 local userId, code, status, sequence, _, decidedAt =
-        string.match(previous, '^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|')
+        string.match(previous, '^([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)|([^|]+)')
 if not userId or userId ~= ARGV[1] or not code or not status or not sequence or not decidedAt then
     return CORRUPTED_STATE
 end
 
 -- 확정 전 상태만 허용하는 단일 보상
-if code ~= '0' or (status ~= 'ACCEPTED' and status ~= 'PROCESSING' and status ~= 'FAILED') then
+-- 구형 문자열 상태 호환
+if code ~= '0' or (status ~= '0' and status ~= '1' and status ~= '3'
+        and status ~= 'ACCEPTED' and status ~= 'PROCESSING' and status ~= 'FAILED') then
     return NOT_COMPENSABLE
 end
 
@@ -52,8 +54,9 @@ local restoredStock = redis.call('INCR', KEYS[2])
 redis.call('SETBIT', KEYS[3], bitOffset, 0)
 local redisTime = redis.call('TIME')
 local now = (tonumber(redisTime[1]) * 1000) + math.floor(tonumber(redisTime[2]) / 1000)
-local packed = table.concat({userId, '8', 'COMPENSATED', sequence,
-        tostring(restoredStock), decidedAt, '-'}, '|')
+-- 숫자 보상 상태 코드 기반 요청 값 크기 축소
+local packed = table.concat({userId, '8', '4', sequence,
+        tostring(restoredStock), decidedAt}, '|')
 redis.call('HSET', KEYS[4], ARGV[3], packed)
 redis.call('XADD', KEYS[5], '*',
         'type', 'COMPENSATE',

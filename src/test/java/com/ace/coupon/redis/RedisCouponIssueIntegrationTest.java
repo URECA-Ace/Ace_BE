@@ -29,6 +29,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
+import com.ace.coupon.enums.IssueRequestStatus;
+
 @Tag("redis-integration")
 class RedisCouponIssueIntegrationTest {
 
@@ -128,6 +130,29 @@ class RedisCouponIssueIntegrationTest {
 		initializer.initialize(closedCampaign, 1, now.minusSeconds(600), now.minusSeconds(1));
 		assertThat(processor.issue(closedCampaign, 1L, UUID.randomUUID()).code())
 				.isEqualTo(CouponIssueLuaCode.EVENT_CLOSED);
+	}
+
+	@Test
+	@DisplayName("최적화 전 7필드 요청 상태도 멱등 결과로 재사용한다")
+	void reusesLegacyRequestState() {
+		long campaignId = initializeOpenCampaign(2);
+		UUID requestId = UUID.randomUUID();
+		long decidedAt = Instant.now().toEpochMilli();
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		redisTemplate.opsForHash().put(
+				keys.requests(),
+				requestId.toString(),
+				"1|0|ACCEPTED|1|1|" + decidedAt + "|1730000000000-0");
+
+		CouponIssueRequestState state = processor.findRequest(campaignId, requestId);
+		CouponIssueDecision replay = processor.issue(campaignId, 1L, requestId);
+		CouponIssueDecision conflict = processor.issue(campaignId, 2L, requestId);
+
+		assertThat(state.status()).isEqualTo(IssueRequestStatus.ACCEPTED);
+		assertThat(replay.code()).isEqualTo(CouponIssueLuaCode.ACCEPTED);
+		assertThat(replay.issueSequence()).isEqualTo(1L);
+		assertThat(replay.remainingStock()).isEqualTo(1L);
+		assertThat(conflict.code()).isEqualTo(CouponIssueLuaCode.IDEMPOTENCY_CONFLICT);
 	}
 
 	@Test

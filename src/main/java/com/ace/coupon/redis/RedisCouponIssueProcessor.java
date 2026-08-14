@@ -15,7 +15,8 @@ import com.ace.coupon.enums.IssueRequestStatus;
 public class RedisCouponIssueProcessor {
 
 	private static final int DECISION_FIELD_COUNT = 4;
-	private static final int REQUEST_STATE_FIELD_COUNT = 7;
+	private static final int COMPACT_REQUEST_STATE_FIELD_COUNT = 6;
+	private static final int LEGACY_REQUEST_STATE_FIELD_COUNT = 7;
 
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> issueScript;
@@ -83,7 +84,8 @@ public class RedisCouponIssueProcessor {
 
 		try {
 			String[] fields = value.toString().split("\\|", -1);
-			if (fields.length != REQUEST_STATE_FIELD_COUNT) {
+			if (fields.length != COMPACT_REQUEST_STATE_FIELD_COUNT
+					&& fields.length != LEGACY_REQUEST_STATE_FIELD_COUNT) {
 				throw new IllegalStateException("쿠폰 요청 상태 필드 수가 올바르지 않습니다.");
 			}
 
@@ -97,12 +99,21 @@ public class RedisCouponIssueProcessor {
 					requestId,
 					campaignId,
 					Long.parseLong(fields[0]),
-					IssueRequestStatus.valueOf(fields[2]),
+					requestStatus(fields[2]),
 					sequence < 0 ? null : sequence,
 					remainingStock < 0 ? null : remainingStock,
 					Instant.ofEpochMilli(decidedAt));
 		} catch (IllegalArgumentException exception) {
 			throw new IllegalStateException("쿠폰 요청 상태 형식이 올바르지 않습니다.", exception);
+		}
+	}
+
+	private IssueRequestStatus requestStatus(String value) {
+		try {
+			return IssueRequestStatus.fromRedisCode(Long.parseLong(value));
+		} catch (NumberFormatException exception) {
+			// 구형 문자열 상태 호환
+			return IssueRequestStatus.valueOf(value);
 		}
 	}
 
