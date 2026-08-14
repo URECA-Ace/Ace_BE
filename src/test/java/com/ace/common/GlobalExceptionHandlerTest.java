@@ -100,7 +100,8 @@ class GlobalExceptionHandlerTest {
 		mockMvc.perform(get("/test/fk-violation"))
 				.andExpect(status().isInternalServerError())
 				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."))
+				.andExpect(jsonPath("$.error.incidentId").isNotEmpty());
 	}
 
 	@Test
@@ -183,7 +184,8 @@ class GlobalExceptionHandlerTest {
 		mockMvc.perform(get("/test/boom"))
 				.andExpect(status().isInternalServerError())
 				.andExpect(jsonPath("$.error.code").value("INTERNAL_ERROR"))
-				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."));
+				.andExpect(jsonPath("$.error.message").value("서버 내부 오류가 발생했습니다."))
+				.andExpect(jsonPath("$.error.incidentId").isNotEmpty());
 	}
 
 	@Test

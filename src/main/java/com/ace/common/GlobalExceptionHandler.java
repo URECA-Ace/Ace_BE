@@ -43,15 +43,16 @@ public class GlobalExceptionHandler {
 			CouponException ex,
 			HttpServletRequest request) {
 		ErrorCode errorCode = ex.getErrorCode();
+		String incidentId = null;
 
 		if (errorCode.getStatus().is5xxServerError()) {
-			logServerError(errorCode.name(), ex, request);
+			incidentId = logServerError(errorCode.name(), ex, request);
 		} else {
 			log.warn("[{}] request rejected: method={}, path={}",
 					errorCode, request.getMethod(), request.getRequestURI());
 		}
 
-		return build(errorCode, ex.getMessage());
+		return build(errorCode, ex.getMessage(), incidentId);
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
@@ -128,12 +129,12 @@ public class GlobalExceptionHandler {
 			return build(ErrorCode.DUPLICATE_REQUEST, null);
 		}
 		if (EVENT_SEQUENCE_CONSTRAINT.equals(constraintName)) {
-			logServerError(ErrorCode.ISSUE_PERSIST_FAILED.name(), ex, request);
-			return build(ErrorCode.ISSUE_PERSIST_FAILED, null);
+			String incidentId = logServerError(ErrorCode.ISSUE_PERSIST_FAILED.name(), ex, request);
+			return build(ErrorCode.ISSUE_PERSIST_FAILED, null, incidentId);
 		}
 
-		logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
-		return build(ErrorCode.INTERNAL_ERROR, null);
+		String incidentId = logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
+		return build(ErrorCode.INTERNAL_ERROR, null, incidentId);
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)
@@ -154,11 +155,12 @@ public class GlobalExceptionHandler {
 			HttpServletRequest request) {
 		HttpStatusCode statusCode = ex.getStatusCode();
 		if (statusCode.is5xxServerError()) {
-			logServerError("HTTP_" + statusCode.value(), ex, request);
+			String incidentId = logServerError("HTTP_" + statusCode.value(), ex, request);
 			HttpStatus status = HttpStatus.resolve(statusCode.value());
 			String code = status != null ? status.name() : "HTTP_" + statusCode.value();
 			return ResponseEntity.status(statusCode)
-					.body(ApiResponse.error(code, ErrorCode.INTERNAL_ERROR.getDefaultMessage()));
+					.body(ApiResponse.error(
+							code, ErrorCode.INTERNAL_ERROR.getDefaultMessage(), incidentId));
 		}
 
 		HttpStatus status = HttpStatus.resolve(statusCode.value());
@@ -171,8 +173,8 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleException(
 			Exception ex,
 			HttpServletRequest request) {
-		logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
-		return build(ErrorCode.INTERNAL_ERROR, null);
+		String incidentId = logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
+		return build(ErrorCode.INTERNAL_ERROR, null, incidentId);
 	}
 
 	private String findConstraintName(Throwable throwable) {
@@ -199,14 +201,50 @@ public class GlobalExceptionHandler {
 		return null;
 	}
 
-	private void logServerError(String code, Throwable ex, HttpServletRequest request) {
+	private String logServerError(String code, Throwable ex, HttpServletRequest request) {
 		String incidentId = UUID.randomUUID().toString();
-		log.error("[{}] server error: incidentId={}, method={}, path={}, exceptionType={}",
-				code, incidentId, request.getMethod(), request.getRequestURI(), ex.getClass().getName());
+		log.error("[{}] server error: incidentId={}, method={}, path={}, exceptionType={}\n{}",
+				code, incidentId, request.getMethod(), request.getRequestURI(),
+				ex.getClass().getName(), sanitizedStackTrace(ex));
+		return incidentId;
+	}
+
+	private String sanitizedStackTrace(Throwable throwable) {
+		StringBuilder trace = new StringBuilder();
+		Throwable current = throwable;
+		int causeDepth = 0;
+
+		while (current != null && causeDepth < 8) {
+			if (causeDepth > 0) {
+				trace.append("Caused by: ");
+			}
+			trace.append(current.getClass().getName()).append(System.lineSeparator());
+
+			StackTraceElement[] frames = current.getStackTrace();
+			int frameLimit = Math.min(frames.length, 64);
+			for (int index = 0; index < frameLimit; index++) {
+				trace.append("\tat ").append(frames[index]).append(System.lineSeparator());
+			}
+			if (frames.length > frameLimit) {
+				trace.append("\t... ").append(frames.length - frameLimit)
+						.append(" more").append(System.lineSeparator());
+			}
+
+			current = current.getCause();
+			causeDepth++;
+		}
+		return trace.toString();
 	}
 
 	private ResponseEntity<ApiResponse<Void>> build(ErrorCode errorCode, String message) {
+		return build(errorCode, message, null);
+	}
+
+	private ResponseEntity<ApiResponse<Void>> build(
+			ErrorCode errorCode,
+			String message,
+			String incidentId) {
 		return ResponseEntity.status(errorCode.getStatus())
-				.body(ApiResponse.error(errorCode, message));
+				.body(ApiResponse.error(errorCode, message, incidentId));
 	}
 }
