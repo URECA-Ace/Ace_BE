@@ -84,10 +84,7 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isAccepted())
-                .andExpect(header().string(
-                        "Location",
-                        "/api/v1/issue-requests/" + requestId
-                ))
+                .andExpect(header().doesNotExist("Location"))
                 .andExpect(jsonPath("$.result")
                         .value("success"))
                 .andExpect(jsonPath("$.error").doesNotExist())
