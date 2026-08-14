@@ -1,8 +1,8 @@
 package com.ace.coupon.controller;
 
-import com.ace.common.api.ApiResponse;
-import com.ace.common.exception.BusinessException;
-import com.ace.common.exception.ErrorCode;
+import com.ace.common.ApiResponse;
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.request.CouponIssueRequest;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
 import com.ace.coupon.service.CouponIssueService;
@@ -57,11 +57,7 @@ public class CouponIssueController {
         );
 
         ApiResponse<CouponIssueAcceptedResponse> response =
-                ApiResponse.success(
-                        "ISSUE_ACCEPTED",
-                        "쿠폰 발급 요청이 접수되었습니다.",
-                        result
-                );
+                ApiResponse.success(result);
 
         return ResponseEntity
                 .accepted()
@@ -71,7 +67,7 @@ public class CouponIssueController {
 
     private UUID parseIdempotencyKey(String value) {
         if (value == null || value.isBlank()) {
-            throw new BusinessException(
+            throw new CouponException(
                     ErrorCode.MISSING_IDEMPOTENCY_KEY
             );
         }
@@ -79,7 +75,7 @@ public class CouponIssueController {
         try {
             return UUID.fromString(value);
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(
+            throw new CouponException(
                     ErrorCode.INVALID_IDEMPOTENCY_KEY
             );
         }

@@ -1,7 +1,7 @@
 package com.ace.coupon.controller;
 
-import com.ace.common.exception.BusinessException;
-import com.ace.common.exception.ErrorCode;
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
 import com.ace.coupon.enums.IssueRequestStatus;
 import com.ace.coupon.service.CouponIssueService;
@@ -88,10 +88,9 @@ class CouponIssueControllerTest {
                         "Location",
                         "/api/v1/issue-requests/" + requestId
                 ))
-                .andExpect(jsonPath("$.code")
-                        .value("ISSUE_ACCEPTED"))
-                .andExpect(jsonPath("$.message")
-                        .value("쿠폰 발급 요청이 접수되었습니다."))
+                .andExpect(jsonPath("$.result")
+                        .value("success"))
+                .andExpect(jsonPath("$.error").doesNotExist())
                 .andExpect(jsonPath("$.data.requestId")
                         .value(requestId.toString()))
                 .andExpect(jsonPath("$.data.eventId")
@@ -130,7 +129,7 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("MISSING_IDEMPOTENCY_KEY"))
                 .andExpect(jsonPath("$.path")
                         .value("/api/v1/events/1/issues"));
@@ -153,7 +152,7 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("MISSING_IDEMPOTENCY_KEY"));
     }
 
@@ -177,7 +176,7 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("INVALID_IDEMPOTENCY_KEY"));
     }
 
@@ -200,11 +199,9 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("INVALID_REQUEST"))
-                .andExpect(jsonPath("$.errors[0].field")
-                        .value("userId"))
-                .andExpect(jsonPath("$.errors[0].message")
+                .andExpect(jsonPath("$.error.message")
                         .value("userId는 필수입니다."));
     }
 
@@ -228,10 +225,8 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
-                        .value("INVALID_REQUEST"))
-                .andExpect(jsonPath("$.errors[0].field")
-                        .value("userId"));
+                .andExpect(jsonPath("$.error.code")
+                        .value("INVALID_REQUEST"));
     }
 
     @Test
@@ -254,8 +249,8 @@ class CouponIssueControllerTest {
                                         """)
                 )
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code")
-                        .value("INVALID_REQUEST"));
+                .andExpect(jsonPath("$.error.code")
+                        .value("MALFORMED_REQUEST"));
     }
 
     @Test
@@ -266,12 +261,12 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(ErrorCode.EVENT_NOT_FOUND)
+                new CouponException(ErrorCode.EVENT_NOT_FOUND)
         );
 
         performValidRequest()
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("EVENT_NOT_FOUND"));
     }
 
@@ -283,12 +278,12 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(ErrorCode.EVENT_NOT_OPEN)
+                new CouponException(ErrorCode.EVENT_NOT_OPEN)
         );
 
         performValidRequest()
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code")
                         .value("EVENT_NOT_OPEN"));
     }
 
@@ -300,13 +295,13 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(ErrorCode.ISSUE_DUPLICATED)
+                new CouponException(ErrorCode.ALREADY_ISSUED)
         );
 
         performValidRequest()
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code")
-                        .value("ISSUE_DUPLICATED"));
+                .andExpect(jsonPath("$.error.code")
+                        .value("ALREADY_ISSUED"));
     }
 
     @Test
@@ -317,13 +312,13 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(ErrorCode.ISSUE_SOLD_OUT)
+                new CouponException(ErrorCode.SOLD_OUT)
         );
 
         performValidRequest()
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code")
-                        .value("ISSUE_SOLD_OUT"));
+                .andExpect(jsonPath("$.error.code")
+                        .value("SOLD_OUT"));
     }
 
     @Test
@@ -334,14 +329,14 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(
+                new CouponException(
                         ErrorCode.IDEMPOTENCY_CONFLICT
                 )
         );
 
         performValidRequest()
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("IDEMPOTENCY_CONFLICT"));
     }
 
@@ -353,14 +348,14 @@ class CouponIssueControllerTest {
                 eq(USER_ID),
                 any(UUID.class)
         )).willThrow(
-                new BusinessException(
+                new CouponException(
                         ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE
                 )
         );
 
         performValidRequest()
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code")
+                .andExpect(jsonPath("$.error.code")
                         .value("ISSUE_TEMPORARILY_UNAVAILABLE"));
     }
 
