@@ -1,8 +1,11 @@
 package com.ace.coupon.entity;
 
+import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.user.entity.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -10,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -19,7 +23,27 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "coupon_issue")
+@Table(
+		name = "coupon_issue",
+		uniqueConstraints = {
+				@UniqueConstraint(
+						name = "uk_coupon_issue_event_user",
+						columnNames = {"event_id", "user_id"}
+				),
+				@UniqueConstraint(
+						name = "uk_coupon_issue_event_sequence",
+						columnNames = {"event_id", "issue_sequence"}
+				),
+				@UniqueConstraint(
+						name = "uk_coupon_issue_request_id",
+						columnNames = "request_id"
+				),
+				@UniqueConstraint(
+						name = "uk_coupon_issue_message_id",
+						columnNames = "message_id"
+				)
+		}
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -46,7 +70,8 @@ public class CouponIssue {
 	private String requestId;
 
 	@Column(name = "status", nullable = false, length = 20)
-	private String status;
+	@Enumerated(EnumType.STRING)
+	private CouponIssueStatus status;
 
 	@Column(name = "issued_at", nullable = false)
 	private LocalDateTime issuedAt;

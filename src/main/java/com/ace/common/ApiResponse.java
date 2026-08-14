@@ -7,6 +7,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import com.ace.common.util.MaskingUtil;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 // 공통 응답(성공과 실패를 같은 형태로)
 public record ApiResponse<T>(
@@ -19,7 +20,10 @@ public record ApiResponse<T>(
 	private static final String SUCCESS = "success";
 	private static final String ERROR = "error";
 
-	public record ErrorBody(String code, String message) {
+	public record ErrorBody(
+			String code,
+			String message,
+			@JsonInclude(JsonInclude.Include.NON_NULL) String incidentId) {
 	}
 
 	public static <T> ApiResponse<T> success(T data) {
@@ -33,17 +37,27 @@ public record ApiResponse<T>(
 
 	// message 가 비어 있으면 ErrorCode 의 기본 메시지를 사용
 	public static ApiResponse<Void> error(ErrorCode errorCode, String message) {
-		String resolved = (message != null && !message.isBlank())
+		return error(errorCode, message, null);
+	}
+
+	public static ApiResponse<Void> error(ErrorCode errorCode, String message, String incidentId) {
+		String resolved = errorCode.getStatus().is5xxServerError()
+				? errorCode.getDefaultMessage()
+				: (message != null && !message.isBlank())
 				? message
 				: errorCode.getDefaultMessage();
 
-		return error(errorCode.name(), resolved);
+		return error(errorCode.name(), resolved, incidentId);
 	}
 
 	// ErrorCode 로 표현할 수 없는 경우
 	public static ApiResponse<Void> error(String code, String message) {
+		return error(code, message, null);
+	}
+
+	public static ApiResponse<Void> error(String code, String message, String incidentId) {
 		return new ApiResponse<>(ERROR, null,
-				new ErrorBody(code, MaskingUtil.mask(message)),
+				new ErrorBody(code, MaskingUtil.mask(message), incidentId),
 				LocalDateTime.now(), currentPath());
 	}
 
