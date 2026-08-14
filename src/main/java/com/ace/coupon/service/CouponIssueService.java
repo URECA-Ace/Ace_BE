@@ -12,14 +12,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CouponIssueService {
 	
-	private static final Long sucess = 0L;
+	private static final Long SUCCESS = 0L;
 	private static final Long out_of_stock = 1L;
 	private static final Long already_issued = 2L;
 	
 	private final CouponRedisRepository couponRedisRepository;
 	
-	public String issueCoupon(Long couponId, Long userId) {
-		Long result = couponRedisRepository.issue(couponId, userId);
+	public String issueCoupon(Long eventId, Long userId) {
+		Long result = couponRedisRepository.issue(eventId, userId);
 		if(out_of_stock.equals(result)) {
 			throw new CouponException(ErrorCode.SOLD_OUT);			//	< == 재고 소진 
 			

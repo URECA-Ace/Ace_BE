@@ -15,9 +15,9 @@ public class CouponRedisRepository {
 	private final StringRedisTemplate  redisTemplate;
 	private final RedisScript<Long> issueCouponScript;
 	
-	public Long issue(Long couponId, Long userId) {
-		String stockKey = "coupon:" + couponId +":stock";
-		String userKey = "coupon:" + couponId + ":user";
+	public Long issue(Long eventId, Long userId) {
+		String stockKey = "event:" + eventId +":stock";
+		String userKey = "event:" + eventId + ":user";
 		
 		return redisTemplate.execute(
 		        issueCouponScript,
@@ -26,9 +26,9 @@ public class CouponRedisRepository {
 	}
 	
 	//이벤트 발생 전 레디스 재고 세팅
-	public void initStock(Long couponId, int totalStock) {
+	public void initStock(Long eventId, int totalStock) {
 		
-		String stockKey = "coupon:"+couponId + ":stock";
+		String stockKey = "event:"+eventId + ":stock";
 		redisTemplate.opsForValue().set(stockKey, String.valueOf(totalStock));
 	}
 	
