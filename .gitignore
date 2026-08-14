@@ -44,9 +44,7 @@ src/main/resources/application.properties
 
 ### Docker ###
 .env
-
-# 더미데이터 볼륨 백업. 파일명이 바뀌어도 제외되도록 디렉터리 단위로 지정
-dump/
+dump/*
 
 ### OS ###
 .DS_Store

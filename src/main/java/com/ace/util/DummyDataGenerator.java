@@ -19,7 +19,6 @@ import java.util.*;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(name = "generate.dummy", havingValue = "true") // 데이터가 생성되었으므로 사용하지 않도록 설정
 public class DummyDataGenerator implements CommandLineRunner {
 
 	private final JdbcTemplate jdbcTemplate;
@@ -37,9 +36,9 @@ public class DummyDataGenerator implements CommandLineRunner {
 		if (!"true".equals(System.getProperty("generate.dummy"))) return;
 
 		Long couponId = generateCoupon();
-		List<Long> eventIds = generateCouponEvents(couponId);
+		Map<Long, Integer> perUserLimitByEvent = generateCouponEvents(couponId);
 		generateUsers();
-		generateCouponIssues(eventIds);
+		generateCouponIssues(perUserLimitByEvent);
 	}
 
 	// 1. 쿠폰 1건
@@ -61,14 +60,14 @@ public class DummyDataGenerator implements CommandLineRunner {
 	}
 
 	// 2. 쿠폰 이벤트 30회차
-	private List<Long> generateCouponEvents(Long couponId) {
+	private Map<Long, Integer> generateCouponEvents(Long couponId) {
 		String sql = """
             INSERT INTO coupon_event
             (coupon_id, round, open_at, close_at, total_stock, remaining_stock, issued_quantity, per_user_limit, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
-		List<Long> eventIds = new ArrayList<>();
+		Map<Long, Integer> perUserLimitByEvent = new LinkedHashMap<>();
 		LocalDateTime now = LocalDateTime.now();
 
 		for (int round = 1; round <= EVENT_COUNT; round++) {
@@ -77,6 +76,7 @@ public class DummyDataGenerator implements CommandLineRunner {
 
 			KeyHolder keyHolder = new GeneratedKeyHolder();
 			int finalRound = round;
+			int perUserLimit = 1;
 			jdbcTemplate.update(con -> {
 				PreparedStatement ps = con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
 				ps.setLong(1, couponId);
@@ -86,17 +86,18 @@ public class DummyDataGenerator implements CommandLineRunner {
 				ps.setInt(5, ISSUE_PER_EVENT);       // total_stock
 				ps.setInt(6, 0);                     // remaining_stock (전부 소진됐다고 가정)
 				ps.setInt(7, ISSUE_PER_EVENT);        // issued_quantity
-				ps.setInt(8, 1);                      // per_user_limit
+				ps.setInt(8, perUserLimit);                      // per_user_limit
 				ps.setString(9, "CLOSED");            // 이미 종료된 회차로 가정
 				ps.setTimestamp(10, Timestamp.valueOf(now));
 				ps.setTimestamp(11, Timestamp.valueOf(now));
 				return ps;
 			}, keyHolder);
 
-			eventIds.add(keyHolder.getKey().longValue());
+			Long eventId = keyHolder.getKey().longValue();
+			perUserLimitByEvent.put(eventId, perUserLimit);
 		}
-		log.info("coupon_event {}건 생성 완료", eventIds.size());
-		return eventIds;
+		log.info("coupon_event {}건 생성 완료", perUserLimitByEvent.size());
+		return perUserLimitByEvent;
 	}
 
 	// 3. 유저 100만
@@ -123,20 +124,28 @@ public class DummyDataGenerator implements CommandLineRunner {
 	}
 
 	// 4. 쿠폰 발급 이력 300만
-	private void generateCouponIssues(List<Long> eventIds) {
+	private void generateCouponIssues(Map<Long, Integer> perUserLimitByEvent) {
 		String sql = """
-            INSERT INTO coupon_issue
-            (event_id, user_id, issue_sequence, request_id, status, issued_at, valid_from, valid_to, used_at, canceled_at, created_at, message_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
+           INSERT INTO coupon_issue
+           (event_id, user_id, issue_sequence, request_id, status, issued_at, valid_from, valid_to, used_at, canceled_at, created_at, message_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           """;
 
 		List<Object[]> batch = new ArrayList<>(BATCH_SIZE);
-		Random random = new Random();
+
+		long seed = 20260813L;
+		Random random = new Random(seed);
 		int total = 0;
 
-		for (Long eventId : eventIds) {
+		for (Map.Entry<Long, Integer> entry : perUserLimitByEvent.entrySet()) {
+			Long eventId = entry.getKey();
+			int perUserLimit = entry.getValue();
+
+			List<Long> userPool = buildUserSlotPool(ISSUE_PER_EVENT, perUserLimit, USER_COUNT, random);
+			Collections.shuffle(userPool, random);
+
 			for (int seq = 1; seq <= ISSUE_PER_EVENT; seq++) {
-				long userId = random.nextInt(USER_COUNT) + 1;
+				long userId = userPool.get(seq - 1);
 				String status = STATUSES[random.nextInt(STATUSES.length)];
 
 				LocalDateTime issuedAt = LocalDateTime.now().minusDays(random.nextInt(30));
@@ -149,18 +158,11 @@ public class DummyDataGenerator implements CommandLineRunner {
 						? issuedAt.plusHours(random.nextInt(5) + 1) : null;
 
 				batch.add(new Object[]{
-						eventId,
-						userId,
-						seq,
-						UUID.randomUUID().toString(),
-						status,
-						Timestamp.valueOf(issuedAt),
-						Timestamp.valueOf(validFrom),
-						Timestamp.valueOf(validTo),
+						eventId, userId, seq, UUID.randomUUID().toString(), status,
+						Timestamp.valueOf(issuedAt), Timestamp.valueOf(validFrom), Timestamp.valueOf(validTo),
 						usedAt != null ? Timestamp.valueOf(usedAt) : null,
 						canceledAt != null ? Timestamp.valueOf(canceledAt) : null,
-						Timestamp.valueOf(issuedAt),
-						UUID.randomUUID().toString()
+						Timestamp.valueOf(issuedAt), UUID.randomUUID().toString()
 				});
 
 				total++;
@@ -173,5 +175,35 @@ public class DummyDataGenerator implements CommandLineRunner {
 		}
 		if (!batch.isEmpty()) jdbcTemplate.batchUpdate(sql, batch);
 		log.info("coupon_issue 생성 완료: 총 {}건", total);
+	}
+
+	/**
+	 * requiredCount 만큼의 슬롯을, 각 user가 최대 perUserLimit번만 차지하도록 채운 pool 생성.
+	 * userCount * perUserLimit < requiredCount 이면 예외 (물리적으로 불가능한 조건).
+	 */
+	private List<Long> buildUserSlotPool(int requiredCount, int perUserLimit, int userCount, Random random) {
+		long maxPossible = (long) userCount * perUserLimit;
+		if (requiredCount > maxPossible) {
+			throw new IllegalStateException(
+					"요청 발급 건수(%d)가 perUserLimit(%d) 제약 하에서 만들 수 있는 최대치(%d)를 초과합니다."
+							.formatted(requiredCount, perUserLimit, maxPossible));
+		}
+
+		// distinct user id를 필요한 만큼만 미리 셔플된 순서로 뽑기
+		List<Long> allUserIds = new ArrayList<>(userCount);
+		for (long i = 1; i <= userCount; i++) allUserIds.add(i);
+		Collections.shuffle(allUserIds, random);
+
+		List<Long> pool = new ArrayList<>(requiredCount);
+		int idx = 0;
+		outer:
+		for (int round = 0; round < perUserLimit; round++) {
+			for (int i = 0; i < userCount; i++) {
+				pool.add(allUserIds.get(i));
+				idx++;
+				if (idx == requiredCount) break outer;
+			}
+		}
+		return pool;
 	}
 }
