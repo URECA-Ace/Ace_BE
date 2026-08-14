@@ -25,5 +25,25 @@ public enum IssueRequestStatus {
     /**
      * 최종 실패 후 Redis 재고와 중복 상태가 원복된 상태
      */
-    COMPENSATED
+	COMPENSATED,
+
+	/**
+	 * 재고 소진 판정 상태
+	 */
+	REJECTED_SOLD_OUT,
+
+	/**
+	 * 사용자 중복 판정 상태
+	 */
+	REJECTED_DUPLICATE,
+
+	/**
+	 * 오픈 전 판정 상태
+	 */
+	REJECTED_NOT_OPEN,
+
+	/**
+	 * 마감 후 판정 상태
+	 */
+	REJECTED_CLOSED
 }
