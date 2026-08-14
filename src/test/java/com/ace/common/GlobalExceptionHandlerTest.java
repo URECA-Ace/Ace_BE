@@ -112,6 +112,14 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	@DisplayName("발급 순번 UNIQUE 충돌은 저장 실패로 구분한다")
+	void duplicateIssueSequence() throws Exception {
+		mockMvc.perform(get("/test/duplicate-issue-sequence"))
+				.andExpect(status().isInternalServerError())
+				.andExpect(jsonPath("$.error.code").value("ISSUE_PERSIST_FAILED"));
+	}
+
+	@Test
 	@DisplayName("@Valid 검증 실패는 400 INVALID_REQUEST 로 응답한다")
 	void validationFailure() throws Exception {
 		mockMvc.perform(post("/test/validate")
@@ -259,6 +267,12 @@ class GlobalExceptionHandlerTest {
 		void duplicateRequestId() {
 			throw new DataIntegrityViolationException(
 					"Duplicate entry for key 'uk_coupon_issue_request_id'");
+		}
+
+		@GetMapping("/test/duplicate-issue-sequence")
+		void duplicateIssueSequence() {
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_issue_event_sequence'");
 		}
 
 		@GetMapping("/test/response-status")

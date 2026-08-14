@@ -23,6 +23,7 @@ class CouponIssueConstraintTest {
 
 		assertThat(constraintNames).contains(
 				"uk_coupon_issue_event_user",
+				"uk_coupon_issue_event_sequence",
 				"uk_coupon_issue_request_id",
 				"uk_coupon_issue_message_id");
 	}

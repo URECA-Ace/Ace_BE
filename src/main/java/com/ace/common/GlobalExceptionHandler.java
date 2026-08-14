@@ -34,6 +34,7 @@ public class GlobalExceptionHandler {
 
 	private static final String IDEMPOTENCY_KEY = "Idempotency-Key";
 	private static final String ISSUE_USER_CONSTRAINT = "uk_coupon_issue_event_user";
+	private static final String EVENT_SEQUENCE_CONSTRAINT = "uk_coupon_issue_event_sequence";
 	private static final String REQUEST_ID_CONSTRAINT = "uk_coupon_issue_request_id";
 	private static final String MESSAGE_ID_CONSTRAINT = "uk_coupon_issue_message_id";
 
@@ -126,6 +127,10 @@ public class GlobalExceptionHandler {
 					ErrorCode.DUPLICATE_REQUEST, request.getMethod(), request.getRequestURI());
 			return build(ErrorCode.DUPLICATE_REQUEST, null);
 		}
+		if (EVENT_SEQUENCE_CONSTRAINT.equals(constraintName)) {
+			logServerError(ErrorCode.ISSUE_PERSIST_FAILED.name(), ex, request);
+			return build(ErrorCode.ISSUE_PERSIST_FAILED, null);
+		}
 
 		logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
 		return build(ErrorCode.INTERNAL_ERROR, null);
@@ -182,7 +187,8 @@ public class GlobalExceptionHandler {
 			if (message != null) {
 				String normalized = message.toLowerCase(Locale.ROOT);
 				for (String knownConstraint : new String[]{
-						ISSUE_USER_CONSTRAINT, REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT}) {
+						ISSUE_USER_CONSTRAINT, EVENT_SEQUENCE_CONSTRAINT,
+						REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT}) {
 					if (normalized.contains(knownConstraint)) {
 						return knownConstraint;
 					}
