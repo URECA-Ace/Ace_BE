@@ -59,6 +59,30 @@ services:
     networks:
       - ace-net
 
+  redis-benchmark:
+    image: redis:8.2
+    container_name: ace-redis-benchmark
+    profiles: ["benchmark"]
+    ports:
+      - "${REDIS_BENCHMARK_PORT:-6380}:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory-policy
+      - noeviction
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      - ace-net
+
   kafka:
     image: apache/kafka:4.3.1
     container_name: ace-kafka

@@ -68,11 +68,12 @@ tasks.register('redisLuaBenchmark', Test) {
 		includeTags 'redis-benchmark'
 	}
 	shouldRunAfter tasks.named('test')
-	systemProperty 'redis.host', System.getProperty('redis.host', 'localhost')
-	systemProperty 'redis.port', System.getProperty('redis.port', '6379')
+	systemProperty 'redis.host', System.getProperty('redis.benchmark.host', 'localhost')
+	systemProperty 'redis.port', System.getProperty('redis.benchmark.port', '6380')
 	systemProperty 'benchmark.mode', System.getProperty('benchmark.mode', 'compare')
 	systemProperty 'benchmark.requests', System.getProperty('benchmark.requests', '20000')
 	systemProperty 'benchmark.workers', System.getProperty('benchmark.workers', '128')
+	systemProperty 'benchmark.report.directory', 'build/reports/redis-lua-benchmark'
 }
 
 // 1. Git Hook 파일을 복사하는 Task 등록

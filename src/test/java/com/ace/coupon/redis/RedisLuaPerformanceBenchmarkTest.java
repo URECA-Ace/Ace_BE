@@ -36,24 +36,29 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.ScriptOutputType;
+import io.lettuce.core.api.StatefulRedisConnection;
+
 @Tag("redis-benchmark")
 class RedisLuaPerformanceBenchmarkTest {
 
 	private static final String BASELINE_SCRIPT = "scripts/coupon-issue-before-optimization.lua";
 	private static final String OPTIMIZED_SCRIPT = "scripts/coupon-issue.lua";
-	private static final Path REPORT_DIRECTORY = Path.of("build", "reports", "redis-lua-benchmark");
 	private static final AtomicLong CAMPAIGN_ID =
 			new AtomicLong(8_100_000_000_000_000L + System.currentTimeMillis());
 
 	private static LettuceConnectionFactory connectionFactory;
 	private static StringRedisTemplate redisTemplate;
 	private static CampaignRedisInitializer initializer;
-	private static RedisScript<Long> compensateScript;
+	private static RedisClient redisClient;
 
 	@BeforeAll
 	static void setUpRedis() {
 		String host = System.getProperty("redis.host", "localhost");
-		int port = Integer.parseInt(System.getProperty("redis.port", "6379"));
+		int port = Integer.parseInt(System.getProperty("redis.port", "6380"));
+		redisClient = RedisClient.create(RedisURI.Builder.redis(host).withPort(port).build());
 		connectionFactory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port));
 		connectionFactory.afterPropertiesSet();
 		connectionFactory.start();
@@ -66,12 +71,12 @@ class RedisLuaPerformanceBenchmarkTest {
 				redisTemplate,
 				script("scripts/coupon-campaign-initialize.lua", Long.class),
 				properties);
-		compensateScript = script("scripts/coupon-issue-compensate.lua", Long.class);
 	}
 
 	@AfterAll
 	static void closeRedis() {
 		connectionFactory.destroy();
+		redisClient.shutdown();
 	}
 
 	@Test
@@ -83,23 +88,39 @@ class RedisLuaPerformanceBenchmarkTest {
 		int workers = Integer.parseInt(System.getProperty("benchmark.workers", "128"));
 		validateConfiguration(totalRequests, workers);
 
-		RedisScript<List> baselineScript = script(BASELINE_SCRIPT, List.class);
-		RedisScript<List> optimizedScript = script(OPTIMIZED_SCRIPT, List.class);
-		warmUp(baselineScript, workers);
+		LuaVariant baselineScript = variant(BASELINE_SCRIPT);
+		LuaVariant optimizedScript = variant(OPTIMIZED_SCRIPT);
 
 		BenchmarkResult baseline;
 		BenchmarkResult optimized = null;
 		if ("baseline".equalsIgnoreCase(mode)) {
+			warmUp(baselineScript, workers);
 			baseline = benchmark("BEFORE", baselineScript, totalRequests, workers);
-		} else {
+		} else if ("optimized".equalsIgnoreCase(mode)) {
 			warmUp(optimizedScript, workers);
-			int halfRequests = totalRequests / 2;
-			RoundResult baselineFirst = runRound(baselineScript, halfRequests, halfRequests / 2, workers);
-			RoundResult optimizedFirst = runRound(optimizedScript, halfRequests, halfRequests / 2, workers);
-			RoundResult optimizedSecond = runRound(optimizedScript, halfRequests, halfRequests / 2, workers);
-			RoundResult baselineSecond = runRound(baselineScript, halfRequests, halfRequests / 2, workers);
-			baseline = BenchmarkResult.merge("BEFORE", workers, baselineFirst, baselineSecond);
-			optimized = BenchmarkResult.merge("AFTER", workers, optimizedFirst, optimizedSecond);
+			baseline = benchmark("AFTER", optimizedScript, totalRequests, workers);
+		} else {
+			warmUp(baselineScript, workers);
+			warmUp(optimizedScript, workers);
+			int roundRequests = totalRequests / 4;
+			int roundStock = roundRequests / 2;
+			List<RoundResult> baselineRounds = new ArrayList<>(4);
+			List<RoundResult> optimizedRounds = new ArrayList<>(4);
+
+			// ABBA-BAAB 순서 기반 실행 위치 편향 상쇄
+			baselineRounds.add(runRound(baselineScript, roundRequests, roundStock, workers));
+			optimizedRounds.add(runRound(optimizedScript, roundRequests, roundStock, workers));
+			optimizedRounds.add(runRound(optimizedScript, roundRequests, roundStock, workers));
+			baselineRounds.add(runRound(baselineScript, roundRequests, roundStock, workers));
+			optimizedRounds.add(runRound(optimizedScript, roundRequests, roundStock, workers));
+			baselineRounds.add(runRound(baselineScript, roundRequests, roundStock, workers));
+			baselineRounds.add(runRound(baselineScript, roundRequests, roundStock, workers));
+			optimizedRounds.add(runRound(optimizedScript, roundRequests, roundStock, workers));
+
+			baseline = BenchmarkResult.merge(
+					"BEFORE", workers, baselineRounds.toArray(RoundResult[]::new));
+			optimized = BenchmarkResult.merge(
+					"AFTER", workers, optimizedRounds.toArray(RoundResult[]::new));
 		}
 
 		printResults(baseline, optimized);
@@ -108,19 +129,19 @@ class RedisLuaPerformanceBenchmarkTest {
 
 	private BenchmarkResult benchmark(
 			String label,
-			RedisScript<List> issueScript,
+			LuaVariant issueScript,
 			int totalRequests,
 			int workers) throws Exception {
 		RoundResult result = runRound(issueScript, totalRequests, totalRequests / 2, workers);
 		return BenchmarkResult.merge(label, workers, result);
 	}
 
-	private void warmUp(RedisScript<List> issueScript, int workers) throws Exception {
+	private void warmUp(LuaVariant issueScript, int workers) throws Exception {
 		runRound(issueScript, 1_000, 500, Math.min(workers, 64));
 	}
 
 	private RoundResult runRound(
-			RedisScript<List> issueScript,
+			LuaVariant issueScript,
 			int requestCount,
 			int stock,
 			int workers) throws Exception {
@@ -130,10 +151,8 @@ class RedisLuaPerformanceBenchmarkTest {
 				campaignId, stock, now.minusSeconds(60), now.plusSeconds(600)))
 				.isEqualTo(CampaignInitializationResult.INITIALIZED);
 
-		RedisCouponIssueProcessor processor =
-				new RedisCouponIssueProcessor(redisTemplate, issueScript, compensateScript);
 		CountDownLatch start = new CountDownLatch(1);
-		List<Future<?>> futures = new ArrayList<>(requestCount);
+		List<Future<?>> futures = new ArrayList<>(workers);
 		long[] latencies = new long[requestCount];
 		LongAdder accepted = new LongAdder();
 		LongAdder soldOut = new LongAdder();
@@ -142,35 +161,61 @@ class RedisLuaPerformanceBenchmarkTest {
 			requestIds.add(UUID.randomUUID());
 		}
 
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		String[] scriptKeys = {
+				keys.metadata(),
+				keys.stock(),
+				keys.sequence(),
+				keys.bitmap(1L).key(),
+				keys.requests(),
+				keys.issueStream()
+		};
+		List<StatefulRedisConnection<String, String>> connections = new ArrayList<>(workers);
+		for (int index = 0; index < workers; index++) {
+			connections.add(redisClient.connect());
+		}
+
 		long elapsed;
 		try (var executor = Executors.newFixedThreadPool(workers)) {
-			for (int index = 0; index < requestCount; index++) {
-				int sampleIndex = index;
-				long userId = index + 1L;
-				UUID requestId = requestIds.get(index);
+			for (int workerIndex = 0; workerIndex < workers; workerIndex++) {
+				int assignedWorker = workerIndex;
 				futures.add(executor.submit(() -> {
+					var commands = connections.get(assignedWorker).sync();
 					start.await();
-					long startedAt = System.nanoTime();
-					CouponIssueLuaCode code = processor.issue(campaignId, userId, requestId).code();
-					latencies[sampleIndex] = System.nanoTime() - startedAt;
-					if (code == CouponIssueLuaCode.ACCEPTED) {
-						accepted.increment();
-					} else if (code == CouponIssueLuaCode.SOLD_OUT) {
-						soldOut.increment();
+					for (int sampleIndex = assignedWorker;
+							sampleIndex < requestCount;
+							sampleIndex += workers) {
+						String userId = String.valueOf(sampleIndex + 1L);
+						long startedAt = System.nanoTime();
+						List<?> result = commands.evalsha(
+								issueScript.sha(),
+								ScriptOutputType.MULTI,
+								scriptKeys,
+								userId,
+								String.valueOf(sampleIndex),
+								requestIds.get(sampleIndex).toString(),
+								String.valueOf(campaignId));
+						latencies[sampleIndex] = System.nanoTime() - startedAt;
+						CouponIssueLuaCode code = CouponIssueLuaCode.from(resultCode(result));
+						if (code == CouponIssueLuaCode.ACCEPTED) {
+							accepted.increment();
+						} else if (code == CouponIssueLuaCode.SOLD_OUT) {
+							soldOut.increment();
+						}
 					}
 					return null;
 				}));
 			}
-
 			long startedAt = System.nanoTime();
 			start.countDown();
 			for (Future<?> future : futures) {
 				future.get();
 			}
 			elapsed = System.nanoTime() - startedAt;
+		} finally {
+			connections.forEach(StatefulRedisConnection::close);
 		}
 
-		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
 		assertThat(accepted.sum()).isEqualTo(stock);
 		assertThat(soldOut.sum()).isEqualTo(requestCount - stock);
 		assertThat(redisTemplate.opsForValue().get(keys.stock())).isEqualTo("0");
@@ -221,14 +266,32 @@ class RedisLuaPerformanceBenchmarkTest {
 	}
 
 	private void writeReports(BenchmarkResult baseline, BenchmarkResult optimized) throws IOException {
-		Files.createDirectories(REPORT_DIRECTORY);
+		Path reportDirectory = Path.of(System.getProperty(
+				"benchmark.report.directory", "build/reports/redis-lua-benchmark"));
+		Files.createDirectories(reportDirectory);
 		Files.writeString(
-				REPORT_DIRECTORY.resolve("results.csv"),
+				reportDirectory.resolve("results.csv"),
 				csv(baseline, optimized),
 				StandardCharsets.UTF_8);
 		Files.writeString(
-				REPORT_DIRECTORY.resolve("index.html"),
+				reportDirectory.resolve("index.html"),
 				html(baseline, optimized),
+				StandardCharsets.UTF_8);
+		if (optimized != null) {
+			writeVariantReport(reportDirectory.resolve("before"), baseline);
+			writeVariantReport(reportDirectory.resolve("after"), optimized);
+		}
+	}
+
+	private void writeVariantReport(Path reportDirectory, BenchmarkResult result) throws IOException {
+		Files.createDirectories(reportDirectory);
+		Files.writeString(
+				reportDirectory.resolve("results.csv"),
+				csv(result, null),
+				StandardCharsets.UTF_8);
+		Files.writeString(
+				reportDirectory.resolve("index.html"),
+				html(result, null),
 				StandardCharsets.UTF_8);
 	}
 
@@ -272,15 +335,17 @@ class RedisLuaPerformanceBenchmarkTest {
 				</head>
 				<body><main>
 				<h1>Redis Lua 최적화 전후 성능 비교</h1>
-				<p>동일 Docker Redis · 동일 요청 수 · 동일 워커 · 동일 정합성 검증</p>
+				<p>동일 benchmark Redis · 동일 요청 수 · 동일 연결 수 · 동일 정합성 검증</p>
+				<p class="meta">Lua 실행 비용 격리용 AOF/RDB 비활성 프로필</p>
 				<p class="meta">측정 시각 %s · Java %s</p>
 				<div class="cards">%s%s</div>
 				%s
 				<table><thead><tr><th>버전</th><th>요청</th><th>승인</th><th>소진</th><th>처리량(req/s)</th><th>P50(ms)</th><th>P95(ms)</th><th>P99(ms)</th><th>최대(ms)</th></tr></thead>
 				<tbody>%s%s</tbody></table>
 				<section class="method"><h2>측정 조건과 정합성 검증</h2><ul>
-				<li>총 %,d건 요청, 재고 %,d장, 애플리케이션 워커 %d개</li>
-				<li>순서 편향 완화용 BEFORE → AFTER → AFTER → BEFORE 교차 실행</li>
+				<li>총 %,d건 요청, 재고 %,d장, 물리 Redis 연결 %d개</li>
+				<li>Lua SHA 사전 로드 후 EVALSHA 호출 기준</li>
+				<li>순서 편향 완화용 ABBA-BAAB 교차 실행</li>
 				<li>각 버전 측정 전 1,000건 warm-up</li>
 				<li class="pass">승인 %,d건 · 재고 소진 %,d건 · 초과 발급 0건</li>
 				<li class="pass">최종 재고 0 · Bitmap/순번/Stream 승인 수 일치</li>
@@ -344,6 +409,27 @@ class RedisLuaPerformanceBenchmarkTest {
 		}
 	}
 
+	private long resultCode(List<?> result) {
+		if (result == null || result.size() != 4) {
+			throw new IllegalStateException("Lua 벤치마크 결과 형식 오류");
+		}
+		Object code = result.get(0);
+		return code instanceof Number number
+				? number.longValue()
+				: Long.parseLong(String.valueOf(code));
+	}
+
+	private static LuaVariant variant(String location) throws IOException {
+		ClassPathResource resource = new ClassPathResource(location);
+		String source;
+		try (var input = resource.getInputStream()) {
+			source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+		}
+		try (StatefulRedisConnection<String, String> connection = redisClient.connect()) {
+			return new LuaVariant(connection.sync().scriptLoad(source));
+		}
+	}
+
 	private static <T> RedisScript<T> script(String location, Class<T> resultType) {
 		DefaultRedisScript<T> script = new DefaultRedisScript<>();
 		script.setLocation(new ClassPathResource(location));
@@ -358,6 +444,9 @@ class RedisLuaPerformanceBenchmarkTest {
 			long soldOut,
 			long elapsedNanos,
 			long[] latencies) {
+	}
+
+	private record LuaVariant(String sha) {
 	}
 
 	private record BenchmarkResult(
