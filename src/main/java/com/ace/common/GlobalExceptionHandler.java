@@ -146,6 +146,16 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiResponse<Void>> handleResponseStatus(
 			ResponseStatusException ex,
 			HttpServletRequest request) {
+		if (ex.getStatusCode().is4xxClientError()
+				&& ex.getReason() != null
+				&& !ex.getReason().isBlank()) {
+			HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+			String code = status != null
+					? status.name()
+					: "HTTP_" + ex.getStatusCode().value();
+			return ResponseEntity.status(ex.getStatusCode())
+					.body(ApiResponse.error(code, ex.getReason()));
+		}
 		return handleSpringError(ex, request);
 	}
 

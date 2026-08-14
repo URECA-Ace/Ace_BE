@@ -218,7 +218,7 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
-	@DisplayName("비표준 상태코드에서도 응답 포맷을 유지한다")
+	@DisplayName("비표준 4xx 상태코드에서도 reason과 응답 포맷을 유지한다")
 	void nonStandardStatusCode() throws Exception {
 		// HttpStatus.valueOf(499) 는 IllegalArgumentException 을 던진다.
 		// 핸들러 안에서 터지면 응답 포맷을 우회하므로 resolve() 로 방어한다.
@@ -226,7 +226,7 @@ class GlobalExceptionHandlerTest {
 				.andExpect(status().is(499))
 				.andExpect(jsonPath("$.result").value("error"))
 				.andExpect(jsonPath("$.error.code").value("HTTP_499"))
-				.andExpect(jsonPath("$.error.message").value("요청을 처리할 수 없습니다."))
+				.andExpect(jsonPath("$.error.message").value("클라이언트가 요청을 취소했습니다."))
 				.andExpect(jsonPath("$.path").value("/test/non-standard-status"));
 	}
 
