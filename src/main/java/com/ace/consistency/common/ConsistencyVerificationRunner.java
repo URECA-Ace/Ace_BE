@@ -2,6 +2,8 @@ package com.ace.consistency.common;
 
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.coupon.repository.CouponEventRepository;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +31,7 @@ public class ConsistencyVerificationRunner {
 	private static final Logger log = LoggerFactory.getLogger(ConsistencyVerificationRunner.class);
 
 	private final VerificationResultRepository resultRepository;
+	private final CouponEventRepository couponEventRepository;
 
 	/**
 	 * 여러 Check를 지정된 Scope, TriggerType으로 순차 실행한다.
@@ -51,6 +54,13 @@ public class ConsistencyVerificationRunner {
 		if (checks.isEmpty()) {
 			log.warn("run() called with empty check list. scope={}, trigger={}", scope, triggerType);
 			return List.of();
+		}
+
+		if(scope.getType() == Scope.ScopeType.EVENT){
+			Long eventId = scope.getEventId();
+			if (!couponEventRepository.existsById(eventId)) {
+				throw new EntityNotFoundException("해당 eventId는 존재하지 않습니다. eventId: " + eventId);
+			}
 		}
 
 		log.info("Starting consistency verification. trigger={}, scope={}, checkCount={}",
