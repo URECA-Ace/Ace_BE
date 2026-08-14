@@ -30,7 +30,7 @@ public class ConsistencyVerificationRunner {
 
 	private static final Logger log = LoggerFactory.getLogger(ConsistencyVerificationRunner.class);
 
-	private final VerificationResultRepository resultRepository;
+	private final VerificationResultPersister resultPersister;
 	private final CouponEventRepository couponEventRepository;
 
 	/**
@@ -70,7 +70,7 @@ public class ConsistencyVerificationRunner {
 				.map(check -> runSingleCheck(check, scope, triggerType))
 				.toList();
 
-		resultRepository.saveAll(results.stream().map(VerificationResultEntity::from).toList());
+		resultPersister.saveAndNotify(results, scope, triggerType);
 
 		long failCount = results.stream().filter(r -> !r.isPass()).count();
 		if (failCount > 0) {
