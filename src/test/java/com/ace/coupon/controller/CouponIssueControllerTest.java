@@ -268,7 +268,7 @@ class CouponIssueControllerTest {
     }
 
     @Test
-    @DisplayName("이벤트가 오픈되지 않았으면 409를 반환한다")
+    @DisplayName("이벤트가 오픈되지 않았으면 400을 반환한다")
     void eventNotOpen() throws Exception {
         given(couponIssueService.issue(
                 eq(EVENT_ID),
