@@ -1,7 +1,10 @@
 package com.ace.coupon.entity;
 
+import com.ace.coupon.enums.CouponEventStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -9,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,7 +22,13 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "coupon_event")
+@Table(
+		name = "coupon_event",
+		uniqueConstraints = @UniqueConstraint(
+				name = "uk_coupon_event_coupon_round",
+				columnNames = {"coupon_id", "round"}
+		)
+)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
@@ -56,7 +66,8 @@ public class CouponEvent {
 	private Integer perUserLimit;
 
 	@Column(name = "status", nullable = false, length = 20)
-	private String status;
+	@Enumerated(EnumType.STRING)
+	private CouponEventStatus status;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
