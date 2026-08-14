@@ -35,7 +35,9 @@
 
 `coupon-issue.lua`는 Redis 서버 시각 판정, 기존 requestId 결과 반환, Bitmap 중복 확인, 재고 `DECR`, 순번 `INCR`, Bitmap 기록, Stream 적재, 요청 상태 기록을 한 번의 실행으로 처리한다. 승인과 비동기 저장 대기열 적재 사이의 유실 구간이 없다.
 
-Redis Lua는 실행 중 다른 명령의 개입은 차단하지만 런타임 오류 발생 시 앞선 쓰기를 자동 롤백하지 않는다. 이를 줄이기 위해 모든 키 타입과 숫자 상태를 첫 쓰기 전에 검증한다. 운영 Redis는 해당 namespace의 외부 쓰기 차단, `maxmemory-policy noeviction`, AOF 내구성, 메모리 임계치 모니터링을 전제로 한다. Docker Compose의 `appendfsync everysec`는 처리량을 우선한 설정으로 최대 약 1초의 장애 손실 가능성이 있으므로, 복제본과 Redis-DB 정합성 복구 작업이 필요하다. `appendfsync always`는 내구성을 높이는 대신 쓰기 지연이 증가한다.
+Redis Lua는 실행 중 다른 명령의 개입은 차단하지만 런타임 오류 발생 시 앞선 쓰기를 자동 롤백하지 않는다. 실제 읽기 명령을 `redis.pcall`로 실행해 타입과 숫자 상태를 첫 쓰기 전에 검증하고, 동적 키 검증은 승인 경로로 지연한다. 운영 Redis는 해당 namespace의 외부 쓰기 차단, `maxmemory-policy noeviction`, AOF 내구성, 메모리 임계치 모니터링을 전제로 한다. Docker Compose의 `appendfsync everysec`는 처리량을 우선한 설정으로 최대 약 1초의 장애 손실 가능성이 있으므로, 복제본과 Redis-DB 정합성 복구 작업이 필요하다. `appendfsync always`는 내구성을 높이는 대신 쓰기 지연이 증가한다.
+
+요청 상태는 `userId|resultCode|statusCode|sequence|remainingStock|decidedAt` 6필드로 저장한다. 숫자 상태 코드와 미사용 Stream ID 제거로 직렬화 크기를 줄였으며, 롤링 배포 중의 기존 7필드·문자열 상태 데이터도 계속 읽을 수 있다.
 
 초기화 Lua는 동일 설정 재실행만 멱등 성공으로 처리한다. 다른 재고나 시간 설정 및 부분 잔존 키는 덮어쓰지 않고 충돌로 종료한다. 모든 판정 키는 캠페인 마감 시각과 보존 기간을 합친 절대 시각에 만료된다.
 
@@ -45,5 +47,7 @@ Redis Lua는 실행 중 다른 명령의 개입은 차단하지만 런타임 오
 2. `docker compose up -d redis` 실행
 3. STS의 Gradle Tasks에서 `verification > redisIntegrationTest` 실행
 4. 전체 단위 테스트는 `verification > test` 실행
+
+성능 비교는 `docker compose --profile benchmark up -d redis-benchmark` 실행 후 STS의 Gradle Tasks에서 `verification > redisLuaBenchmark`를 실행한다. 교차 측정과 동일한 수치의 최적화 전·후 개별 캡처용 리포트도 함께 생성된다. 발표용 HTML·CSV는 `build/reports/redis-lua-benchmark` 경로에 생성되며, 세부 측정 조건과 결과는 `docs/performance/redis-lua-performance.md`에 정리해 두었다.
 
 상태 조회 API는 `GET /api/v1/events/{eventId}/issues/{requestId}`다.
