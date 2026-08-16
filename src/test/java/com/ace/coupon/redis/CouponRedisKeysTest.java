@@ -29,8 +29,10 @@ class CouponRedisKeysTest {
 		CouponRedisKeys.BitmapLocation nextSegment = keys.bitmap(CouponRedisKeys.BITMAP_SEGMENT_BITS + 1);
 
 		assertThat(first.key()).endsWith("issued:bitmap:0");
+		assertThat(first.segment()).isZero();
 		assertThat(first.offset()).isZero();
 		assertThat(nextSegment.key()).endsWith("issued:bitmap:1");
+		assertThat(nextSegment.segment()).isOne();
 		assertThat(nextSegment.offset()).isZero();
 	}
 }

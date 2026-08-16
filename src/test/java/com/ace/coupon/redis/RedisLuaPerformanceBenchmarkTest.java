@@ -194,7 +194,8 @@ class RedisLuaPerformanceBenchmarkTest {
 								userId,
 								String.valueOf(sampleIndex),
 								requestIds.get(sampleIndex).toString(),
-								String.valueOf(campaignId));
+								String.valueOf(campaignId),
+								"0");
 						latencies[sampleIndex] = System.nanoTime() - startedAt;
 						CouponIssueLuaCode code = CouponIssueLuaCode.from(resultCode(result));
 						if (code == CouponIssueLuaCode.ACCEPTED) {

@@ -133,23 +133,18 @@ class RedisCouponIssueIntegrationTest {
 	}
 
 	@Test
-	@DisplayName("최적화 전 7필드 요청 상태도 멱등 결과로 재사용한다")
-	void reusesLegacyRequestState() {
+	@DisplayName("v2 요청 상태는 Java 조회와 Lua 멱등 재요청에서 동일하게 해석된다")
+	void reusesVersionedRequestState() {
 		long campaignId = initializeOpenCampaign(2);
 		UUID requestId = UUID.randomUUID();
-		long decidedAt = Instant.now().toEpochMilli();
-		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
-		redisTemplate.opsForHash().put(
-				keys.requests(),
-				requestId.toString(),
-				"1|0|ACCEPTED|1|1|" + decidedAt + "|1730000000000-0");
+		CouponIssueDecision accepted = processor.issue(campaignId, 1L, requestId);
 
 		CouponIssueRequestState state = processor.findRequest(campaignId, requestId);
 		CouponIssueDecision replay = processor.issue(campaignId, 1L, requestId);
 		CouponIssueDecision conflict = processor.issue(campaignId, 2L, requestId);
 
 		assertThat(state.status()).isEqualTo(IssueRequestStatus.ACCEPTED);
-		assertThat(replay.code()).isEqualTo(CouponIssueLuaCode.ACCEPTED);
+		assertThat(replay).isEqualTo(accepted);
 		assertThat(replay.issueSequence()).isEqualTo(1L);
 		assertThat(replay.remainingStock()).isEqualTo(1L);
 		assertThat(conflict.code()).isEqualTo(CouponIssueLuaCode.IDEMPOTENCY_CONFLICT);
@@ -168,11 +163,29 @@ class RedisCouponIssueIntegrationTest {
 
 		assertThat(accepted.code()).isEqualTo(CouponIssueLuaCode.ACCEPTED);
 		assertThat(compensated).isEqualTo(CouponIssueCompensationResult.COMPENSATED);
-		assertThat(replay).isEqualTo(CouponIssueCompensationResult.NOT_COMPENSABLE);
+		assertThat(replay).isEqualTo(CouponIssueCompensationResult.ALREADY_COMPENSATED);
 		assertThat(nextIssue.code()).isEqualTo(CouponIssueLuaCode.ACCEPTED);
 		assertThat(nextIssue.issueSequence()).isEqualTo(2L);
 		assertThat(processor.findRequest(campaignId, requestId).status())
 				.isEqualTo(com.ace.coupon.enums.IssueRequestStatus.COMPENSATED);
+	}
+
+	@Test
+	@DisplayName("다른 사용자 위치로 보상하면 재고와 원래 사용자의 Bitmap을 변경하지 않는다")
+	void rejectsCompensationForDifferentBitmapLocation() {
+		long campaignId = initializeOpenCampaign(2);
+		UUID requestId = UUID.randomUUID();
+		processor.issue(campaignId, 1L, requestId);
+
+		CouponIssueCompensationResult wrongUser =
+				processor.compensate(campaignId, 2L, requestId);
+
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		assertThat(wrongUser).isEqualTo(CouponIssueCompensationResult.INVALID_ARGUMENT);
+		assertThat(redisTemplate.opsForValue().get(keys.stock())).isEqualTo("1");
+		assertThat(bitCount(keys.bitmap(1L).key())).isOne();
+		assertThat(processor.compensate(campaignId, 1L, requestId))
+				.isEqualTo(CouponIssueCompensationResult.COMPENSATED);
 	}
 
 	@Test
