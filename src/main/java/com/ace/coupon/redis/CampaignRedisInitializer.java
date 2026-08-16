@@ -54,11 +54,17 @@ public class CampaignRedisInitializer {
 		long expireAt = closeAt.plus(properties.retention()).toEpochMilli();
 		Long code = redisTemplate.execute(
 				initializeScript,
-				List.of(keys.metadata(), keys.stock(), keys.sequence(), keys.requests()),
+				List.of(
+						keys.metadata(),
+						keys.stock(),
+						keys.sequence(),
+						keys.requests(),
+						keys.issueStream()),
 				String.valueOf(totalStock),
 				String.valueOf(openAt.toEpochMilli()),
 				String.valueOf(closeAt.toEpochMilli()),
-				String.valueOf(expireAt));
+				String.valueOf(expireAt),
+				String.valueOf(CouponRedisKeys.BITMAP_SEGMENT_BITS));
 
 		if (code == null) {
 			throw new IllegalStateException("캠페인 Redis 초기화 결과가 없습니다.");

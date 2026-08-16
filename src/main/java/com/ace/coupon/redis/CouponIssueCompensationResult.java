@@ -5,9 +5,12 @@ import java.util.Arrays;
 public enum CouponIssueCompensationResult {
 
 	COMPENSATED(0),
-	REQUEST_NOT_FOUND(1),
-	NOT_COMPENSABLE(2),
-	CORRUPTED_STATE(3);
+	ALREADY_COMPENSATED(1),
+	REQUEST_NOT_FOUND(2),
+	NOT_COMPENSABLE(3),
+	CORRUPTED_STATE(4),
+	INVALID_ARGUMENT(5),
+	INTERNAL_WRITE_ERROR(6);
 
 	private final long code;
 

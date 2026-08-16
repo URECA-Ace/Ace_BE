@@ -55,10 +55,10 @@ public final class CouponRedisKeys {
 			long zeroBasedUserId = userId - 1;
 			long segment = zeroBasedUserId / BITMAP_SEGMENT_BITS;
 			long offset = zeroBasedUserId % BITMAP_SEGMENT_BITS;
-			return new BitmapLocation(base() + "issued:bitmap:" + segment, offset);
+			return new BitmapLocation(base() + "issued:bitmap:" + segment, segment, offset);
 		}
 	}
 
-	public record BitmapLocation(String key, long offset) {
+	public record BitmapLocation(String key, long segment, long offset) {
 	}
 }

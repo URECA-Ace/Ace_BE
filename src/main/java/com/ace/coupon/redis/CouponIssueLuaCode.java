@@ -14,7 +14,9 @@ public enum CouponIssueLuaCode {
 	CAMPAIGN_NOT_INITIALIZED(5, null),
 	IDEMPOTENCY_CONFLICT(6, null),
 	CORRUPTED_STATE(7, null),
-	PERSISTENCE_FAILED(8, IssueRequestStatus.COMPENSATED);
+	PERSISTENCE_FAILED(8, IssueRequestStatus.COMPENSATED),
+	INVALID_ARGUMENT(9, null),
+	INTERNAL_WRITE_ERROR(10, null);
 
 	private final long value;
 	private final IssueRequestStatus requestStatus;

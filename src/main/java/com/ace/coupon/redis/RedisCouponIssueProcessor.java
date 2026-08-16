@@ -15,8 +15,10 @@ import com.ace.coupon.enums.IssueRequestStatus;
 public class RedisCouponIssueProcessor {
 
 	private static final int DECISION_FIELD_COUNT = 4;
+	private static final int VERSIONED_REQUEST_STATE_FIELD_COUNT = 10;
 	private static final int COMPACT_REQUEST_STATE_FIELD_COUNT = 6;
 	private static final int LEGACY_REQUEST_STATE_FIELD_COUNT = 7;
+	private static final String REQUEST_STATE_SCHEMA_VERSION = "v2";
 
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> issueScript;
@@ -50,7 +52,8 @@ public class RedisCouponIssueProcessor {
 				String.valueOf(userId),
 				String.valueOf(bitmap.offset()),
 				requestId.toString(),
-				String.valueOf(campaignId));
+				String.valueOf(campaignId),
+				String.valueOf(bitmap.segment()));
 
 		if (result == null || result.size() != DECISION_FIELD_COUNT) {
 			throw new IllegalStateException("쿠폰 발급 Lua 결과 형식이 올바르지 않습니다.");
@@ -84,6 +87,9 @@ public class RedisCouponIssueProcessor {
 
 		try {
 			String[] fields = value.toString().split("\\|", -1);
+			if (fields.length == VERSIONED_REQUEST_STATE_FIELD_COUNT) {
+				return versionedRequestState(requestId, campaignId, fields);
+			}
 			if (fields.length != COMPACT_REQUEST_STATE_FIELD_COUNT
 					&& fields.length != LEGACY_REQUEST_STATE_FIELD_COUNT) {
 				throw new IllegalStateException("쿠폰 요청 상태 필드 수가 올바르지 않습니다.");
@@ -106,6 +112,55 @@ public class RedisCouponIssueProcessor {
 		} catch (IllegalArgumentException exception) {
 			throw new IllegalStateException("쿠폰 요청 상태 형식이 올바르지 않습니다.", exception);
 		}
+	}
+
+	private CouponIssueRequestState versionedRequestState(
+			UUID requestId,
+			Long campaignId,
+			String[] fields) {
+		if (!REQUEST_STATE_SCHEMA_VERSION.equals(fields[0])) {
+			throw new IllegalStateException("쿠폰 요청 상태 스키마 버전이 올바르지 않습니다.");
+		}
+
+		long decisionCode = Long.parseLong(fields[4]);
+		long lifecycle = Long.parseLong(fields[5]);
+		long sequence = Long.parseLong(fields[6]);
+		long remainingStock = Long.parseLong(fields[7]);
+		long decidedAt = Long.parseLong(fields[8]);
+		long updatedAt = Long.parseLong(fields[9]);
+		if (decidedAt <= 0 || updatedAt < decidedAt) {
+			throw new IllegalStateException("쿠폰 요청 상태 시각이 올바르지 않습니다.");
+		}
+
+		return new CouponIssueRequestState(
+				requestId,
+				campaignId,
+				Long.parseLong(fields[1]),
+				requestStatus(decisionCode, lifecycle),
+				sequence < 0 ? null : sequence,
+				remainingStock < 0 ? null : remainingStock,
+				Instant.ofEpochMilli(decidedAt));
+	}
+
+	private IssueRequestStatus requestStatus(long decisionCode, long lifecycle) {
+		if (decisionCode == CouponIssueLuaCode.ACCEPTED.value()) {
+			return switch ((int) lifecycle) {
+				case 0 -> IssueRequestStatus.ACCEPTED;
+				case 1 -> IssueRequestStatus.ISSUED;
+				default -> throw new IllegalStateException("승인 요청 수명주기가 올바르지 않습니다.");
+			};
+		}
+		if (decisionCode == CouponIssueLuaCode.PERSISTENCE_FAILED.value() && lifecycle == 2) {
+			return IssueRequestStatus.COMPENSATED;
+		}
+		if (lifecycle != 3) {
+			throw new IllegalStateException("거절 요청 수명주기가 올바르지 않습니다.");
+		}
+		CouponIssueLuaCode code = CouponIssueLuaCode.from(decisionCode);
+		if (code.requestStatus() == null) {
+			throw new IllegalStateException("요청 상태로 변환할 수 없는 Lua 코드입니다.");
+		}
+		return code.requestStatus();
 	}
 
 	private IssueRequestStatus requestStatus(String value) {
@@ -133,7 +188,8 @@ public class RedisCouponIssueProcessor {
 						keys.issueStream()),
 				String.valueOf(userId),
 				String.valueOf(bitmap.offset()),
-				requestId.toString());
+				requestId.toString(),
+				String.valueOf(bitmap.segment()));
 
 		if (code == null) {
 			throw new IllegalStateException("쿠폰 발급 보상 결과가 없습니다.");

@@ -7,7 +7,8 @@ public enum CampaignInitializationResult {
 	INITIALIZED(0),
 	ALREADY_INITIALIZED(1),
 	CONFIGURATION_CONFLICT(2),
-	INVALID_CONFIGURATION(3);
+	INVALID_CONFIGURATION(3),
+	INTERNAL_WRITE_ERROR(4);
 
 	private final long code;
 

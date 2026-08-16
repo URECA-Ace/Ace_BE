@@ -50,7 +50,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 			case EVENT_CLOSED -> throw new CouponException(ErrorCode.EVENT_CLOSED);
 			case IDEMPOTENCY_CONFLICT -> throw new CouponException(ErrorCode.IDEMPOTENCY_CONFLICT);
 			case PERSISTENCE_FAILED -> throw new CouponException(ErrorCode.ISSUE_PERSIST_FAILED);
-			case CAMPAIGN_NOT_INITIALIZED, CORRUPTED_STATE ->
+			case CAMPAIGN_NOT_INITIALIZED, CORRUPTED_STATE, INVALID_ARGUMENT, INTERNAL_WRITE_ERROR ->
 					throw new CouponException(ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE);
 		};
 	}
