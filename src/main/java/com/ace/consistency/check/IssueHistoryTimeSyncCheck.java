@@ -46,7 +46,7 @@ public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
             FROM coupon_issue ci
             JOIN (
                 SELECT issue_id, to_status, occurred_at,
-                       ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, id DESC) as rn
+                       ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
             WHERE (:eventId IS NULL OR ci.event_id = :eventId)

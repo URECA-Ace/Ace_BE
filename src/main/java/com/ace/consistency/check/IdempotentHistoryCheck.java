@@ -31,7 +31,7 @@ public class IdempotentHistoryCheck implements ConsistencyCheck {
             FROM coupon_history a
             JOIN coupon_history b 
               ON a.issue_id = b.issue_id 
-              AND a.id != b.id
+              AND a.history_id != b.history_id
               AND a.from_status <=> b.from_status
               AND a.to_status = b.to_status
             JOIN coupon_issue ci ON ci.issue_id = a.issue_id
