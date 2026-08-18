@@ -26,12 +26,12 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 				ci.event_id IS NULL OR ci.user_id IS NULL OR ci.issue_sequence IS NULL
 				OR ci.issue_sequence <= 0 OR ci.request_id IS NULL OR CHAR_LENGTH(ci.request_id) <> 36
 				OR (ci.message_id IS NOT NULL AND CHAR_LENGTH(ci.message_id) <> 36)
-				OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
+				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
 				OR ci.issued_at IS NULL OR ci.valid_from IS NULL OR ci.valid_to IS NULL OR ci.created_at IS NULL
 				OR ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to OR ci.created_at < ci.issued_at
 				OR (ci.status IN ('ISSUED','EXPIRED') AND (ci.used_at IS NOT NULL OR ci.canceled_at IS NOT NULL))
 				OR (ci.status = 'USED' AND (ci.used_at IS NULL OR ci.canceled_at IS NOT NULL
-					OR ci.used_at < ci.valid_from OR ci.used_at > ci.valid_to))
+					OR ci.used_at < ci.valid_from))
 				OR (ci.status = 'CANCELED' AND (ci.canceled_at IS NULL OR ci.used_at IS NOT NULL
 					OR ci.canceled_at < ci.issued_at))
 			)

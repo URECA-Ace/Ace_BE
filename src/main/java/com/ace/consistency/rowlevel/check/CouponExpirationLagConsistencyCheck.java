@@ -22,7 +22,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 
 	private static final String CONDITION = """
 			(ci.status = 'ISSUED' AND ci.valid_to <= :allowedExpirationBoundary)
-			OR (ci.status = 'USED' AND ci.used_at > ci.valid_to)
+			OR (ci.status = 'USED' AND ci.used_at > ci.valid_to AND ci.used_at < :snapshotAt)
 			""";
 	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE " + CONDITION;
 	private static final String SAMPLE_SQL = """
@@ -46,8 +46,9 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 	public CheckOutcome check(Scope scope) {
 		// AS_OF_RANGE의 from은 "검증시각 - 합의된 허용 지연시간"이다.
 		// 허용시간을 Check 안에 하드코딩하지 않아 스케줄러 정책 변경과 검증 로직을 분리한다.
-		MapSqlParameterSource params = new MapSqlParameterSource(
-				"allowedExpirationBoundary", scope.getFrom());
+		MapSqlParameterSource params = new MapSqlParameterSource()
+				.addValue("allowedExpirationBoundary", scope.getFrom())
+				.addValue("snapshotAt", scope.getTo());
 		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
 		int violationCount = count == null ? 0 : count;
 		if (violationCount == 0) {
