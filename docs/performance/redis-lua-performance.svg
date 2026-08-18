@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="1" stop-color="#11253b"/>
+    </linearGradient>
+    <linearGradient id="afterBar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#20c997"/>
+      <stop offset="1" stop-color="#6ee7b7"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" rx="36" fill="url(#background)"/>
+  <circle cx="410" cy="210" r="510" fill="none" stroke="#173856" stroke-width="5" opacity="0.7"/>
+  <circle cx="410" cy="210" r="525" fill="none" stroke="#173856" stroke-width="3" opacity="0.55"/>
+
+  <text x="80" y="105" fill="#f5f8ff" font-family="Malgun Gothic, sans-serif" font-size="45" font-weight="700">Redis Lua v2 성능 비교</text>
+  <text x="80" y="143" fill="#9fb0c8" font-family="Malgun Gothic, sans-serif" font-size="21">20,000 requests  |  10,000 stock  |  128 physical connections  |  EVALSHA</text>
+
+  <rect x="80" y="184" width="690" height="224" rx="22" fill="#142238" stroke="#33455f"/>
+  <text x="120" y="237" fill="#f59e0b" font-family="Malgun Gothic, sans-serif" font-size="20" font-weight="700">최적화 전 고정본</text>
+  <text x="120" y="330" fill="#f5f8ff" font-family="Malgun Gothic, sans-serif" font-size="62" font-weight="800">6,744.10</text>
+  <text x="432" y="326" fill="#9fb0c8" font-family="Malgun Gothic, sans-serif" font-size="24">req/s</text>
+  <rect x="120" y="350" width="590" height="20" rx="10" fill="#293952"/>
+  <rect x="120" y="350" width="530" height="20" rx="10" fill="#f59e0b"/>
+
+  <rect x="830" y="184" width="690" height="224" rx="22" fill="#142238" stroke="#2f725d"/>
+  <text x="870" y="237" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="20" font-weight="700">현재 v2</text>
+  <text x="870" y="330" fill="#f5f8ff" font-family="Malgun Gothic, sans-serif" font-size="62" font-weight="800">6,864.56</text>
+  <text x="1182" y="326" fill="#9fb0c8" font-family="Malgun Gothic, sans-serif" font-size="24">req/s</text>
+  <rect x="870" y="350" width="590" height="20" rx="10" fill="#293952"/>
+  <rect x="870" y="350" width="540" height="20" rx="10" fill="url(#afterBar)"/>
+
+  <rect x="80" y="448" width="1440" height="116" rx="22" fill="#103327" stroke="#267054"/>
+  <text x="224" y="515" text-anchor="middle" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="31" font-weight="800">+1.79%</text>
+  <text x="224" y="548" text-anchor="middle" fill="#bdd9ce" font-family="Malgun Gothic, sans-serif" font-size="17">처리량</text>
+  <text x="512" y="515" text-anchor="middle" fill="#fbbf24" font-family="Malgun Gothic, sans-serif" font-size="31" font-weight="800">+3.87%</text>
+  <text x="512" y="548" text-anchor="middle" fill="#bdd9ce" font-family="Malgun Gothic, sans-serif" font-size="17">P50 지연</text>
+  <text x="800" y="515" text-anchor="middle" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="31" font-weight="800">-11.39%</text>
+  <text x="800" y="548" text-anchor="middle" fill="#bdd9ce" font-family="Malgun Gothic, sans-serif" font-size="17">P95 지연</text>
+  <text x="1088" y="515" text-anchor="middle" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="31" font-weight="800">-11.16%</text>
+  <text x="1088" y="548" text-anchor="middle" fill="#bdd9ce" font-family="Malgun Gothic, sans-serif" font-size="17">P99 지연</text>
+  <text x="1376" y="515" text-anchor="middle" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="31" font-weight="800">0건</text>
+  <text x="1376" y="548" text-anchor="middle" fill="#bdd9ce" font-family="Malgun Gothic, sans-serif" font-size="17">초과 발급</text>
+
+  <text x="80" y="638" fill="#f5f8ff" font-family="Malgun Gothic, sans-serif" font-size="27" font-weight="700">지연시간 비교</text>
+  <text x="80" y="684" fill="#cbd5e1" font-family="Malgun Gothic, sans-serif" font-size="18" font-weight="700">P50</text>
+  <rect x="170" y="670" width="1140" height="14" rx="7" fill="#293952"/>
+  <rect x="170" y="670" width="439" height="14" rx="7" fill="#f59e0b"/>
+  <rect x="170" y="692" width="456" height="14" rx="7" fill="url(#afterBar)"/>
+  <text x="1340" y="684" fill="#f59e0b" font-family="Malgun Gothic, sans-serif" font-size="16">16.604 ms</text>
+  <text x="1340" y="706" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="16">17.247 ms</text>
+
+  <text x="80" y="752" fill="#cbd5e1" font-family="Malgun Gothic, sans-serif" font-size="18" font-weight="700">P95</text>
+  <rect x="170" y="738" width="1140" height="14" rx="7" fill="#293952"/>
+  <rect x="170" y="738" width="885" height="14" rx="7" fill="#f59e0b"/>
+  <rect x="170" y="760" width="784" height="14" rx="7" fill="url(#afterBar)"/>
+  <text x="1340" y="752" fill="#f59e0b" font-family="Malgun Gothic, sans-serif" font-size="16">33.476 ms</text>
+  <text x="1340" y="774" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="16">29.663 ms</text>
+
+  <text x="80" y="820" fill="#cbd5e1" font-family="Malgun Gothic, sans-serif" font-size="18" font-weight="700">P99</text>
+  <rect x="170" y="806" width="1140" height="14" rx="7" fill="#293952"/>
+  <rect x="170" y="806" width="1140" height="14" rx="7" fill="#f59e0b"/>
+  <rect x="170" y="828" width="1013" height="14" rx="7" fill="url(#afterBar)"/>
+  <text x="1340" y="820" fill="#f59e0b" font-family="Malgun Gothic, sans-serif" font-size="16">43.135 ms</text>
+  <text x="1340" y="842" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="16">38.323 ms</text>
+
+  <text x="80" y="873" fill="#9fb0c8" font-family="Malgun Gothic, sans-serif" font-size="15">Redis 8.2  |  AOF/RDB off  |  1,000 warm-up  |  ABBA-BAAB  |  commit d5530f8</text>
+  <text x="1520" y="873" text-anchor="end" fill="#6ee7b7" font-family="Malgun Gothic, sans-serif" font-size="15">승인 10,000  |  소진 10,000  |  초과 발급 0</text>
+</svg>
