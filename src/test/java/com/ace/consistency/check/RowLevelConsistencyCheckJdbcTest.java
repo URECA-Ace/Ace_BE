@@ -15,6 +15,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @JdbcTest
 @Testcontainers
 class RowLevelConsistencyCheckJdbcTest {
+	private static final Duration TEST_ALLOWED_EXPIRATION_DELAY = Duration.ofMinutes(30);
 
 	@Container
 	@ServiceConnection
@@ -238,7 +240,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				LocalDateTime.of(2026, 8, 18, 10, 30),
 				LocalDateTime.of(2026, 8, 18, 12, 0));
 
-		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(namedJdbcTemplate).check(scope);
+		CheckOutcome outcome = expirationLagCheck().check(scope);
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
@@ -253,7 +255,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				LocalDateTime.of(2026, 8, 18, 10, 30),
 				LocalDateTime.of(2026, 8, 18, 12, 0));
 
-		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(namedJdbcTemplate).check(scope);
+		CheckOutcome outcome = expirationLagCheck().check(scope);
 
 		assertThat(outcome.isPass()).isTrue();
 	}
@@ -267,7 +269,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				LocalDateTime.of(2026, 8, 18, 10, 30),
 				LocalDateTime.of(2026, 8, 18, 12, 0));
 
-		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(namedJdbcTemplate).check(scope);
+		CheckOutcome outcome = expirationLagCheck().check(scope);
 
 		assertThat(outcome.isPass()).isTrue();
 	}
@@ -279,12 +281,53 @@ class RowLevelConsistencyCheckJdbcTest {
 				LocalDateTime.of(2026, 8, 18, 10, 30),
 				LocalDateTime.of(2026, 8, 18, 12, 0));
 
-		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(namedJdbcTemplate).check(scope);
+		CheckOutcome outcome = expirationLagCheck().check(scope);
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("EXPIRATION_BATCH_DELAY");
+	}
+
+	@Test
+	void 만료_처리_마감시각이_from_이전이면_검증_구간에서_제외한다() {
+		insertIssue("ISSUED", null, 1L);
+		Scope scope = Scope.ofAsOfRange(
+				LocalDateTime.of(2026, 8, 18, 11, 1),
+				LocalDateTime.of(2026, 8, 18, 12, 0));
+
+		CheckOutcome outcome = expirationLagCheck().check(scope);
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 만료_처리_마감시각이_from과_같으면_검증_구간에_포함한다() {
+		insertIssue("ISSUED", null, 1L);
+		Scope scope = Scope.ofAsOfRange(
+				LocalDateTime.of(2026, 8, 18, 11, 0),
+				LocalDateTime.of(2026, 8, 18, 12, 0));
+
+		CheckOutcome outcome = expirationLagCheck().check(scope);
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	void 만료_처리_마감시각이_to와_같으면_검증_구간에서_제외한다() {
+		insertIssue("ISSUED", null, 1L);
+		Scope scope = Scope.ofAsOfRange(
+				LocalDateTime.of(2026, 8, 18, 10, 0),
+				LocalDateTime.of(2026, 8, 18, 11, 0));
+
+		CheckOutcome outcome = expirationLagCheck().check(scope);
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	private CouponExpirationLagConsistencyCheck expirationLagCheck() {
+		return new CouponExpirationLagConsistencyCheck(namedJdbcTemplate, TEST_ALLOWED_EXPIRATION_DELAY);
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {
