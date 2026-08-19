@@ -24,6 +24,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.ace.common.exception.CouponException;
 
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import lombok.extern.slf4j.Slf4j;
@@ -140,6 +141,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(NoResourceFoundException.class)
 	public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException ex) {
 		return build(ErrorCode.RESOURCE_NOT_FOUND, null);
+	}
+
+	// Runner가 존재하지 않는 쿠폰 이벤트를 감지하면 공통 404 응답으로 변환한다.
+	@ExceptionHandler(EntityNotFoundException.class)
+	public ResponseEntity<ApiResponse<Void>> handleEntityNotFound(EntityNotFoundException ex) {
+		return build(ErrorCode.EVENT_NOT_FOUND, ex.getMessage());
 	}
 
 	@ExceptionHandler(ResponseStatusException.class)
