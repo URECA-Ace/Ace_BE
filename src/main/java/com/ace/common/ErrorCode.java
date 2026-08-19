@@ -37,6 +37,8 @@ public enum ErrorCode {
 	// 캠페인 운영
 	CAMPAIGN_CONFIG_CONFLICT(HttpStatus.CONFLICT,
 			"이미 다른 설정으로 초기화된 캠페인입니다."),
+	CAMPAIGN_NOT_INITIALIZABLE(HttpStatus.BAD_REQUEST,
+			"초기화할 수 없는 회차입니다."),
 	CAMPAIGN_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
 			"캠페인 초기화에 실패했습니다."),
 

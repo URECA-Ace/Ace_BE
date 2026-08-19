@@ -51,11 +51,14 @@ public class CampaignAdminService {
 					ErrorCode.CAMPAIGN_CONFIG_CONFLICT,
 					"회차 %d 가 이미 다른 설정으로 초기화되어 있습니다. 키를 지우고 다시 실행하세요."
 							.formatted(eventId));
+			// 서버 잘못이 아니라 입력 잘못
+			// 이미 마감된 회차를 올리려는 경우가 대부분이라 사유를 알려준다
 			case INVALID_CONFIGURATION -> throw new CouponException(
-					ErrorCode.CAMPAIGN_INIT_FAILED,
-					"회차 %d 의 설정이 올바르지 않습니다: totalStock=%d, openAt=%s, closeAt=%s"
-							.formatted(eventId, event.getTotalStock(),
-									event.getOpenAt(), event.getCloseAt()));
+					ErrorCode.CAMPAIGN_NOT_INITIALIZABLE,
+					("회차 %d 를 초기화할 수 없습니다. 보존기간이 지났거나 설정이 올바르지 않습니다. "
+							+ "openAt=%s, closeAt=%s, totalStock=%d")
+							.formatted(eventId, event.getOpenAt(), event.getCloseAt(),
+									event.getTotalStock()));
 			case INTERNAL_WRITE_ERROR -> throw new CouponException(
 					ErrorCode.CAMPAIGN_INIT_FAILED,
 					ErrorCode.CAMPAIGN_INIT_FAILED.getDefaultMessage());

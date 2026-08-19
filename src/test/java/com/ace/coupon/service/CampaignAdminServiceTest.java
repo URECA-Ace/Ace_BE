@@ -124,14 +124,17 @@ class CampaignAdminServiceTest {
 	}
 
 	@Test
-	@DisplayName("설정이 올바르지 않으면 500 + 어떤 값이 문제인지 알려준다")
+	@DisplayName("마감된 회차는 400 으로 거절하고 사유를 알려준다")
 	void reportsInvalidConfiguration() {
 		givenResult(CampaignInitializationResult.INVALID_CONFIGURATION);
 
 		assertThatThrownBy(() -> service.initialize(1L))
 				.isInstanceOfSatisfying(CouponException.class, exception -> {
-					assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.CAMPAIGN_INIT_FAILED);
-					assertThat(exception.getMessage()).contains("totalStock=10000");
+					assertThat(exception.getErrorCode())
+							.isEqualTo(ErrorCode.CAMPAIGN_NOT_INITIALIZABLE);
+					assertThat(exception.getMessage())
+							.contains("보존기간이 지났거나")
+							.contains("totalStock=10000");
 				});
 	}
 
