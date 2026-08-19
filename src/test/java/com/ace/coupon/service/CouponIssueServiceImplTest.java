@@ -2,7 +2,13 @@ package com.ace.coupon.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -12,6 +18,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import com.ace.common.ErrorCode;
@@ -19,6 +26,11 @@ import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
 import com.ace.coupon.dto.response.CouponIssueStatusResponse;
 import com.ace.coupon.enums.IssueRequestStatus;
+import com.ace.coupon.persistence.CouponIssuePersistenceProperties;
+import com.ace.coupon.persistence.failure.IssueFailureStage;
+import com.ace.coupon.persistence.IssuePersistenceCoordinator;
+import com.ace.coupon.persistence.IssueRecord;
+import com.ace.coupon.persistence.PersistenceMode;
 import com.ace.coupon.redis.CouponIssueDecision;
 import com.ace.coupon.redis.CouponIssueLuaCode;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
@@ -28,14 +40,22 @@ import com.ace.coupon.redis.RedisCouponIssueProcessor;
 class CouponIssueServiceImplTest {
 
 	private RedisCouponIssueProcessor processor;
+	private IssuePersistenceCoordinator coordinator;
 	private CouponIssueService service;
 
 	@BeforeEach
 	void setUp() {
+		service = serviceWithMode(PersistenceMode.SYNC);
+	}
+
+	private CouponIssueService serviceWithMode(PersistenceMode mode) {
 		processor = Mockito.mock(RedisCouponIssueProcessor.class);
-		service = new CouponIssueServiceImpl(
+		coordinator = Mockito.mock(IssuePersistenceCoordinator.class);
+		return new CouponIssueServiceImpl(
 				processor,
-				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")));
+				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
+				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null, null),
+				coordinator);
 	}
 
 	@Test
@@ -91,5 +111,85 @@ class CouponIssueServiceImplTest {
 		assertThatThrownBy(() -> service.findStatus(1L, requestId))
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ISSUE_NOT_FOUND));
+	}
+
+	@Test
+	@DisplayName("SYNC 모드는 응답 전에 저장까지 끝낸다")
+	void persistsBeforeRespondingInSyncMode() {
+		UUID requestId = UUID.randomUUID();
+		Instant decidedAt = Instant.parse("2026-08-19T03:00:00Z");
+		given(processor.issue(1L, 2L, requestId))
+				.willReturn(new CouponIssueDecision(CouponIssueLuaCode.ACCEPTED, 7L, 93L, decidedAt));
+
+		service.issue(1L, 2L, requestId);
+
+		ArgumentCaptor<IssueRecord> captor = ArgumentCaptor.forClass(IssueRecord.class);
+		verify(coordinator).persist(captor.capture(), eq(IssueFailureStage.DB_INSERT), anyString());
+		IssueRecord record = captor.getValue();
+		assertThat(record.requestId()).isEqualTo(requestId);
+		assertThat(record.issueSequence()).isEqualTo(7L);
+		assertThat(record.decidedAt()).isEqualTo(decidedAt);
+		// Stream 을 거치지 않았으므로 message_id 가 없다
+		assertThat(record.messageId()).isNull();
+	}
+
+	@Test
+	@DisplayName("RELAY 모드는 저장하지 않는다")
+	void doesNotPersistInRelayMode() {
+		CouponIssueService relayService = serviceWithMode(PersistenceMode.RELAY);
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId)).willReturn(
+				new CouponIssueDecision(CouponIssueLuaCode.ACCEPTED, 7L, 93L, Instant.now()));
+
+		CouponIssueAcceptedResponse response = relayService.issue(1L, 2L, requestId);
+
+		assertThat(response.issueSequence()).isEqualTo(7L);
+		verify(coordinator, never()).persist(any(), any(), anyString());
+	}
+
+	@Test
+	@DisplayName("거절 판정은 저장하지 않는다")
+	void doesNotPersistRejectedDecision() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId)).willReturn(
+				new CouponIssueDecision(CouponIssueLuaCode.SOLD_OUT, null, 0L, Instant.now()));
+
+		assertThatThrownBy(() -> service.issue(1L, 2L, requestId))
+				.isInstanceOf(CouponException.class);
+
+		verify(coordinator, never()).persist(any(), any(), anyString());
+	}
+
+	@Test
+	@DisplayName("저장이 실패하면 202가 아니라 500으로 응답한다")
+	void failsWhenPersistenceFails() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId)).willReturn(
+				new CouponIssueDecision(CouponIssueLuaCode.ACCEPTED, 7L, 93L, Instant.now()));
+		given(coordinator.persist(any(), any(), anyString()))
+				.willThrow(new IllegalStateException("저장 실패"));
+
+		assertThatThrownBy(() -> service.issue(1L, 2L, requestId))
+				.isInstanceOfSatisfying(CouponException.class, exception -> {
+					assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ISSUE_PERSIST_FAILED);
+					assertThat(exception.getIncidentId()).isNotBlank();
+				});
+	}
+
+	@Test
+	@DisplayName("응답의 incidentId와 실패 기록에 넘긴 값이 같다")
+	void reusesIncidentIdFromPersistence() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId)).willReturn(
+				new CouponIssueDecision(CouponIssueLuaCode.ACCEPTED, 7L, 93L, Instant.now()));
+		given(coordinator.persist(any(), any(), anyString()))
+				.willThrow(new IllegalStateException("저장 실패"));
+
+		CouponException exception = catchThrowableOfType(
+				() -> service.issue(1L, 2L, requestId), CouponException.class);
+
+		ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+		verify(coordinator).persist(any(), any(), captor.capture());
+		assertThat(exception.getIncidentId()).isEqualTo(captor.getValue());
 	}
 }
