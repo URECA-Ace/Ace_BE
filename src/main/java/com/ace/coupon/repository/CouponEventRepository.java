@@ -17,11 +17,20 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	Optional<CouponEvent> findByCoupon_IdAndRound(Long couponId, Integer round);
 
+	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
+	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
+
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
 
 	List<CouponEvent> findAllByStatusInAndCloseAtAfter(
 			List<CouponEventStatus> statuses,
 			LocalDateTime closeAt);
+
+	// Stream 을 소비해야 할 회차
+	@Query("select e.id from CouponEvent e where e.openAt <= :now and e.closeAt >= :since order by e.id")
+	List<Long> findConsumableEventIds(
+			@Param("now") LocalDateTime now,
+			@Param("since") LocalDateTime since);
 
 	/**
 	 * 오픈 시각에 도달했고 아직 마감되지 않은 캠페인을 한 번의 조건부 UPDATE로 전환한다.
