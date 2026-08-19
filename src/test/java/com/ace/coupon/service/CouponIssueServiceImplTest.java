@@ -54,7 +54,7 @@ class CouponIssueServiceImplTest {
 		return new CouponIssueServiceImpl(
 				processor,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
-				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null, null),
+				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
 				coordinator);
 	}
 

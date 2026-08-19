@@ -14,7 +14,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("설정이 없으면 기본값으로 채운다")
 	void fillsDefaults() {
 		CouponIssuePersistenceProperties properties =
-				new CouponIssuePersistenceProperties(null, null, null, null, null, null, null, null);
+				new CouponIssuePersistenceProperties(null, null, null, null, null, null, null);
 
 		assertThat(properties.mode()).isEqualTo(PersistenceMode.SYNC);
 		assertThat(properties.consumerGroup()).isEqualTo("issue-persist");
@@ -31,7 +31,7 @@ class CouponIssuePersistencePropertiesTest {
 	void keepsGivenValues() {
 		CouponIssuePersistenceProperties properties = new CouponIssuePersistenceProperties(
 				PersistenceMode.RELAY, "relay-1", 50,
-				Duration.ofSeconds(5), Duration.ofMinutes(1), 5, Duration.ofSeconds(30), false);
+				Duration.ofSeconds(5), Duration.ofMinutes(1), 5, Duration.ofSeconds(30));
 
 		assertThat(properties.mode()).isEqualTo(PersistenceMode.RELAY);
 		assertThat(properties.consumerGroup()).isEqualTo("relay-1");
@@ -42,7 +42,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("빈 컨슈머 그룹은 기본값으로 되돌린다")
 	void fallsBackOnBlankConsumerGroup() {
 		CouponIssuePersistenceProperties properties =
-				new CouponIssuePersistenceProperties(null, "  ", null, null, null, null, null, null);
+				new CouponIssuePersistenceProperties(null, "  ", null, null, null, null, null);
 
 		assertThat(properties.consumerGroup()).isEqualTo("issue-persist");
 	}
@@ -51,7 +51,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("batchSize가 0 이하면 거부한다")
 	void rejectsNonPositiveBatchSize() {
 		assertThatThrownBy(() ->
-				new CouponIssuePersistenceProperties(null, null, -1, null, null, null, null, null))
+				new CouponIssuePersistenceProperties(null, null, -1, null, null, null, null))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("batchSize");
 	}
@@ -60,7 +60,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("blockTimeout이 0이면 거부한다")
 	void rejectsZeroBlockTimeout() {
 		assertThatThrownBy(() ->
-				new CouponIssuePersistenceProperties(null, null, null, Duration.ZERO, null, null, null, null))
+				new CouponIssuePersistenceProperties(null, null, null, Duration.ZERO, null, null, null))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("blockTimeout");
 	}
@@ -69,7 +69,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("claimMinIdle이 음수면 거부한다")
 	void rejectsNegativeClaimMinIdle() {
 		assertThatThrownBy(() -> new CouponIssuePersistenceProperties(
-				null, null, null, null, Duration.ofSeconds(-1), null, null, null))
+				null, null, null, null, Duration.ofSeconds(-1), null, null))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("claimMinIdle");
 	}
@@ -78,7 +78,7 @@ class CouponIssuePersistencePropertiesTest {
 	@DisplayName("maxDeliveryAttempts가 0 이하면 거부한다")
 	void rejectsNonPositiveMaxDeliveryAttempts() {
 		assertThatThrownBy(() ->
-				new CouponIssuePersistenceProperties(null, null, null, null, null, 0, null, null))
+				new CouponIssuePersistenceProperties(null, null, null, null, null, 0, null))
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("maxDeliveryAttempts");
 	}

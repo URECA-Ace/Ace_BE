@@ -127,7 +127,7 @@ class IssueStreamRelayIntegrationTest {
 				targetProvider,
 				new CouponIssuePersistenceProperties(
 						PersistenceMode.RELAY, GROUP, 100,
-						Duration.ofMillis(50), claimMinIdle, maxDeliveryAttempts, Duration.ofSeconds(1), null));
+						Duration.ofMillis(50), claimMinIdle, maxDeliveryAttempts, Duration.ofSeconds(1)));
 	}
 
 	private UUID issue(long userId) {

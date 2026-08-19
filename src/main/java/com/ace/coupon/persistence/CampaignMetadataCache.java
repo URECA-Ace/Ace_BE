@@ -8,7 +8,6 @@ import org.springframework.stereotype.Component;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.repository.CouponEventRepository;
 
-
 import lombok.RequiredArgsConstructor;
 
 // 회차 불변값 캐시
@@ -19,15 +18,9 @@ import lombok.RequiredArgsConstructor;
 public class CampaignMetadataCache {
 
 	private final CouponEventRepository couponEventRepository;
-	private final CouponIssuePersistenceProperties properties;
-
 	private final ConcurrentMap<Long, CampaignMetadata> cache = new ConcurrentHashMap<>();
 
 	public CampaignMetadata get(long eventId) {
-		// 캐시를 끄면 저장 건마다 회차를 다시 조회(측정용, 문서화 후 제거 예정)
-		if (!properties.campaignCache()) {
-			return load(eventId);
-		}
 		return cache.computeIfAbsent(eventId, this::load);
 	}
 

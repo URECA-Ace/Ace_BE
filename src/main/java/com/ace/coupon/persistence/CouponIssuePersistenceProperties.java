@@ -13,8 +13,7 @@ public record CouponIssuePersistenceProperties(
 		Duration blockTimeout,
 		Duration claimMinIdle,
 		Integer maxDeliveryAttempts,
-		Duration refreshInterval,
-		Boolean campaignCache) {
+		Duration refreshInterval) {
 
 	private static final PersistenceMode DEFAULT_MODE = PersistenceMode.SYNC;
 	private static final String DEFAULT_CONSUMER_GROUP = "issue-persist";
@@ -23,7 +22,6 @@ public record CouponIssuePersistenceProperties(
 	private static final Duration DEFAULT_CLAIM_MIN_IDLE = Duration.ofSeconds(30);
 	private static final int DEFAULT_MAX_DELIVERY_ATTEMPTS = 3;
 	private static final Duration DEFAULT_REFRESH_INTERVAL = Duration.ofSeconds(10);
-	private static final boolean DEFAULT_CAMPAIGN_CACHE = true;
 
 	public CouponIssuePersistenceProperties {
 		mode = mode == null ? DEFAULT_MODE : mode;
@@ -37,9 +35,6 @@ public record CouponIssuePersistenceProperties(
 				? DEFAULT_MAX_DELIVERY_ATTEMPTS
 				: maxDeliveryAttempts;
 		refreshInterval = refreshInterval == null ? DEFAULT_REFRESH_INTERVAL : refreshInterval;
-		// 측정용 스위치
-		// 캐시 효과를 수치로 남기려고 둔 것이라 결과를 문서화한 뒤 지울 예정
-		campaignCache = campaignCache == null ? DEFAULT_CAMPAIGN_CACHE : campaignCache;
 
 		if (batchSize <= 0) {
 			throw new IllegalArgumentException("batchSize는 양수여야 합니다.");

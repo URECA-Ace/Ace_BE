@@ -10,10 +10,10 @@ import static org.mockito.Mockito.verify;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -30,15 +30,8 @@ class CampaignMetadataCacheTest {
 	@Mock
 	private CouponEventRepository couponEventRepository;
 
+	@InjectMocks
 	private CampaignMetadataCache cache;
-
-	@BeforeEach
-	void setUp() {
-		cache = new CampaignMetadataCache(
-				couponEventRepository,
-				new CouponIssuePersistenceProperties(
-						null, null, null, null, null, null, null, true));
-	}
 
 	private CouponEvent event(long eventId, int validHours) {
 		Coupon coupon = Coupon.builder()
@@ -122,21 +115,5 @@ class CampaignMetadataCacheTest {
 		LocalDateTime validTo = cache.get(1L).validTo(validFrom);
 
 		assertThat(validTo).isEqualTo(validFrom.plusHours(168));
-	}
-
-	@Test
-	@DisplayName("캐시를 끄면 매번 조회한다(측정용 스위치가 실제로 동작하는지)")
-	void bypassesCacheWhenDisabled() {
-		given(couponEventRepository.findWithCouponById(1L)).willReturn(Optional.of(event(1L, 168)));
-		CampaignMetadataCache noCache = new CampaignMetadataCache(
-				couponEventRepository,
-				new CouponIssuePersistenceProperties(
-						null, null, null, null, null, null, null, false));
-
-		noCache.get(1L);
-		noCache.get(1L);
-		noCache.get(1L);
-
-		verify(couponEventRepository, times(3)).findWithCouponById(1L);
 	}
 }
