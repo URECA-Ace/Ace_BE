@@ -11,10 +11,7 @@ public class CouponException extends RuntimeException {
 
 	private final ErrorCode errorCode;
 
-	/**
-	 * 응답에 노출할 사고 식별자. 예외를 던지는 쪽이 이미 로그나 실패 기록에 같은 값을 남긴 경우에만 채운다.
-	 * 비어 있으면 예외 핸들러가 새로 발급한다.
-	 */
+	// 응답에 노출할 사고 식별자
 	private final String incidentId;
 
 	public CouponException(ErrorCode errorCode) {
