@@ -54,6 +54,9 @@ class ConsistencyVerificationRunnerBatchTest {
 	private DuplicateConsistencyCheck duplicateConsistencyCheck;
 
 	@Autowired
+	private RestartableFlakyConsistencyCheck flakyConsistencyCheck;
+
+	@Autowired
 	private JobRepository jobRepository;
 
 	@Autowired
@@ -149,6 +152,43 @@ class ConsistencyVerificationRunnerBatchTest {
 
 		assertEquals("FAIL", failingResult.get("status"));
 		assertEquals("PASS", duplicateResult.get("status"));
+	}
+
+	/**
+	 * [검증 목적] Step이 예외로 실패해 Job이 FAILED로 끝난 뒤, restartRunAsync()로
+	 * 같은 checks/scope/triggerType을 재구성해 재시작하면 실패했던 Step부터 이어서 실행되어
+	 * 결국 Job 전체가 COMPLETED로 끝나는지, 그리고 같은 JobInstance를 이어가는지 확인한다.
+	 */
+	@Test
+	void 실패한_Job을_재시작하면_이어서_실행되어_완료된다() {
+		maxIdBefore = maxVerificationResultId();
+		flakyConsistencyCheck.throwOnNextCall();
+		List<ConsistencyCheck> checks = List.of(flakyConsistencyCheck, duplicateConsistencyCheck);
+
+		JobExecution firstExecution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
+		JobExecution firstFinished = awaitCompletion(firstExecution);
+
+		assertEquals(BatchStatus.FAILED, firstFinished.getStatus());
+		assertEquals(1, firstFinished.getStepExecutions().size(),
+				"뒤 Step(DuplicateConsistencyCheckStep)은 아직 실행되지 않아야 합니다.");
+
+		JobExecution restarted = runner.restartRunAsync(firstFinished.getId());
+		JobExecution restartedFinished = awaitCompletion(restarted);
+
+		assertNotEquals(firstFinished.getId(), restartedFinished.getId(), "재시작은 새 JobExecution을 만들어야 합니다.");
+		assertEquals(firstFinished.getJobInstanceId(), restartedFinished.getJobInstanceId(),
+				"재시작이어도 같은 JobInstance를 이어가야 합니다.");
+		assertEquals(BatchStatus.COMPLETED, restartedFinished.getStatus());
+		assertEquals(2, restartedFinished.getStepExecutions().size());
+		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "RestartableFlakyConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "DuplicateConsistencyCheckStep").getStatus());
+
+		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
+		assertEquals(3, rows.size(), "1차 실행의 ERROR 1건 + 재시작 후 PASS 2건이 저장돼야 합니다: " + rows);
+		long errorCount = rows.stream().filter(r -> "ERROR".equals(r.get("status"))).count();
+		long passCount = rows.stream().filter(r -> "PASS".equals(r.get("status"))).count();
+		assertEquals(1, errorCount);
+		assertEquals(2, passCount);
 	}
 
 	// ----------------- 테스트 전용 가짜 Check -----------------
