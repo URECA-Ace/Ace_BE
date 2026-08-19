@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -65,6 +66,36 @@ class CouponEventRepositoryTest {
 		assertThat(findStatus(future.getId())).isEqualTo(CouponEventStatus.SCHEDULED);
 		assertThat(findStatus(expired.getId())).isEqualTo(CouponEventStatus.SCHEDULED);
 		assertThat(findStatus(alreadyOpen.getId())).isEqualTo(CouponEventStatus.OPEN);
+	}
+
+	@Test
+	@DisplayName("Redis 복구 대상 조회는 마감 전 SCHEDULED와 OPEN 캠페인만 반환한다")
+	void findsOnlyActiveCampaignsForRedisRecovery() {
+		LocalDateTime databaseNow = entityManager
+				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
+				.getSingleResult()
+				.toLocalDateTime();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent scheduled = persistEvent(
+				coupon, 11, databaseNow.plusMinutes(10), databaseNow.plusMinutes(20),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		CouponEvent open = persistEvent(
+				coupon, 12, databaseNow.minusMinutes(1), databaseNow.plusMinutes(20),
+				CouponEventStatus.OPEN, databaseNow);
+		persistEvent(
+				coupon, 13, databaseNow.minusMinutes(20), databaseNow.minusMinutes(1),
+				CouponEventStatus.OPEN, databaseNow);
+		persistEvent(
+				coupon, 14, databaseNow.minusMinutes(1), databaseNow.plusMinutes(20),
+				CouponEventStatus.SOLD_OUT, databaseNow);
+		entityManager.flush();
+
+		List<CouponEvent> result = couponEventRepository.findAllByStatusInAndCloseAtAfter(
+				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN),
+				databaseNow);
+
+		assertThat(result).extracting(CouponEvent::getId)
+				.containsExactlyInAnyOrder(scheduled.getId(), open.getId());
 	}
 
 	private Coupon persistCoupon(LocalDateTime now) {
