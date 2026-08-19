@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.repository.CouponIssueRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -34,12 +35,38 @@ public class IssuePersistenceProbe {
 	@Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
 	public Result probe(IssueRecord record) {
 		try {
-			Optional<com.ace.coupon.entity.CouponIssue> stored =
+			Optional<CouponIssue> stored =
 					couponIssueRepository.findByRequestId(record.requestId().toString());
-			return stored.isPresent() ? Result.PERSISTED : Result.ABSENT;
+			if (stored.isEmpty()) {
+				return Result.ABSENT;
+			}
+			if (matches(stored.get(), record)) {
+				return Result.PERSISTED;
+			}
+
+			CouponIssue other = stored.get();
+			log.warn(
+					"같은 requestId의 다른 발급이 저장되어 있어 현재 요청은 미저장으로 판단합니다: "
+							+ "requestId={}, requestedEventId={}, requestedUserId={}, requestedSequence={}, "
+							+ "storedIssueId={}, storedEventId={}, storedUserId={}, storedSequence={}",
+					record.requestId(),
+					record.campaignId(),
+					record.userId(),
+					record.issueSequence(),
+					other.getId(),
+					other.getCouponEvent().getId(),
+					other.getUser().getId(),
+					other.getIssueSequence());
+			return Result.ABSENT;
 		} catch (RuntimeException exception) {
 			log.error("저장 여부 판별 실패, 원복하지 않습니다: requestId={}", record.requestId(), exception);
 			return Result.UNVERIFIED;
 		}
+	}
+
+	private boolean matches(CouponIssue stored, IssueRecord record) {
+		return stored.getCouponEvent().getId().longValue() == record.campaignId()
+				&& stored.getUser().getId().longValue() == record.userId()
+				&& stored.getIssueSequence().longValue() == record.issueSequence();
 	}
 }
