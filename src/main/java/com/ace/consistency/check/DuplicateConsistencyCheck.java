@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,13 +33,41 @@ public class DuplicateConsistencyCheck implements ConsistencyCheck {
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
-	private static final String SQL = """
+	private static final String EVENT_SQL = """
             SELECT sub.event_id, sub.user_id, sub.active_issued_count, ce.per_user_limit
             FROM (
                 SELECT event_id, user_id, COUNT(*) AS active_issued_count
                 FROM coupon_issue
                 WHERE status IN ('ISSUED','USED','EXPIRED')
-                  AND (:eventId IS NULL OR event_id = :eventId)
+                  AND event_id = :eventId
+                GROUP BY event_id, user_id
+            ) sub
+            JOIN coupon_event ce ON ce.event_id = sub.event_id
+            WHERE sub.active_issued_count > ce.per_user_limit
+            """;
+
+	private static final String ALL_SQL = """
+            SELECT sub.event_id, sub.user_id, sub.active_issued_count, ce.per_user_limit
+            FROM (
+                SELECT event_id, user_id, COUNT(*) AS active_issued_count
+                FROM coupon_issue
+                WHERE status IN ('ISSUED','USED','EXPIRED')
+                  AND event_id IN (:eventIds)
+                  AND created_at < :to
+                GROUP BY event_id, user_id
+            ) sub
+            JOIN coupon_event ce ON ce.event_id = sub.event_id
+            WHERE sub.active_issued_count > ce.per_user_limit
+            """;
+
+	private static final String AS_OF_RANGE_SQL = """
+            SELECT sub.event_id, sub.user_id, sub.active_issued_count, ce.per_user_limit
+            FROM (
+                SELECT event_id, user_id, COUNT(*) AS active_issued_count
+                FROM coupon_issue
+                WHERE status IN ('ISSUED','USED','EXPIRED')
+                  AND created_at < :to
+                  AND created_at > :from
                 GROUP BY event_id, user_id
             ) sub
             JOIN coupon_event ce ON ce.event_id = sub.event_id
@@ -47,16 +76,31 @@ public class DuplicateConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
-		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL, Scope.ScopeType.AS_OF_RANGE);
 	}
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		Long eventIdFilter = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-
-		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventIdFilter);
-
-		List<Map<String, Object>> violations = jdbcTemplate.queryForList(SQL, params);
+		List<Map<String, Object>> violations;
+		switch (scope.getType()) {
+			case EVENT -> {
+				MapSqlParameterSource params = new MapSqlParameterSource("eventId", scope.getEventId());
+				violations = jdbcTemplate.queryForList(EVENT_SQL, params);
+			}
+			case ALL -> {
+				MapSqlParameterSource params = new MapSqlParameterSource()
+						.addValue("eventIds", scope.getEventIds())
+						.addValue("to", scope.getTo());
+				violations = jdbcTemplate.queryForList(ALL_SQL, params);
+			}
+			case AS_OF_RANGE -> {
+				MapSqlParameterSource params = new MapSqlParameterSource()
+						.addValue("from", scope.getFrom())
+						.addValue("to", scope.getTo());
+				violations = jdbcTemplate.queryForList(AS_OF_RANGE_SQL, params);
+			}
+			default -> throw new IllegalArgumentException("Unsupported scope type: " + scope.getType());
+		}
 
 		if (violations.isEmpty()) {
 			return CheckOutcome.pass();

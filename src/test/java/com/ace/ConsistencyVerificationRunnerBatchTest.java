@@ -1,0 +1,243 @@
+package com.ace;
+
+import com.ace.consistency.check.DuplicateConsistencyCheck;
+import com.ace.consistency.check.StockConsistencyCheck;
+import com.ace.consistency.common.ConsistencyCheck;
+import com.ace.consistency.common.ConsistencyVerificationRunner;
+import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.TriggerType;
+import com.ace.coupon.service.CouponIssueService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.StepExecution;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * ConsistencyVerificationRunner.runAsync()가 실제로 Spring Batch Job을 통해
+ * ALL 스코프 정합성 검증을 수행하는지 확인하는 통합 테스트.
+ *
+ * ConsistencyVerificationRunnerEventNotFoundTest와 마찬가지로 실제 로컬 MySQL(더미데이터 적재된 DB)에
+ * 대고 실행하며, 배치는 별도 스레드(TaskExecutorJobOperator)에서 비동기로 실행되므로
+ * verification_result 테이블에 결과가 쌓일 때까지 폴링(awaitCompletion)해서 기다린다.
+ *
+ * 각 테스트는 실제 DB에 verification_result 행을 커밋하므로(배치가 별도 스레드/트랜잭션에서
+ * 돌기 때문에 테스트 트랜잭션 롤백으로는 정리되지 않는다), afterEach에서 테스트가 만든 행만
+ * id 기준으로 직접 지운다.
+ */
+@SpringBootTest
+class ConsistencyVerificationRunnerBatchTest {
+
+	// Redis + Lua 기반 실제 구현체가 추가되기 전까지 전체 Context에서만 대체한다.
+	@MockitoBean
+	private CouponIssueService couponIssueService;
+
+	@Autowired
+	private ConsistencyVerificationRunner runner;
+
+	@Autowired
+	private StockConsistencyCheck stockConsistencyCheck;
+
+	@Autowired
+	private DuplicateConsistencyCheck duplicateConsistencyCheck;
+
+	@Autowired
+	private JobRepository jobRepository;
+
+	@Autowired
+	private NamedParameterJdbcTemplate jdbcTemplate;
+
+	private Long maxIdBefore;
+
+	// 저장 결과를 직접 확인하기 위해 임시로 정리(cleanup)를 꺼둔 상태입니다. 확인이 끝나면 주석을 해제해주세요.
+	// @AfterEach
+	// void cleanUp() {
+	// 	if (maxIdBefore != null) {
+	// 		jdbcTemplate.update("DELETE FROM verification_result WHERE id > :maxId", Map.of("maxId", maxIdBefore));
+	// 		maxIdBefore = null;
+	// 	}
+	// }
+
+	/**
+	 * [검증 목적] 실제 StockConsistencyCheck/DuplicateConsistencyCheck 두 개를 ALL 스코프로 넣고
+	 * runAsync()를 호출했을 때, Job이 정상적으로 두 Step을 모두 순차 실행하고
+	 * 각 Step 결과가 verification_result 테이블에 저장되는지 확인한다.
+	 * (현재 더미데이터는 두 Check 모두 위반이 없는 상태 — 사전에 직접 SQL로 확인함)
+	 */
+	@Test
+	void 두_Check_모두_정상적으로_실행되고_결과가_저장된다() {
+		maxIdBefore = maxVerificationResultId();
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+
+		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
+		JobExecution finished = awaitCompletion(execution);
+
+		assertEquals(BatchStatus.COMPLETED, finished.getStatus());
+		assertEquals(2, finished.getStepExecutions().size());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StockConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+
+		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
+		assertEquals(2, rows.size());
+		assertTrue(rows.stream().allMatch(r -> "PASS".equals(r.get("status"))),
+				"현재 더미데이터는 위반이 없어야 하는데 FAIL/ERROR 결과가 저장됐습니다: " + rows);
+	}
+
+	/**
+	 * [검증 목적] 앞 Step에서 예외가 발생하면(정합성 위반이 아니라 Check 실행 자체가 실패하면)
+	 * Job이 FAILED로 끝나고, 뒤에 연결된 Step은 아예 시작조차 되지 않는지 확인한다.
+	 */
+	@Test
+	void 앞_Step이_예외로_실패하면_뒤_Step은_실행되지_않는다() {
+		maxIdBefore = maxVerificationResultId();
+		ConsistencyCheck throwingCheck = new ThrowingConsistencyCheck("FakeThrowingCheck");
+		List<ConsistencyCheck> checks = List.of(throwingCheck, duplicateConsistencyCheck);
+
+		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
+		JobExecution finished = awaitCompletion(execution);
+
+		assertEquals(BatchStatus.FAILED, finished.getStatus());
+		assertEquals(1, finished.getStepExecutions().size(),
+				"뒤 Step(DuplicateConsistencyCheckStep)은 아예 시작되지 않아야 합니다.");
+		assertEquals(BatchStatus.FAILED, stepOf(finished, "FakeThrowingCheckStep").getStatus());
+
+		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
+		assertEquals(1, rows.size(), "실행되지 않은 뒤 Step의 결과가 저장되면 안 됩니다.");
+		assertEquals("ERROR", rows.get(0).get("status"));
+		assertEquals("FakeThrowingCheck", rows.get(0).get("check_name"));
+	}
+
+	/**
+	 * [검증 목적] 앞 Step에서 "정합성 위반"(FAIL, 예외 아님)이 나와도 Step 자체는 정상 종료되므로
+	 * Job은 계속 진행되어 뒤 Step도 정상적으로 실행/저장되는지 확인한다.
+	 */
+	@Test
+	void 앞_Step의_정합성_실패는_뒤_Step_실행을_막지_않는다() {
+		maxIdBefore = maxVerificationResultId();
+		ConsistencyCheck failingCheck = new FailingConsistencyCheck("FakeFailingCheck");
+		List<ConsistencyCheck> checks = List.of(failingCheck, duplicateConsistencyCheck);
+
+		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
+		JobExecution finished = awaitCompletion(execution);
+
+		assertEquals(BatchStatus.COMPLETED, finished.getStatus(),
+				"정합성 FAIL은 예외가 아니므로 Job 전체는 COMPLETED여야 합니다.");
+		assertEquals(2, finished.getStepExecutions().size());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "FakeFailingCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+
+		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
+		assertEquals(2, rows.size());
+		Map<String, Object> failingResult = rows.stream()
+				.filter(r -> "FakeFailingCheck".equals(r.get("check_name")))
+				.findFirst().orElseThrow();
+		Map<String, Object> duplicateResult = rows.stream()
+				.filter(r -> "DuplicateConsistencyCheck".equals(r.get("check_name")))
+				.findFirst().orElseThrow();
+
+		assertEquals("FAIL", failingResult.get("status"));
+		assertEquals("PASS", duplicateResult.get("status"));
+	}
+
+	// ----------------- 테스트 전용 가짜 Check -----------------
+
+	private static final class ThrowingConsistencyCheck implements ConsistencyCheck {
+		private final String name;
+
+		private ThrowingConsistencyCheck(String name) {
+			this.name = name;
+		}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public Set<Scope.ScopeType> supportedScopeTypes() {
+			return Set.of(Scope.ScopeType.ALL);
+		}
+
+		@Override
+		public CheckOutcome check(Scope scope) {
+			throw new RuntimeException("테스트용 강제 예외");
+		}
+	}
+
+	private static final class FailingConsistencyCheck implements ConsistencyCheck {
+		private final String name;
+
+		private FailingConsistencyCheck(String name) {
+			this.name = name;
+		}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public Set<Scope.ScopeType> supportedScopeTypes() {
+			return Set.of(Scope.ScopeType.ALL);
+		}
+
+		@Override
+		public CheckOutcome check(Scope scope) {
+			return CheckOutcome.fail(1, Map.of("sample", List.of(Map.of("reason", "테스트용 강제 실패"))));
+		}
+	}
+
+	// ----------------- 헬퍼 -----------------
+
+	/**
+	 * runAsync()는 Job을 별도 스레드에서 시작만 시키고 바로 반환하므로, JobRepository에서
+	 * 최신 상태를 다시 읽어와 더 이상 실행 중이 아닐 때까지(성공/실패 확정될 때까지) 기다린다.
+	 */
+	private JobExecution awaitCompletion(JobExecution execution) {
+		long deadline = System.currentTimeMillis() + 30_000;
+		JobExecution latest = execution;
+		while (latest.getStatus().isRunning()) {
+			if (System.currentTimeMillis() > deadline) {
+				fail("배치 Job이 제한 시간(30s) 내에 끝나지 않았습니다. status=" + latest.getStatus());
+			}
+			try {
+				Thread.sleep(200);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				fail("대기 중 인터럽트가 발생했습니다.");
+			}
+			latest = jobRepository.getJobExecution(execution.getId());
+		}
+		return latest;
+	}
+
+	private StepExecution stepOf(JobExecution execution, String stepName) {
+		return execution.getStepExecutions().stream()
+				.filter(step -> step.getStepName().equals(stepName))
+				.findFirst()
+				.orElseThrow(() -> new AssertionError(stepName + " Step이 실행되지 않았습니다."));
+	}
+
+	private Long maxVerificationResultId() {
+		Long max = jdbcTemplate.queryForObject(
+				"SELECT COALESCE(MAX(id), 0) FROM verification_result", Map.of(), Long.class);
+		return max == null ? 0L : max;
+	}
+
+	private List<Map<String, Object>> fetchResultsAfter(Long maxIdBefore) {
+		return jdbcTemplate.queryForList(
+				"SELECT * FROM verification_result WHERE id > :maxId ORDER BY id", Map.of("maxId", maxIdBefore));
+	}
+}
