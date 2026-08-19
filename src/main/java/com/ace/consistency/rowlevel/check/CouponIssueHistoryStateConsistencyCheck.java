@@ -20,23 +20,30 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
-	private static final String LATEST_HISTORY_JOIN = """
-			LEFT JOIN coupon_history latest
-			  ON latest.history_id = (
-				SELECT h.history_id
+	private static final String LATEST_HISTORY_CTE = """
+			WITH latest_history AS (
+				SELECT h.history_id, h.issue_id, h.from_status, h.to_status, h.occurred_at,
+				       ROW_NUMBER() OVER (
+				           PARTITION BY h.issue_id
+				           ORDER BY h.occurred_at DESC, h.history_id DESC
+				       ) AS rn
 				FROM coupon_history h
-				WHERE h.issue_id = ci.issue_id
-				ORDER BY h.occurred_at DESC, h.history_id DESC
-				LIMIT 1
-			  )
+				JOIN coupon_issue scoped_issue ON scoped_issue.issue_id = h.issue_id
+				WHERE (:eventId IS NULL OR scoped_issue.event_id = :eventId)
+			)
+			""";
+	private static final String LATEST_HISTORY_JOIN = """
+			LEFT JOIN latest_history latest
+			  ON latest.issue_id = ci.issue_id AND latest.rn = 1
 			""";
 	private static final String CONDITION = """
 			(:eventId IS NULL OR ci.event_id = :eventId)
-			AND (latest.history_id IS NULL OR latest.to_status <> ci.status)
+			AND (latest.history_id IS NULL OR NOT (latest.to_status <=> ci.status))
 			""";
-	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci "
+	private static final String COUNT_SQL = LATEST_HISTORY_CTE + "SELECT COUNT(*) FROM coupon_issue ci "
 			+ LATEST_HISTORY_JOIN + " WHERE " + CONDITION;
 	private static final String SAMPLE_SQL = """
+			%s
 			SELECT ci.issue_id, ci.event_id, ci.status AS current_status,
 			       latest.history_id, latest.from_status, latest.to_status, latest.occurred_at
 			FROM coupon_issue ci
@@ -44,7 +51,7 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 			WHERE %s
 			ORDER BY ci.issue_id
 			LIMIT %d
-			""".formatted(LATEST_HISTORY_JOIN, CONDITION, SAMPLE_LIMIT);
+			""".formatted(LATEST_HISTORY_CTE, LATEST_HISTORY_JOIN, CONDITION, SAMPLE_LIMIT);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

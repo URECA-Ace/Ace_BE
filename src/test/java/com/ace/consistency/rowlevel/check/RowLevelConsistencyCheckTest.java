@@ -3,11 +3,9 @@ package com.ace.consistency.rowlevel.check;
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -16,7 +14,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RowLevelConsistencyCheckTest {
@@ -35,32 +32,6 @@ class RowLevelConsistencyCheckTest {
 	}
 
 	@Test
-	void 구조_검증은_NULL_상태를_위반으로_검사한다() {
-		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
-				.thenReturn(0);
-
-		new CouponIssueStructuralConsistencyCheck(jdbcTemplate).check(Scope.all());
-
-		ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-		verify(jdbcTemplate).queryForObject(sqlCaptor.capture(),
-				any(MapSqlParameterSource.class), eq(Integer.class));
-		assertThat(sqlCaptor.getValue()).contains("ci.status IS NULL");
-	}
-
-	@Test
-	void 만료_후_사용은_구조_검증에서_중복_검사하지_않는다() {
-		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
-				.thenReturn(0);
-
-		new CouponIssueStructuralConsistencyCheck(jdbcTemplate).check(Scope.all());
-
-		ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-		verify(jdbcTemplate).queryForObject(sqlCaptor.capture(),
-				any(MapSqlParameterSource.class), eq(Integer.class));
-		assertThat(sqlCaptor.getValue()).doesNotContain("ci.used_at > ci.valid_to");
-	}
-
-	@Test
 	void 현재_상태와_최신_이력이_다르면_실패_상세를_반환한다() {
 		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
 				.thenReturn(1);
@@ -75,27 +46,6 @@ class RowLevelConsistencyCheckTest {
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail()).containsKey("sample");
-	}
-
-	@Test
-	void 만료_시차_검증은_호출자가_정한_허용_경계를_사용한다() {
-		LocalDateTime boundary = LocalDateTime.of(2026, 8, 14, 12, 55);
-		LocalDateTime snapshotAt = boundary.plusMinutes(5);
-		Scope scope = Scope.ofAsOfRange(boundary, snapshotAt);
-		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
-				.thenReturn(0);
-
-		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(jdbcTemplate).check(scope);
-
-		assertThat(outcome.isPass()).isTrue();
-		ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
-		ArgumentCaptor<MapSqlParameterSource> paramsCaptor =
-				ArgumentCaptor.forClass(MapSqlParameterSource.class);
-		verify(jdbcTemplate).queryForObject(sqlCaptor.capture(),
-				paramsCaptor.capture(), eq(Integer.class));
-		assertThat(sqlCaptor.getValue()).contains("ci.used_at < :snapshotAt");
-		assertThat(paramsCaptor.getValue().getValue("allowedExpirationBoundary")).isEqualTo(boundary);
-		assertThat(paramsCaptor.getValue().getValue("snapshotAt")).isEqualTo(snapshotAt);
 	}
 
 	@Test

@@ -23,7 +23,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	private static final String BASE_CONDITION = """
 			(:eventId IS NULL OR ci.event_id = :eventId)
 			AND (
-				h.issue_id IS NULL OR h.to_status IS NULL OR h.occurred_at IS NULL OR h.recorded_at IS NULL
+				h.issue_id IS NULL OR ci.issue_id IS NULL
+				OR h.to_status IS NULL OR h.occurred_at IS NULL OR h.recorded_at IS NULL
 				OR h.recorded_at < h.occurred_at
 				OR h.to_status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
 				OR (h.from_status IS NULL AND h.to_status <> 'ISSUED')
@@ -33,7 +34,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 			)
 			""";
 
-	private static final String FROM_SQL = " FROM coupon_history h JOIN coupon_issue ci ON ci.issue_id = h.issue_id WHERE ";
+	private static final String FROM_SQL =
+			" FROM coupon_history h LEFT JOIN coupon_issue ci ON ci.issue_id = h.issue_id WHERE ";
 	private static final String COUNT_SQL = "SELECT COUNT(*)" + FROM_SQL + BASE_CONDITION;
 	private static final String SAMPLE_SQL = ("""
 			SELECT h.history_id, h.issue_id, h.from_status, h.to_status, h.occurred_at, h.recorded_at
