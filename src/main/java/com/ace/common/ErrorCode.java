@@ -18,8 +18,10 @@ public enum ErrorCode {
 	IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "동일한 Idempotency-Key가 다른 요청에 사용되었습니다."),
 	EVENT_NOT_OPEN(HttpStatus.BAD_REQUEST, "아직 발급 시작 전입니다."),
 	EVENT_CLOSED(HttpStatus.BAD_REQUEST, "종료된 캠페인입니다."),
+	EVENT_CONFIGURATION_CONFLICT(HttpStatus.CONFLICT, "동일 회차의 캠페인이 다른 설정으로 이미 존재합니다."),
 
 	// 조회
+	COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "쿠폰을 찾을 수 없습니다."),
 	EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "캠페인을 찾을 수 없습니다."),
 	ISSUE_NOT_FOUND(HttpStatus.NOT_FOUND, "발급 내역을 찾을 수 없습니다."),
 	RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
@@ -35,6 +37,9 @@ public enum ErrorCode {
 	UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 요청 형식입니다."),
 
 	// 시스템
+	CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE(
+			HttpStatus.SERVICE_UNAVAILABLE,
+			"쿠폰 캠페인 발급 상태를 초기화할 수 없습니다."),
 	ISSUE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 요청을 일시적으로 처리할 수 없습니다."),
 	EVENT_STATS_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 현황을 일시적으로 조회할 수 없습니다."),
 	ISSUE_PERSIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 처리 중 오류가 발생했습니다."),
