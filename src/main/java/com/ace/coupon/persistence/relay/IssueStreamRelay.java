@@ -24,6 +24,7 @@ import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponRedisKeys;
 
 import lombok.extern.slf4j.Slf4j;
@@ -202,7 +203,9 @@ public class IssueStreamRelay implements SmartLifecycle {
 					XClaimOptions.minIdle(properties.claimMinIdle()).ids(message.getId()));
 
 			for (MapRecord<String, String, String> record : claimed) {
-				process(key, record, message.getTotalDeliveryCount());
+				// XCLAIM 이 전달 횟수 + 1
+				// 조회값은 증가 전이라 +1 해야 이번이 몇 번째 전달인지 맞는다
+				process(key, record, message.getTotalDeliveryCount() + 1);
 			}
 		}
 	}
@@ -251,7 +254,17 @@ public class IssueStreamRelay implements SmartLifecycle {
 		String incidentId = UUID.randomUUID().toString();
 		log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
 				issueRecord.requestId(), incidentId, exception);
-		coordinator.abandon(issueRecord, IssueFailureStage.RELAY, incidentId, exception);
+
+		CouponIssueCompensationResult compensation =
+				coordinator.abandon(issueRecord, IssueFailureStage.RELAY, incidentId, exception);
+
+		// 원복 결과가 불확실하면 XACK 하지 않는다
+		// 여기서 지우면 저장도 원복도 안 된 채 재처리 수단만 사라진다
+		if (compensation == null) {
+			log.error("원복 결과가 불확실해 pending 을 유지합니다: requestId={}, incidentId={}",
+					issueRecord.requestId(), incidentId);
+			return;
+		}
 		acknowledge(key, recordId);
 	}
 

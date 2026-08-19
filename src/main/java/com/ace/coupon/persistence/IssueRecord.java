@@ -87,6 +87,7 @@ public record IssueRecord(
 	}
 
 	// RELAY 경로(Stream 엔트리를 저장 입력으로)
+	// Stream 엔트리 ID 는 그 Stream 안에서만 유일한데 message_id 는 전역 UNIQUE  = 캠페인 식별자를 붙여야 다른 캠페인과 충돌하지 않는다
 	public static Optional<IssueRecord> fromStreamEntry(Map<String, String> fields, String entryId) {
 		if (fields == null) {
 			throw new IllegalArgumentException("Stream 엔트리 필드가 필요합니다.");
@@ -103,7 +104,16 @@ public record IssueRecord(
 				number(fields, FIELD_BIT_OFFSET),
 				number(fields, FIELD_ISSUE_SEQUENCE),
 				Instant.ofEpochMilli(number(fields, FIELD_DECIDED_AT)),
-				entryId));
+				messageId(number(fields, FIELD_CAMPAIGN_ID), entryId)));
+	}
+
+	// campaignId-entryId
+	// 전역 UNIQUE 인 message_id 컬럼에 그대로 들어간다
+	public static String messageId(long campaignId, String entryId) {
+		if (entryId == null || entryId.isBlank()) {
+			throw new IllegalArgumentException("Stream 엔트리 식별자가 필요합니다.");
+		}
+		return campaignId + "-" + entryId;
 	}
 
 	private static String required(Map<String, String> fields, String name) {

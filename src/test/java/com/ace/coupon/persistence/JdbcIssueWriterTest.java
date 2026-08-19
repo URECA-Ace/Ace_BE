@@ -210,4 +210,35 @@ class JdbcIssueWriterTest {
 				.isInstanceOf(IllegalArgumentException.class)
 				.hasMessageContaining("일치하지 않습니다");
 	}
+
+	@Test
+	@DisplayName("같은 requestId 라도 사용자가 다르면 드러낸다 - 남의 발급에 이력이 붙으면 안 된다")
+	void rejectsSameRequestIdWithDifferentUser() {
+		UUID requestId = UUID.randomUUID();
+		long first = writer.write(record(requestId, 1L, null), metadata);
+
+		long otherUserId = jdbcTemplate.queryForObject(
+				"SELECT MIN(user_id) FROM user WHERE user_id > ?", Long.class, userId);
+		IssueRecord sameKeyOtherUser = new IssueRecord(
+				requestId, metadata.eventId(), otherUserId, 0L, otherUserId - 1,
+				2L, DECIDED_AT, null);
+
+		assertThatThrownBy(() -> writer.write(sameKeyOtherUser, metadata))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("다른 발급");
+
+		assertThat(issueCount()).isEqualTo(1);
+		assertThat(historyCount(first)).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("같은 requestId 라도 순번이 다르면 드러낸다")
+	void rejectsSameRequestIdWithDifferentSequence() {
+		UUID requestId = UUID.randomUUID();
+		writer.write(record(requestId, 1L, null), metadata);
+
+		assertThatThrownBy(() -> writer.write(record(requestId, 2L, null), metadata))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("다른 발급");
+	}
 }

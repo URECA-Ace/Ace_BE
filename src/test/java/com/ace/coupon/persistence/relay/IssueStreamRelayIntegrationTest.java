@@ -37,6 +37,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
 import com.ace.coupon.redis.CampaignRedisInitializer;
+import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponRedisKeys;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
@@ -243,6 +244,8 @@ class IssueStreamRelayIntegrationTest {
 	void abandonsAfterMaxAttempts() {
 		issue(1L);
 		given(persistenceService.persist(any())).willThrow(new IllegalStateException("저장 실패"));
+		given(coordinator.abandon(any(), any(), any(), any()))
+				.willReturn(CouponIssueCompensationResult.COMPENSATED);
 		IssueStreamRelay relay = relay(1, Duration.ofMillis(1));
 
 		relay.runOnce();
@@ -291,5 +294,39 @@ class IssueStreamRelayIntegrationTest {
 				IssueRecord.FIELD_BIT_OFFSET,
 				IssueRecord.FIELD_ISSUE_SEQUENCE,
 				IssueRecord.FIELD_DECIDED_AT);
+	}
+
+	@Test
+	@DisplayName("원복 결과가 불확실하면 XACK 하지 않는다 - 저장도 원복도 안 된 채 메시지만 사라지면 안 된다")
+	void keepsPendingWhenCompensationOutcomeUnknown() {
+		issue(1L);
+		given(persistenceService.persist(any())).willThrow(new IllegalStateException("저장 실패"));
+		// null = 원복 여부를 알 수 없음
+		given(coordinator.abandon(any(), any(), any(), any())).willReturn(null);
+
+		relay(1, Duration.ofMillis(1)).runOnce();
+
+		verify(coordinator).abandon(any(), eq(IssueFailureStage.RELAY), any(), any());
+		assertThat(pendingCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("설정한 횟수만큼만 저장을 시도하고 포기한다 - XCLAIM 이 전달 횟수를 올린다")
+	void stopsExactlyAtMaxDeliveryAttempts() {
+		issue(1L);
+		given(persistenceService.persist(any())).willThrow(new IllegalStateException("저장 실패"));
+		given(coordinator.abandon(any(), any(), any(), any()))
+				.willReturn(CouponIssueCompensationResult.COMPENSATED);
+		IssueStreamRelay relay = relay(2, Duration.ofMillis(1));
+
+		// 신규 소비 1회 + 회수 재시도. 한도(2)에 닿으면 더 시도하지 않는다
+		for (int i = 0; i < 5; i++) {
+			relay.runOnce();
+			sleepMillis(5);
+		}
+
+		verify(persistenceService, times(2)).persist(any());
+		verify(coordinator, times(1)).abandon(any(), any(), any(), any());
+		assertThat(pendingCount()).isZero();
 	}
 }

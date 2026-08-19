@@ -130,7 +130,8 @@ class IssueRecordTest {
 			assertThat(record.get().userId()).isEqualTo(7L);
 			assertThat(record.get().issueSequence()).isEqualTo(3L);
 			assertThat(record.get().decidedAt()).isEqualTo(DECIDED_AT);
-			assertThat(record.get().messageId()).isEqualTo("1755-0");
+			// Stream 엔트리 ID 는 Stream 안에서만 유일하므로 캠페인 식별자를 붙인다
+			assertThat(record.get().messageId()).isEqualTo("1-1755-0");
 		}
 
 		@Test
@@ -183,5 +184,21 @@ class IssueRecordTest {
 					.isInstanceOf(IllegalArgumentException.class)
 					.hasMessageContaining(IssueRecord.FIELD_REQUEST_ID);
 		}
+	}
+
+	@Test
+	@DisplayName("캠페인이 다르면 같은 엔트리 ID 라도 messageId 가 달라진다")
+	void messageIdIncludesCampaign() {
+		Map<String, String> first = streamFields();
+		Map<String, String> second = streamFields();
+		second.put(IssueRecord.FIELD_CAMPAIGN_ID, "2");
+		second.put(IssueRecord.FIELD_REQUEST_ID, UUID.randomUUID().toString());
+
+		String firstId = IssueRecord.fromStreamEntry(first, "1755-0").orElseThrow().messageId();
+		String secondId = IssueRecord.fromStreamEntry(second, "1755-0").orElseThrow().messageId();
+
+		assertThat(firstId).isEqualTo("1-1755-0");
+		assertThat(secondId).isEqualTo("2-1755-0");
+		assertThat(firstId).isNotEqualTo(secondId);
 	}
 }

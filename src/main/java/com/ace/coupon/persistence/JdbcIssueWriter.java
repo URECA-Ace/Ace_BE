@@ -29,8 +29,10 @@ public class JdbcIssueWriter implements IssueWriter {
 			""";
 
 	// FOR SHARE 필수: 일반 SELECT 는 트랜잭션 스냅샷을 읽어 방금 커밋한 승자 행이 안 보인다(REPEATABLE READ)
+	// request_id 는 전역 UNIQUE 인데 Redis 멱등은 캠페인별이라, 신원까지 확인해야 남의 발급을 내 것으로 오인하지 않는다
 	private static final String SELECT_BY_REQUEST_ID = """
-			SELECT issue_id FROM coupon_issue WHERE request_id = ? FOR SHARE
+			SELECT issue_id, event_id, user_id, issue_sequence
+			FROM coupon_issue WHERE request_id = ? FOR SHARE
 			""";
 
 	// event_uid = requestId, uk_coupon_history_event_uid 가 이력 중복을 막는다
@@ -114,12 +116,30 @@ public class JdbcIssueWriter implements IssueWriter {
 
 	// 같은 requestId 의 재처리만 흡수, 나머지 UNIQUE 충돌은 표시
 	private long resolveExisting(IssueRecord record, DuplicateKeyException cause) {
-		Long issueId = jdbcTemplate.query(
+		StoredIssue stored = jdbcTemplate.query(
 				SELECT_BY_REQUEST_ID,
-				resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
+				resultSet -> resultSet.next()
+						? new StoredIssue(
+								resultSet.getLong(1),
+								resultSet.getLong(2),
+								resultSet.getLong(3),
+								resultSet.getLong(4))
+						: null,
 				record.requestId().toString());
 
-		if (issueId == null) {
+		if (stored != null && !stored.matches(record)) {
+			throw new IllegalStateException(
+					("같은 requestId 의 다른 발급입니다 - 요청 %s (event_id=%d, user_id=%d, sequence=%d) / "
+							+ "기존 (issue_id=%d, event_id=%d, user_id=%d, sequence=%d)")
+							.formatted(
+									record.requestId(),
+									record.campaignId(), record.userId(), record.issueSequence(),
+									stored.issueId(), stored.eventId(),
+									stored.userId(), stored.issueSequence()),
+					cause);
+		}
+
+		if (stored == null) {
 			throw new IllegalStateException(
 					"발급 UNIQUE 충돌 - 요청 %s (event_id=%d, user_id=%d, sequence=%d) 이(가) 기존 행과 충돌했습니다."
 							.formatted(
@@ -129,7 +149,17 @@ public class JdbcIssueWriter implements IssueWriter {
 									record.issueSequence()),
 					cause);
 		}
-		return issueId;
+		return stored.issueId();
+	}
+
+	// 신원 확인용 조회 결과
+	private record StoredIssue(long issueId, long eventId, long userId, long issueSequence) {
+
+		boolean matches(IssueRecord record) {
+			return eventId == record.campaignId()
+					&& userId == record.userId()
+					&& issueSequence == record.issueSequence();
+		}
 	}
 
 	// 발생 시각(판정)과 기록 시각(저장)을 나눠 담기(둘의 차이가 저장 지연)
