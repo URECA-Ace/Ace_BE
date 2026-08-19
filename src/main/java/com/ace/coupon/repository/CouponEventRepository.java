@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,10 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	Optional<CouponEvent> findByCoupon_IdAndRound(Long couponId, Integer round);
 
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
+
+	List<CouponEvent> findAllByStatusInAndCloseAtAfter(
+			List<CouponEventStatus> statuses,
+			LocalDateTime closeAt);
 
 	/**
 	 * 오픈 시각에 도달했고 아직 마감되지 않은 캠페인을 한 번의 조건부 UPDATE로 전환한다.
