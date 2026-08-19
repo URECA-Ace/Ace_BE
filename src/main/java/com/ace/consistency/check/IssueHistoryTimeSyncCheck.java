@@ -24,15 +24,20 @@ import java.util.Set;
 public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
 
 	private static final int SAMPLE_LIMIT = 20;
+	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간
+	private static final int MAX_BATCH_LAG_SECONDS = 86400; 
+
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	// 상태는 일치하지만, 시간이 1초 이상 차이나는 경우를 검출
+	// 상태는 일치하지만, 시간이 누락되었거나 1초 이상 차이나는 경우를 검출
 	private static final String SQL = """
             SELECT ci.issue_id, ci.status, 
                    CASE ci.status 
                        WHEN 'USED' THEN ci.used_at 
                        WHEN 'CANCELED' THEN ci.canceled_at 
                        WHEN 'ISSUED' THEN ci.issued_at 
+                       WHEN 'EXPIRED' THEN ci.valid_to
                    END as issue_time,
                    latest_history.occurred_at as history_time,
                    ABS(TIMESTAMPDIFF(MICROSECOND, 
@@ -40,6 +45,7 @@ public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
                            WHEN 'USED' THEN ci.used_at 
                            WHEN 'CANCELED' THEN ci.canceled_at 
                            WHEN 'ISSUED' THEN ci.issued_at 
+                           WHEN 'EXPIRED' THEN ci.valid_to
                        END, 
                        latest_history.occurred_at
                    )) / 1000000.0 as time_diff_seconds
@@ -51,14 +57,43 @@ public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
             WHERE (:eventId IS NULL OR ci.event_id = :eventId)
               AND ci.status = latest_history.to_status
-              AND ci.status IN ('ISSUED', 'USED', 'CANCELED')
-              AND ABS(TIMESTAMPDIFF(MICROSECOND, 
-                       CASE ci.status 
-                           WHEN 'USED' THEN ci.used_at 
-                           WHEN 'CANCELED' THEN ci.canceled_at 
-                           WHEN 'ISSUED' THEN ci.issued_at 
-                       END, 
-                       latest_history.occurred_at)) > 1000000 -- 1초 오차 허용
+              AND ci.status IN ('ISSUED', 'USED', 'CANCELED', 'EXPIRED')
+              AND (
+                  -- 1) 리뷰 반영: 기준 시간이 누락된 경우 즉시 위반 처리
+                  CASE ci.status 
+                       WHEN 'USED' THEN ci.used_at 
+                       WHEN 'CANCELED' THEN ci.canceled_at 
+                       WHEN 'ISSUED' THEN ci.issued_at 
+                       WHEN 'EXPIRED' THEN ci.valid_to
+                  END IS NULL
+                  
+                  OR 
+                  
+                  -- 2) 시간 차이 검증 (상태별 특성 반영)
+                  (
+                      -- [실시간 처리] ISSUED, USED, CANCELED는 1초 오차만 허용
+                      ci.status IN ('ISSUED', 'USED', 'CANCELED') AND
+                      ABS(TIMESTAMPDIFF(MICROSECOND, 
+                           CASE ci.status 
+                               WHEN 'USED' THEN ci.used_at 
+                               WHEN 'CANCELED' THEN ci.canceled_at 
+                               WHEN 'ISSUED' THEN ci.issued_at 
+                           END, 
+                           latest_history.occurred_at)) > 1000000
+                  )
+                  OR
+                  (
+                      -- [배치 처리] EXPIRED는 스케줄러 지연(Lag)을 고려하여 별도 검증
+                      ci.status = 'EXPIRED' AND
+                      (
+                          -- 유효기간 전에 미리 만료시킨 경우 (치명적 버그)
+                          latest_history.occurred_at < ci.valid_to
+                          OR
+                          -- 배치가 유효기간 만료 후 너무 늦게 도는 경우 (스케줄러 장애 의심)
+                          TIMESTAMPDIFF(SECOND, ci.valid_to, latest_history.occurred_at) > :maxBatchLagSeconds
+                      )
+                  )
+              )
             """;
 
 	@Override
@@ -69,7 +104,9 @@ public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		Long eventIdFilter = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventIdFilter);
+		MapSqlParameterSource params = new MapSqlParameterSource()
+				.addValue("eventId", eventIdFilter)
+				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS);
 
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(SQL, params);
 
@@ -78,7 +115,6 @@ public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("violationCount", violations.size());
 		diff.put("sample", violations.stream()
 				.limit(SAMPLE_LIMIT)
 				.map(row -> Map.of(

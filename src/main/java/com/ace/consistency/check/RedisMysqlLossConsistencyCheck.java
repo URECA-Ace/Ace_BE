@@ -43,20 +43,33 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		if (scope.getType() != Scope.ScopeType.EVENT || scope.getEventId() == null) {
-			throw new IllegalArgumentException("RedisMysqlLossConsistencyCheck는 EVENT 스코프(eventId 필수)만 지원합니다.");
-		}
-
 		Long eventId = scope.getEventId();
 		
-		// 1. Redis에서 기대 발급 건수(Sequence MAX) 조회
+		// 1. 비동기 파이프라인(Stream)에 아직 처리 중인 메시지(Pending)가 있는지 확인
+		// 질문자님의 완벽한 직관대로, eventId에 종속된 독립적인 스트림 키를 가져옵니다!
+		String streamKey = CouponRedisKeys.campaign(eventId).issueStream();
+		try {
+			long pendingCount = redisTemplate.opsForStream().groups(streamKey).stream()
+					.mapToLong(org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroup::pendingCount)
+					.sum();
+			
+			// 아직 작업자(Consumer)가 DB에 밀어넣고 있는 중이라면, 오탐지를 막기 위해 이번 검사는 조용히 스킵합니다.
+			if (pendingCount > 0) {
+				return CheckOutcome.pass();
+			}
+		} catch (Exception e) {
+			// 스트림 키나 컨슈머 그룹이 아직 생성되지 않은 경우 (발급 내역이 아예 없는 초기 상태 등)
+			// PENDING이 없는 것과 동일하므로 무시하고 아래 검증 로직으로 넘어갑니다.
+		}
+
+		// 2. Redis에서 기대 발급 건수(Sequence MAX) 조회
 		String sequenceKey = CouponRedisKeys.campaign(eventId).sequence();
 		String redisValue = redisTemplate.opsForValue().get(sequenceKey);
 		
 		// Redis에 값이 없다면 쿠폰이 한 건도 발급 승인되지 않은 상태
 		long expectedCount = (redisValue == null) ? 0L : Long.parseLong(redisValue);
 
-		// 2. MySQL에서 실제 저장 건수 조회
+		// 3. MySQL에서 실제 저장 건수 조회
 		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventId);
 		Integer mysqlCount = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
 		long actualCount = (mysqlCount == null) ? 0L : mysqlCount;

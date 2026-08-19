@@ -5,10 +5,14 @@ import com.ace.consistency.common.Scope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.stream.StreamInfo;
+import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -22,12 +26,15 @@ class RedisMysqlLossConsistencyCheckTest extends CheckIntegrationTestBase {
 
 	private RedisMysqlLossConsistencyCheck check;
 	private ValueOperations<String, String> valueOperations;
+	private StreamOperations<String, Object, Object> streamOperations;
 
 	@BeforeEach
 	void setUp() {
 		check = new RedisMysqlLossConsistencyCheck(jdbcTemplate, redisTemplate);
 		valueOperations = mock(ValueOperations.class);
+		streamOperations = mock(StreamOperations.class);
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(redisTemplate.opsForStream()).thenReturn(streamOperations);
 	}
 
 	@Test
@@ -76,6 +83,49 @@ class RedisMysqlLossConsistencyCheckTest extends CheckIntegrationTestBase {
 		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
 
 		assertThat(outcome.isPass()).isFalse();
+	}
+
+	@Test
+	@DisplayName("작업 중(Pending > 0)일 때는 유실로 보지 않고 검사를 스킵(PASS)한다")
+	void passWhenPendingIsGreaterThanZero() {
+		long eventId = generateUniqueId();
+		
+		// Mock Pending = 5
+		StreamInfo.XInfoGroup groupInfo = mock(StreamInfo.XInfoGroup.class);
+		when(groupInfo.pendingCount()).thenReturn(5L);
+		StreamInfo.XInfoGroups groups = mock(StreamInfo.XInfoGroups.class);
+		when(groups.stream()).thenReturn(List.of(groupInfo).stream());
+		when(streamOperations.groups(anyString())).thenReturn(groups);
+
+		// Mock Redis Count = 10 (But it shouldn't matter since it skips)
+		when(valueOperations.get(anyString())).thenReturn("10");
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	@DisplayName("Pending이 0이거나 스트림이 삭제된 상태에서 데이터가 유실되었다면 확실하게 FAIL 반환 (트럭 폭파 시나리오)")
+	void failWhenPendingIsZeroAndDataIsLost() {
+		long eventId = generateUniqueId();
+		
+		// Mock Pending = 0 (트럭 비워짐 또는 폭파됨)
+		StreamInfo.XInfoGroup groupInfo = mock(StreamInfo.XInfoGroup.class);
+		when(groupInfo.pendingCount()).thenReturn(0L);
+		StreamInfo.XInfoGroups groups = mock(StreamInfo.XInfoGroups.class);
+		when(groups.stream()).thenReturn(List.of(groupInfo).stream());
+		when(streamOperations.groups(anyString())).thenReturn(groups);
+
+		// Mock Redis Count = 100 (영수증)
+		when(valueOperations.get(anyString())).thenReturn("100");
+
+		// MySQL에는 0개 저장됨 (창고 비어있음) - insertDummyIssue 호출 안 함
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
 	}
 
 	private void insertDummyIssue(long eventId, Long issueSequence) {

@@ -11,21 +11,23 @@ import org.springframework.jdbc.support.KeyHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ConcurrentStatusRaceCheckTest extends CheckIntegrationTestBase {
+class StateMachineConsistencyCheckTest extends CheckIntegrationTestBase {
 
-	private ConcurrentStatusRaceCheck check;
+	private StateMachineConsistencyCheck check;
 
 	@BeforeEach
 	void setUp() {
-		check = new ConcurrentStatusRaceCheck(jdbcTemplate);
+		check = new StateMachineConsistencyCheck(jdbcTemplate);
 	}
 
 	@Test
-	@DisplayName("동일 상태(예: USED) 변경 이력이 1회뿐이면 PASS 반환")
-	void passWhenStatusIsUpdatedOnce() {
+	@DisplayName("정상적인 이력 체인이면 PASS 반환")
+	void passWhenStatusChainIsValid() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED");
+		insertDummyHistory(issueId, "USED", "CANCELED");
+		insertDummyHistory(issueId, "CANCELED", "USED"); // 취소 후 재사용 정상 케이스
 
 		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
 
@@ -33,12 +35,55 @@ class ConcurrentStatusRaceCheckTest extends CheckIntegrationTestBase {
 	}
 
 	@Test
-	@DisplayName("동일 상태(예: USED) 변경 이력이 중복되면 FAIL 반환 (Lost Update)")
-	void failWhenStatusUpdateIsDuplicated() {
+	@DisplayName("따닥 클릭 - 잃어버린 업데이트 발생 시 FAIL 반환")
+	void failWhenLostUpdateHappens() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "ISSUED", "USED"); // Concurrent race condition happened!
+		insertDummyHistory(issueId, "ISSUED", "USED"); // 락 뚫림
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("이기종 상태 동시성 충돌 발생 시 FAIL 반환")
+	void failWhenHeterogeneousRaceConditionHappens() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, "ISSUED", "USED");
+		insertDummyHistory(issueId, "ISSUED", "CANCELED"); // 락 뚫림 (이기종 충돌)
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("멱등성 처리 실패 (네트워크 타임아웃 재시도) 발생 시 FAIL 반환")
+	void failWhenIdempotencyFails() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, "ISSUED", "USED");
+		insertDummyHistory(issueId, "USED", "CANCELED");
+		insertDummyHistory(issueId, "USED", "CANCELED"); // 멱등성 방어 뚫림
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("낡은 데이터를 읽은 배치 로직의 덮어쓰기 발생 시 FAIL 반환")
+	void failWhenStaleDataOverwrittenByBatch() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, "ISSUED", "USED"); // 낮 12시 유저 사용
+		insertDummyHistory(issueId, "ISSUED", "EXPIRED"); // 자정 배치 잘못된 덮어쓰기
 
 		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
 

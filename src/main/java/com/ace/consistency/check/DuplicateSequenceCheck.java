@@ -51,7 +51,6 @@ public class DuplicateSequenceCheck implements ConsistencyCheck {
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("violationCount", violations.size());
 		diff.put("sample", violations.stream()
 				.limit(SAMPLE_LIMIT)
 				.map(row -> Map.of(
