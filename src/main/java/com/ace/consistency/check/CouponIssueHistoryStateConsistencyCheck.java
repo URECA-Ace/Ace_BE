@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel.check;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
@@ -12,7 +12,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** coupon_issue의 현재 상태와 가장 최근 coupon_history의 도착 상태가 같은지 검사한다. */
+/**
+ * coupon_issue의 현재 상태와 가장 최근 coupon_history의 도착 상태가 같은지 검사한다.
+ * 발급 건에는 최초 ISSUED 이력부터 상태 변경 이력이 항상 남는다는 현재 MVP 정책을 전제로 하므로,
+ * 이력이 전혀 없는 발급 건도 상태 감사 기록이 유실된 위반으로 처리한다.
+ */
 @Component
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck {
@@ -45,7 +49,11 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 	private static final String SAMPLE_SQL = """
 			%s
 			SELECT ci.issue_id, ci.event_id, ci.status AS current_status,
-			       latest.history_id, latest.from_status, latest.to_status, latest.occurred_at
+			       latest.history_id, latest.from_status, latest.to_status, latest.occurred_at,
+			       CASE
+			         WHEN latest.history_id IS NULL THEN 'NO_HISTORY'
+			         ELSE 'LATEST_STATUS_MISMATCH'
+			       END AS violation_type
 			FROM coupon_issue ci
 			%s
 			WHERE %s

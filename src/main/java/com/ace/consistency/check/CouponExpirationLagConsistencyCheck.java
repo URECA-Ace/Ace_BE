@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel.check;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
@@ -20,22 +20,43 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
-	private static final String CONDITION = """
-			(ci.status = 'ISSUED' AND ci.valid_to <= :allowedExpirationBoundary)
-			OR (ci.status = 'USED' AND ci.used_at > ci.valid_to AND ci.used_at < :snapshotAt)
+	private static final String COUNT_SQL = """
+			SELECT COUNT(*)
+			FROM (
+			    SELECT ci.issue_id
+			    FROM coupon_issue ci
+			    WHERE ci.status = 'ISSUED'
+			      AND ci.valid_to <= :allowedExpirationBoundary
+			      AND ci.created_at < :snapshotAt
+			    UNION ALL
+			    SELECT ci.issue_id
+			    FROM coupon_issue ci
+			    WHERE ci.status = 'USED'
+			      AND ci.used_at > ci.valid_to
+			      AND ci.used_at < :snapshotAt
+			) violation
 			""";
-	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE " + CONDITION;
 	private static final String SAMPLE_SQL = """
-			SELECT ci.issue_id, ci.event_id, ci.status, ci.valid_to, ci.used_at,
-			       CASE
-			         WHEN ci.status = 'ISSUED' THEN 'EXPIRATION_BATCH_DELAY'
-			         ELSE 'USED_AFTER_EXPIRATION'
-			       END AS violation_type
-			FROM coupon_issue ci
-			WHERE %s
-			ORDER BY ci.issue_id
+			SELECT violation.issue_id, violation.event_id, violation.status,
+			       violation.valid_to, violation.used_at, violation.violation_type
+			FROM (
+			    SELECT ci.issue_id, ci.event_id, ci.status, ci.valid_to, ci.used_at,
+			           'EXPIRATION_BATCH_DELAY' AS violation_type
+			    FROM coupon_issue ci
+			    WHERE ci.status = 'ISSUED'
+			      AND ci.valid_to <= :allowedExpirationBoundary
+			      AND ci.created_at < :snapshotAt
+			    UNION ALL
+			    SELECT ci.issue_id, ci.event_id, ci.status, ci.valid_to, ci.used_at,
+			           'USED_AFTER_EXPIRATION' AS violation_type
+			    FROM coupon_issue ci
+			    WHERE ci.status = 'USED'
+			      AND ci.used_at > ci.valid_to
+			      AND ci.used_at < :snapshotAt
+			) violation
+			ORDER BY violation.issue_id
 			LIMIT %d
-			""".formatted(CONDITION, SAMPLE_LIMIT);
+			""".formatted(SAMPLE_LIMIT);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

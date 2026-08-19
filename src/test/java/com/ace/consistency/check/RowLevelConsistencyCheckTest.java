@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel.check;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;

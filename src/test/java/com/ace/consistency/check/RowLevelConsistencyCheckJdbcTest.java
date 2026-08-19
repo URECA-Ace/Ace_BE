@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel.check;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
@@ -79,6 +79,44 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
+	void UUID_형식의_message_id는_구조_검증을_통과한다() {
+		insertIssue("ISSUED", null, 1L, "10000000-0000-0000-0000-000000000001");
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all());
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void Redis_Stream_ID_형식의_message_id는_공통_UUID_계약_위반으로_검출한다() {
+		insertIssue("ISSUED", null, 1L, "1723982400000-0");
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all());
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("INVALID_MESSAGE_ID_FORMAT");
+	}
+
+	@Test
+	void 길이만_36자인_비_UUID_request_id는_구조_위반으로_검출한다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		jdbcTemplate.update("UPDATE coupon_issue SET request_id = ? WHERE issue_id = ?",
+				"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", issueId);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all());
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("INVALID_REQUEST_ID");
+	}
+
+	@Test
 	void 현재_상태와_최신_이력_상태가_일치하면_통과한다() {
 		long issueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
 		insertHistory(issueId, null, "ISSUED", LocalDateTime.of(2026, 8, 18, 10, 0));
@@ -100,6 +138,21 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("LATEST_STATUS_MISMATCH");
+	}
+
+	@Test
+	void 상태_이력이_없는_발급_건은_감사_이력_누락으로_검출한다() {
+		insertIssue("ISSUED", null, 1L);
+
+		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all());
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("NO_HISTORY");
 	}
 
 	@Test
@@ -149,6 +202,20 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("INVALID_STATUS_TRANSITION");
+	}
+
+	@Test
+	void 현재_MVP에서_USED에서_ISSUED로의_복원은_허용하지_않는다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		insertHistory(issueId, "USED", "ISSUED", LocalDateTime.of(2026, 8, 18, 11, 0));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all());
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
 	}
 
 	@Test
@@ -160,6 +227,8 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("ORPHAN_HISTORY");
 	}
 
 	@Test
@@ -173,11 +242,27 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("USED_AFTER_EXPIRATION");
 	}
 
 	@Test
 	void 검증_기준_시각_이후의_사용은_현재_스냅샷에서_제외한다() {
 		insertIssue("USED", LocalDateTime.of(2026, 8, 18, 12, 30), 1L);
+		Scope scope = Scope.ofAsOfRange(
+				LocalDateTime.of(2026, 8, 18, 10, 30),
+				LocalDateTime.of(2026, 8, 18, 12, 0));
+
+		CheckOutcome outcome = new CouponExpirationLagConsistencyCheck(namedJdbcTemplate).check(scope);
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 검증_기준_시각_이후에_생성된_발급_건은_과거_만료_스냅샷에서_제외한다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		jdbcTemplate.update("UPDATE coupon_issue SET created_at = ? WHERE issue_id = ?",
+				Timestamp.valueOf(LocalDateTime.of(2026, 8, 18, 12, 30)), issueId);
 		Scope scope = Scope.ofAsOfRange(
 				LocalDateTime.of(2026, 8, 18, 10, 30),
 				LocalDateTime.of(2026, 8, 18, 12, 0));
@@ -198,9 +283,16 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("EXPIRATION_BATCH_DELAY");
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {
+		return insertIssue(status, usedAt, eventId,
+				"10000000-0000-0000-0000-%012d".formatted(eventId));
+	}
+
+	private long insertIssue(String status, LocalDateTime usedAt, long eventId, String messageId) {
 		LocalDateTime issuedAt = LocalDateTime.of(2026, 8, 18, 9, 0);
 		LocalDateTime validTo = LocalDateTime.of(2026, 8, 18, 10, 30);
 		jdbcTemplate.update("""
@@ -215,7 +307,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				Timestamp.valueOf(issuedAt), Timestamp.valueOf(issuedAt), Timestamp.valueOf(validTo),
 				usedAt == null ? null : Timestamp.valueOf(usedAt),
 				Timestamp.valueOf(issuedAt),
-				"10000000-0000-0000-0000-00000000000" + eventId);
+				messageId);
 		return jdbcTemplate.queryForObject("SELECT MAX(issue_id) FROM coupon_issue", Long.class);
 	}
 

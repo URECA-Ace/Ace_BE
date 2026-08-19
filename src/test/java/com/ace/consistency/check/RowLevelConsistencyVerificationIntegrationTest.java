@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.ConsistencyCheck;
@@ -6,8 +6,6 @@ import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.repository.VerificationResultRepository;
-import com.ace.consistency.rowlevel.check.CouponHistoryStructuralConsistencyCheck;
-import com.ace.consistency.rowlevel.check.CouponIssueStructuralConsistencyCheck;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;

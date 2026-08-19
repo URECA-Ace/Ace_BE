@@ -1,4 +1,4 @@
-package com.ace.consistency.rowlevel.check;
+package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
@@ -24,8 +24,10 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 			(:eventId IS NULL OR ci.event_id = :eventId)
 			AND (
 				ci.event_id IS NULL OR ci.user_id IS NULL OR ci.issue_sequence IS NULL
-				OR ci.issue_sequence <= 0 OR ci.request_id IS NULL OR CHAR_LENGTH(ci.request_id) <> 36
-				OR (ci.message_id IS NOT NULL AND CHAR_LENGTH(ci.message_id) <> 36)
+				OR ci.issue_sequence <= 0 OR ci.request_id IS NULL OR ci.request_id NOT REGEXP
+					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+				OR (ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
+					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
 				OR ci.issued_at IS NULL OR ci.valid_from IS NULL OR ci.valid_to IS NULL OR ci.created_at IS NULL
 				OR ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to OR ci.created_at < ci.issued_at
@@ -40,7 +42,25 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE " + BASE_CONDITION;
 	private static final String SAMPLE_SQL = """
 			SELECT ci.issue_id, ci.event_id, ci.user_id, ci.status,
-			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at, ci.canceled_at
+			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at, ci.canceled_at,
+			       CASE
+			         WHEN ci.event_id IS NULL THEN 'MISSING_EVENT_ID'
+			         WHEN ci.user_id IS NULL THEN 'MISSING_USER_ID'
+			         WHEN ci.issue_sequence IS NULL OR ci.issue_sequence <= 0 THEN 'INVALID_ISSUE_SEQUENCE'
+				         WHEN ci.request_id IS NULL OR ci.request_id NOT REGEXP
+				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+				              THEN 'INVALID_REQUEST_ID'
+				         WHEN ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
+				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+				              THEN 'INVALID_MESSAGE_ID_FORMAT'
+			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
+			              THEN 'INVALID_STATUS'
+			         WHEN ci.issued_at IS NULL OR ci.valid_from IS NULL
+			              OR ci.valid_to IS NULL OR ci.created_at IS NULL THEN 'MISSING_TIMESTAMP'
+			         WHEN ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to
+			              OR ci.created_at < ci.issued_at THEN 'INVALID_TIMESTAMP_ORDER'
+			         ELSE 'INVALID_STATUS_FIELDS'
+			       END AS violation_type
 			FROM coupon_issue ci
 			WHERE %s
 			ORDER BY ci.issue_id
