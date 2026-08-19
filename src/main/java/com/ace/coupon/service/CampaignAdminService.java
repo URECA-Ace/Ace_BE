@@ -39,10 +39,21 @@ public class CampaignAdminService {
 	public CampaignInitializationResponse initialize(Long eventId) {
 		CouponEvent event = couponEventRepository.findById(eventId)
 				.orElseThrow(() -> new CouponException(ErrorCode.EVENT_NOT_FOUND));
+		return initialize(event);
+	}
+
+	/**
+	 * DB에서 저장 또는 조회한 회차 값으로 Redis를 초기화한다.
+	 * 생성 API와 복구 스케줄러가 내부 운영 API와 동일한 결과 해석을 사용한다.
+	 */
+	public CampaignInitializationResponse initialize(CouponEvent event) {
+		if (event == null || event.getId() == null) {
+			throw new IllegalArgumentException("영속화된 캠페인이 필요합니다.");
+		}
 
 		CampaignInitializationResult result = campaignRedisInitializer.initialize(event);
 		log.info("캠페인 Redis 초기화: eventId={}, result={}, totalStock={}",
-				eventId, result, event.getTotalStock());
+				event.getId(), result, event.getTotalStock());
 
 		return switch (result) {
 			// 재실행해도 같은 설정이면 성공으로 본다. 부하테스트 스크립트가 매번 확인하고 넘어갈 수 있어야 한다
@@ -50,14 +61,14 @@ public class CampaignAdminService {
 			case CONFIGURATION_CONFLICT -> throw new CouponException(
 					ErrorCode.CAMPAIGN_CONFIG_CONFLICT,
 					"회차 %d 가 이미 다른 설정으로 초기화되어 있습니다. 키를 지우고 다시 실행하세요."
-							.formatted(eventId));
+							.formatted(event.getId()));
 			// 서버 잘못이 아니라 입력 잘못
 			// 이미 마감된 회차를 올리려는 경우가 대부분이라 사유를 알려준다
 			case INVALID_CONFIGURATION -> throw new CouponException(
 					ErrorCode.CAMPAIGN_NOT_INITIALIZABLE,
 					("회차 %d 를 초기화할 수 없습니다. 보존기간이 지났거나 설정이 올바르지 않습니다. "
 							+ "openAt=%s, closeAt=%s, totalStock=%d")
-							.formatted(eventId, event.getOpenAt(), event.getCloseAt(),
+							.formatted(event.getId(), event.getOpenAt(), event.getCloseAt(),
 									event.getTotalStock()));
 			case INTERNAL_WRITE_ERROR -> throw new CouponException(
 					ErrorCode.CAMPAIGN_INIT_FAILED,

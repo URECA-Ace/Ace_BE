@@ -16,8 +16,6 @@ import com.ace.coupon.dto.request.CouponEventCreateRequest;
 import com.ace.coupon.dto.response.CouponEventCreateResponse;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
-import com.ace.coupon.redis.CampaignInitializationResult;
-import com.ace.coupon.redis.CampaignRedisInitializer;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponEventRepository;
 
@@ -29,7 +27,7 @@ public class CouponEventCreationService {
 
 	private final CouponEventCreationPersistenceService persistenceService;
 	private final CouponEventRepository couponEventRepository;
-	private final CampaignRedisInitializer campaignRedisInitializer;
+	private final CampaignAdminService campaignAdminService;
 	private final CouponIssueRedisProperties properties;
 
 	public CouponEventCreateResponse create(Long couponId, CouponEventCreateRequest request) {
@@ -113,19 +111,10 @@ public class CouponEventCreationService {
 	}
 
 	private void initializeRedis(CouponEvent event) {
-		CampaignInitializationResult result;
 		try {
-			result = campaignRedisInitializer.initialize(event);
-		} catch (DataAccessException | IllegalStateException | IllegalArgumentException exception) {
+			campaignAdminService.initialize(event);
+		} catch (CouponException | DataAccessException | IllegalStateException | IllegalArgumentException exception) {
 			throw initializationUnavailable(exception);
-		}
-
-		switch (result) {
-			case INITIALIZED, ALREADY_INITIALIZED -> {
-				return;
-			}
-			case CONFIGURATION_CONFLICT, INVALID_CONFIGURATION, INTERNAL_WRITE_ERROR ->
-					throw initializationUnavailable(null);
 		}
 	}
 

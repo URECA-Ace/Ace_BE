@@ -6,10 +6,11 @@ import java.util.List;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
+import com.ace.common.exception.CouponException;
+import com.ace.coupon.dto.response.CampaignInitializationResponse;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CampaignInitializationResult;
-import com.ace.coupon.redis.CampaignRedisInitializer;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponEventRepository;
 
@@ -26,7 +27,7 @@ public class CampaignRedisInitializationRecoveryService {
 			CouponEventStatus.OPEN);
 
 	private final CouponEventRepository couponEventRepository;
-	private final CampaignRedisInitializer campaignRedisInitializer;
+	private final CampaignAdminService campaignAdminService;
 	private final CouponIssueRedisProperties properties;
 
 	public int recoverActiveCampaigns() {
@@ -45,18 +46,16 @@ public class CampaignRedisInitializationRecoveryService {
 
 	private boolean recover(CouponEvent campaign) {
 		try {
-			CampaignInitializationResult result = campaignRedisInitializer.initialize(campaign);
-			if (result == CampaignInitializationResult.INITIALIZED) {
+			CampaignInitializationResponse response = campaignAdminService.initialize(campaign);
+			if (response.result() == CampaignInitializationResult.INITIALIZED) {
 				log.info("쿠폰 캠페인 Redis 상태를 복구했습니다. eventId={}", campaign.getId());
 				return true;
 			}
-			if (result == CampaignInitializationResult.ALREADY_INITIALIZED) {
+			if (response.result() == CampaignInitializationResult.ALREADY_INITIALIZED) {
 				return false;
 			}
-			log.error("쿠폰 캠페인 Redis 상태를 복구하지 못했습니다. eventId={}, result={}",
-					campaign.getId(), result);
 			return false;
-		} catch (DataAccessException | IllegalStateException | IllegalArgumentException exception) {
+		} catch (CouponException | DataAccessException | IllegalStateException | IllegalArgumentException exception) {
 			log.error("쿠폰 캠페인 Redis 상태 복구 중 오류가 발생했습니다. eventId={}",
 					campaign.getId(), exception);
 			return false;
