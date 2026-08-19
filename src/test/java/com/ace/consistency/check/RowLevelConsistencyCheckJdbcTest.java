@@ -207,15 +207,15 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
-	void 현재_MVP에서_USED에서_ISSUED로의_복원은_허용하지_않는다() {
+	void 사용_취소에_따른_USED에서_ISSUED로의_복원을_허용한다() {
 		long issueId = insertIssue("ISSUED", null, 1L);
 		insertHistory(issueId, "USED", "ISSUED", LocalDateTime.of(2026, 8, 18, 11, 0));
 
 		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
 				.check(Scope.all());
 
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.isPass()).isTrue();
+		assertThat(outcome.getViolationCount()).isZero();
 	}
 
 	@Test

@@ -29,7 +29,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 				OR h.to_status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
 				OR (h.from_status IS NULL AND h.to_status <> 'ISSUED')
 				OR (h.from_status IS NOT NULL AND NOT (
-					h.from_status = 'ISSUED' AND h.to_status IN ('USED','CANCELED','EXPIRED')
+					(h.from_status = 'ISSUED' AND h.to_status IN ('USED','CANCELED','EXPIRED'))
+					OR (h.from_status = 'USED' AND h.to_status = 'ISSUED')
 				))
 			)
 			""";
