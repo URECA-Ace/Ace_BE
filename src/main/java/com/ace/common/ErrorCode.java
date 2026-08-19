@@ -34,6 +34,12 @@ public enum ErrorCode {
 	METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다."),
 	UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 요청 형식입니다."),
 
+	// 캠페인 운영
+	CAMPAIGN_CONFIG_CONFLICT(HttpStatus.CONFLICT,
+			"이미 다른 설정으로 초기화된 캠페인입니다."),
+	CAMPAIGN_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+			"캠페인 초기화에 실패했습니다."),
+
 	// 시스템
 	ISSUE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 요청을 일시적으로 처리할 수 없습니다."),
 	ISSUE_PERSIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 처리 중 오류가 발생했습니다."),
