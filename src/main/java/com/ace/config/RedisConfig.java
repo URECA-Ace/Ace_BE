@@ -30,6 +30,11 @@ public class RedisConfig {
 		return script("scripts/coupon-issue-compensate.lua", Long.class);
 	}
 
+	@Bean
+	public RedisScript<List> couponEventStatsScript() {
+		return script("scripts/coupon-event-stats.lua", List.class);
+	}
+
 	private <T> RedisScript<T> script(String location, Class<T> resultType) {
 		DefaultRedisScript<T> script = new DefaultRedisScript<>();
 		script.setLocation(new ClassPathResource(location));

@@ -1,6 +1,7 @@
 package com.ace.coupon.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -42,6 +43,7 @@ class RedisCouponIssueIntegrationTest {
 	private static StringRedisTemplate redisTemplate;
 	private static CampaignRedisInitializer initializer;
 	private static RedisCouponIssueProcessor processor;
+	private static RedisCouponEventStatsReader statsReader;
 
 	@BeforeAll
 	static void setUpRedis() {
@@ -64,6 +66,9 @@ class RedisCouponIssueIntegrationTest {
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
 				script("scripts/coupon-issue-compensate.lua", Long.class));
+		statsReader = new RedisCouponEventStatsReader(
+				redisTemplate,
+				script("scripts/coupon-event-stats.lua", List.class));
 	}
 
 	@AfterEach
@@ -130,6 +135,56 @@ class RedisCouponIssueIntegrationTest {
 		initializer.initialize(closedCampaign, 1, now.minusSeconds(600), now.minusSeconds(1));
 		assertThat(processor.issue(closedCampaign, 1L, UUID.randomUUID()).code())
 				.isEqualTo(CouponIssueLuaCode.EVENT_CLOSED);
+	}
+
+	@Test
+	@DisplayName("발급 현황은 Redis 시각과 재고의 원자적 스냅샷으로 상태와 수량을 반환한다")
+	void readsRealtimeIssuanceStats() {
+		long scheduledCampaign = nextCampaignId();
+		Instant now = Instant.now();
+		initializer.initialize(
+				scheduledCampaign, 2, now.plusSeconds(600), now.plusSeconds(1_200));
+		assertThat(statsReader.read(scheduledCampaign).status())
+				.isEqualTo(com.ace.coupon.enums.CouponEventStatus.SCHEDULED);
+
+		long openCampaign = initializeOpenCampaign(2);
+		UUID requestId = UUID.randomUUID();
+		processor.issue(openCampaign, 1L, requestId);
+		CouponEventStatsSnapshot allocated = statsReader.read(openCampaign);
+		assertThat(allocated.totalStock()).isEqualTo(2L);
+		assertThat(allocated.allocatedQuantity()).isOne();
+		assertThat(allocated.remainingStock()).isOne();
+		assertThat(allocated.status()).isEqualTo(com.ace.coupon.enums.CouponEventStatus.OPEN);
+
+		processor.compensate(openCampaign, 1L, requestId);
+		CouponEventStatsSnapshot compensated = statsReader.read(openCampaign);
+		assertThat(compensated.allocatedQuantity()).isZero();
+		assertThat(compensated.remainingStock()).isEqualTo(2L);
+
+		long soldOutCampaign = initializeOpenCampaign(1);
+		processor.issue(soldOutCampaign, 2L, UUID.randomUUID());
+		assertThat(statsReader.read(soldOutCampaign).status())
+				.isEqualTo(com.ace.coupon.enums.CouponEventStatus.SOLD_OUT);
+
+		long closedCampaign = nextCampaignId();
+		initializer.initialize(
+				closedCampaign, 1, now.minusSeconds(600), now.minusSeconds(1));
+		assertThat(statsReader.read(closedCampaign).status())
+				.isEqualTo(com.ace.coupon.enums.CouponEventStatus.CLOSED);
+
+		long missingCampaign = nextCampaignId();
+		assertThat(statsReader.read(missingCampaign)).isNull();
+	}
+
+	@Test
+	@DisplayName("발급 현황은 전체 수량보다 큰 잔여 재고를 손상 상태로 거절한다")
+	void rejectsCorruptedRealtimeStats() {
+		long campaignId = initializeOpenCampaign(1);
+		redisTemplate.opsForValue().set(CouponRedisKeys.campaign(campaignId).stock(), "2");
+
+		assertThatThrownBy(() -> statsReader.read(campaignId))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("Redis 상태");
 	}
 
 	@Test
