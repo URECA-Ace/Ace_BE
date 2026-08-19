@@ -41,6 +41,7 @@ import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.enums.IssueRequestStatus;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.coupon.service.CampaignAdminService;
 import com.ace.coupon.service.CouponEventCreationPersistenceService;
 import com.ace.coupon.service.CouponEventCreationService;
 
@@ -142,13 +143,17 @@ class RedisCouponIssueIntegrationTest {
 		CouponEventCreationPersistenceService persistenceService =
 				mock(CouponEventCreationPersistenceService.class);
 		CouponEventRepository repository = mock(CouponEventRepository.class);
+		CouponIssueRedisProperties redisProperties =
+				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
 		given(persistenceService.create(any(), any(), any(), any(), any(), any(), any()))
 				.willReturn(event);
+		CampaignAdminService campaignAdminService =
+				new CampaignAdminService(repository, initializer, redisProperties);
 		CouponEventCreationService creationService = new CouponEventCreationService(
 				persistenceService,
 				repository,
-				initializer,
-				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul")));
+				campaignAdminService,
+				redisProperties);
 
 		CouponEventCreateResponse created = creationService.create(
 				1L,

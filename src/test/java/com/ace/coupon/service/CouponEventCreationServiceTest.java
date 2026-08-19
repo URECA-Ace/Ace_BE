@@ -26,8 +26,6 @@ import com.ace.coupon.dto.request.CouponEventCreateRequest;
 import com.ace.coupon.dto.response.CouponEventCreateResponse;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
-import com.ace.coupon.redis.CampaignInitializationResult;
-import com.ace.coupon.redis.CampaignRedisInitializer;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponEventRepository;
 
@@ -41,18 +39,18 @@ class CouponEventCreationServiceTest {
 
 	private CouponEventCreationPersistenceService persistenceService;
 	private CouponEventRepository couponEventRepository;
-	private CampaignRedisInitializer initializer;
+	private CampaignAdminService campaignAdminService;
 	private CouponEventCreationService service;
 
 	@BeforeEach
 	void setUp() {
 		persistenceService = Mockito.mock(CouponEventCreationPersistenceService.class);
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
-		initializer = Mockito.mock(CampaignRedisInitializer.class);
+		campaignAdminService = Mockito.mock(CampaignAdminService.class);
 		service = new CouponEventCreationService(
 				persistenceService,
 				couponEventRepository,
-				initializer,
+				campaignAdminService,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZONE_ID));
 	}
 
@@ -65,14 +63,12 @@ class CouponEventCreationServiceTest {
 				ArgumentMatchers.any(), ArgumentMatchers.any(),
 				ArgumentMatchers.eq(CouponEventStatus.SCHEDULED), ArgumentMatchers.any()))
 				.willReturn(event);
-		given(initializer.initialize(event)).willReturn(CampaignInitializationResult.INITIALIZED);
-
 		CouponEventCreateResponse response = service.create(1L, request(10_000, OPEN_AT, CLOSE_AT));
 
 		assertThat(response.eventId()).isEqualTo(24L);
 		assertThat(response.remainingStock()).isEqualTo(10_000);
 		assertThat(response.perUserLimit()).isOne();
-		verify(initializer).initialize(event);
+		verify(campaignAdminService).initialize(event);
 	}
 
 	@Test
@@ -81,13 +77,10 @@ class CouponEventCreationServiceTest {
 		CouponEvent existing = event(24L, 10_000, OPEN_AT, CLOSE_AT);
 		given(couponEventRepository.findByCoupon_IdAndRound(1L, 24))
 				.willReturn(Optional.of(existing));
-		given(initializer.initialize(existing))
-				.willReturn(CampaignInitializationResult.ALREADY_INITIALIZED);
-
 		CouponEventCreateResponse response = service.create(1L, request(10_000, OPEN_AT, CLOSE_AT));
 
 		assertThat(response.eventId()).isEqualTo(24L);
-		verify(initializer).initialize(existing);
+		verify(campaignAdminService).initialize(existing);
 		verify(persistenceService, never()).create(
 				ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(),
 				ArgumentMatchers.any(), ArgumentMatchers.any(),
@@ -106,13 +99,10 @@ class CouponEventCreationServiceTest {
 				ArgumentMatchers.any(), ArgumentMatchers.any(),
 				ArgumentMatchers.any(), ArgumentMatchers.any()))
 				.willThrow(new DataIntegrityViolationException("duplicate"));
-		given(initializer.initialize(existing))
-				.willReturn(CampaignInitializationResult.ALREADY_INITIALIZED);
-
 		CouponEventCreateResponse response = service.create(1L, request(10_000, OPEN_AT, CLOSE_AT));
 
 		assertThat(response.eventId()).isEqualTo(24L);
-		verify(initializer).initialize(existing);
+		verify(campaignAdminService).initialize(existing);
 	}
 
 	@Test
@@ -126,7 +116,7 @@ class CouponEventCreationServiceTest {
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode())
 								.isEqualTo(ErrorCode.EVENT_CONFIGURATION_CONFLICT));
-		verify(initializer, never()).initialize(ArgumentMatchers.any());
+		verify(campaignAdminService, never()).initialize(ArgumentMatchers.any(CouponEvent.class));
 	}
 
 	@Test
@@ -138,8 +128,26 @@ class CouponEventCreationServiceTest {
 				ArgumentMatchers.any(), ArgumentMatchers.any(),
 				ArgumentMatchers.any(), ArgumentMatchers.any()))
 				.willReturn(event);
-		given(initializer.initialize(event))
+		given(campaignAdminService.initialize(event))
 				.willThrow(new RedisConnectionFailureException("redis unavailable"));
+
+		assertThatThrownBy(() -> service.create(1L, request(10_000, OPEN_AT, CLOSE_AT)))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode()).isEqualTo(
+								ErrorCode.CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE));
+	}
+
+	@Test
+	@DisplayName("공통 초기화 경로의 실패도 생성 API에서는 재시도 가능한 503으로 변환한다")
+	void returnsUnavailableWhenInitializerReportsWriteFailure() {
+		CouponEvent event = event(24L, 10_000, OPEN_AT, CLOSE_AT);
+		given(persistenceService.create(
+				ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(),
+				ArgumentMatchers.any(), ArgumentMatchers.any(),
+				ArgumentMatchers.any(), ArgumentMatchers.any()))
+				.willReturn(event);
+		given(campaignAdminService.initialize(event))
+				.willThrow(new CouponException(ErrorCode.CAMPAIGN_INIT_FAILED));
 
 		assertThatThrownBy(() -> service.create(1L, request(10_000, OPEN_AT, CLOSE_AT)))
 				.isInstanceOfSatisfying(CouponException.class,
