@@ -14,6 +14,7 @@ import com.ace.coupon.redis.CouponIssueDecision;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
+import com.ace.coupon.repository.CouponEventRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,6 +24,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 
 	private final RedisCouponIssueProcessor issueProcessor;
 	private final CouponIssueRedisProperties properties;
+	private final CouponEventRepository couponEventRepository;
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
@@ -50,9 +52,24 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 			case EVENT_CLOSED -> throw new CouponException(ErrorCode.EVENT_CLOSED);
 			case IDEMPOTENCY_CONFLICT -> throw new CouponException(ErrorCode.IDEMPOTENCY_CONFLICT);
 			case PERSISTENCE_FAILED -> throw new CouponException(ErrorCode.ISSUE_PERSIST_FAILED);
-			case CAMPAIGN_NOT_INITIALIZED, CORRUPTED_STATE, INVALID_ARGUMENT, INTERNAL_WRITE_ERROR ->
+			case CAMPAIGN_NOT_INITIALIZED -> throw missingCampaignOrUnavailable(eventId);
+			case CORRUPTED_STATE, INVALID_ARGUMENT, INTERNAL_WRITE_ERROR ->
 					throw new CouponException(ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE);
 		};
+	}
+
+	private CouponException missingCampaignOrUnavailable(Long eventId) {
+		try {
+			if (!couponEventRepository.existsById(eventId)) {
+				return new CouponException(ErrorCode.EVENT_NOT_FOUND);
+			}
+		} catch (DataAccessException exception) {
+			return new CouponException(
+					ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE,
+					ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE.getDefaultMessage(),
+					exception);
+		}
+		return new CouponException(ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE);
 	}
 
 	@Override
