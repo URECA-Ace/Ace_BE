@@ -11,7 +11,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Range;
+import org.springframework.data.redis.connection.RedisStreamCommands.StreamDeletionPolicy;
+import org.springframework.data.redis.connection.RedisStreamCommands.TrimOptions;
 import org.springframework.data.redis.connection.RedisStreamCommands.XClaimOptions;
+import org.springframework.data.redis.connection.RedisStreamCommands.XTrimOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.PendingMessage;
@@ -123,7 +126,7 @@ public class IssueStreamRelay implements SmartLifecycle {
 		}
 	}
 
-	// 한 주기: 대상 갱신 -> 그룹 확인 -> 유휴 pending 회수 -> 신규 소비
+	// 한 주기: 대상 갱신 -> 그룹 확인 -> 유휴 pending 회수 -> 신규 소비 -> 안전한 엔트리 정리
 	boolean runOnce() {
 		List<Long> campaignIds = targetProvider.campaignIds();
 		if (campaignIds.isEmpty()) {
@@ -136,6 +139,7 @@ public class IssueStreamRelay implements SmartLifecycle {
 		keys.forEach(this::ensureGroup);
 		keys.forEach(this::reclaimPending);
 		consume(keys);
+		keys.forEach(this::trimAcknowledged);
 		return true;
 	}
 
@@ -270,6 +274,36 @@ public class IssueStreamRelay implements SmartLifecycle {
 
 	private void acknowledge(String key, RecordId recordId) {
 		streams().acknowledge(key, properties.consumerGroup(), recordId);
+	}
+
+	/**
+	 * 모든 Consumer Group에서 처리 완료된 엔트리만 제거한다.
+	 *
+	 * <p>Redis 8.2의 {@code XTRIM MINID ... ACKED}를 사용하므로 현재 그룹의 pending뿐 아니라
+	 * 다른 그룹이 아직 전달받지 않았거나 ACK하지 않은 엔트리도 삭제되지 않는다. 마지막 엔트리는
+	 * MINID의 배타 경계로 남겨 Stream과 Consumer Group 자체가 유지되도록 한다.</p>
+	 */
+	private void trimAcknowledged(String key) {
+		try {
+			String lastGeneratedId = streams().info(key).lastGeneratedId();
+			if (lastGeneratedId == null || "0-0".equals(lastGeneratedId)) {
+				return;
+			}
+
+			Long trimmed = streams().trim(
+					key,
+					XTrimOptions.trim(
+							TrimOptions.minId(RecordId.of(lastGeneratedId))
+									.exact()
+									.deletionPolicy(StreamDeletionPolicy.removeAcknowledged())));
+			if (trimmed != null && trimmed > 0) {
+				log.debug("처리 완료된 Stream 엔트리를 정리했습니다: key={}, count={}, minId={}",
+						key, trimmed, lastGeneratedId);
+			}
+		} catch (DataAccessException | IllegalArgumentException exception) {
+			// 정리는 저장 정확성보다 후순위다. 실패해도 다음 소비 주기에서 다시 시도한다.
+			log.warn("처리 완료된 Stream 엔트리 정리 실패: key={}", key, exception);
+		}
 	}
 
 	private void sleep(java.time.Duration duration) {
