@@ -46,12 +46,15 @@ import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponRedisKeys;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
+import com.ace.coupon.redis.RedisLuaFailureObserver;
 import com.ace.coupon.persistence.CouponIssuePersistenceProperties;
 import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceService;
 import com.ace.coupon.persistence.IssueRecord;
 import com.ace.coupon.persistence.PersistenceMode;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 // Stream 소비 계층을 실제 Redis 에 대고 검증
 @Tag("redis-integration")
@@ -85,14 +88,18 @@ class IssueStreamRelayIntegrationTest {
 
 		CouponIssueRedisProperties properties =
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
+		RedisLuaFailureObserver failureObserver =
+				new RedisLuaFailureObserver(new SimpleMeterRegistry());
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				failureObserver);
 		processor = new RedisCouponIssueProcessor(
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
-				script("scripts/coupon-issue-compensate.lua", Long.class));
+				script("scripts/coupon-issue-compensate.lua", List.class),
+				failureObserver);
 	}
 
 	@AfterAll

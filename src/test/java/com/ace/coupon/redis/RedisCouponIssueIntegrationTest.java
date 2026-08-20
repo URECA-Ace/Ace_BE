@@ -45,6 +45,8 @@ import com.ace.coupon.service.CampaignAdminService;
 import com.ace.coupon.service.CouponEventCreationPersistenceService;
 import com.ace.coupon.service.CouponEventCreationService;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 @Tag("redis-integration")
 class RedisCouponIssueIntegrationTest {
 
@@ -57,6 +59,7 @@ class RedisCouponIssueIntegrationTest {
 	private static CampaignRedisInitializer initializer;
 	private static RedisCouponIssueProcessor processor;
 	private static RedisCouponEventStatsReader statsReader;
+	private static SimpleMeterRegistry meterRegistry;
 
 	@BeforeAll
 	static void setUpRedis() {
@@ -71,14 +74,18 @@ class RedisCouponIssueIntegrationTest {
 
 		CouponIssueRedisProperties properties =
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
+		meterRegistry = new SimpleMeterRegistry();
+		RedisLuaFailureObserver failureObserver = new RedisLuaFailureObserver(meterRegistry);
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				failureObserver);
 		processor = new RedisCouponIssueProcessor(
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
-				script("scripts/coupon-issue-compensate.lua", Long.class));
+				script("scripts/coupon-issue-compensate.lua", List.class),
+				failureObserver);
 		statsReader = new RedisCouponEventStatsReader(
 				redisTemplate,
 				script("scripts/coupon-event-stats.lua", List.class));
@@ -305,6 +312,27 @@ class RedisCouponIssueIntegrationTest {
 		assertThat(bitCount(keys.bitmap(1L).key())).isOne();
 		assertThat(processor.compensate(campaignId, 1L, requestId))
 				.isEqualTo(CouponIssueCompensationResult.COMPENSATED);
+	}
+
+	@Test
+	@DisplayName("Redis pcall 오류는 외부 결과와 분리해 실패 단계 메트릭에 기록한다")
+	void recordsPcallDiagnosticWithoutExposingRawError() {
+		long campaignId = initializeOpenCampaign(1);
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		redisTemplate.delete(keys.requests());
+		redisTemplate.opsForValue().set(keys.requests(), "wrong-type");
+
+		CouponIssueDecision decision = processor.issue(campaignId, 1L, UUID.randomUUID());
+
+		assertThat(decision.code()).isEqualTo(CouponIssueLuaCode.CORRUPTED_STATE);
+		double count = meterRegistry.get("coupon.redis.lua.failures")
+				.tag("script", "issue")
+				.tag("stage", "ISSUE_REQUEST_READ")
+				.tag("command", "HMGET")
+				.tag("result", "CORRUPTED_STATE")
+				.counter()
+				.count();
+		assertThat(count).isEqualTo(1.0);
 	}
 
 	@Test

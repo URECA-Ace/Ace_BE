@@ -40,6 +40,7 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @Tag("redis-benchmark")
 class RedisLuaPerformanceBenchmarkTest {
@@ -69,8 +70,9 @@ class RedisLuaPerformanceBenchmarkTest {
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				new RedisLuaFailureObserver(new SimpleMeterRegistry()));
 	}
 
 	@AfterAll
@@ -411,7 +413,7 @@ class RedisLuaPerformanceBenchmarkTest {
 	}
 
 	private long resultCode(List<?> result) {
-		if (result == null || result.size() != 4) {
+		if (result == null || (result.size() != 4 && result.size() != 6)) {
 			throw new IllegalStateException("Lua 벤치마크 결과 형식 오류");
 		}
 		Object code = result.get(0);
