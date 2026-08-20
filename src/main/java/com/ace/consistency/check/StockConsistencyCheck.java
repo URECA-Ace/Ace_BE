@@ -62,25 +62,10 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 				OR ce.issued_quantity != actual_active_count
             """;
 
-	private static final String AS_OF_RANGE_SQL = """
-			SELECT ce.event_id,
-				   ce.total_stock,
-				   ce.issued_quantity,
-				   ce.remaining_stock,
-				   COUNT(CASE WHEN ci.status IN ('ISSUED','USED','EXPIRED') THEN 1 END) AS actual_active_count
-			FROM coupon_event ce
-			LEFT JOIN coupon_issue ci
-				   ON ci.event_id = ce.event_id
-				  AND ci.created_at < :to
-				  AND ci.created_at >= :from
-			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
-			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
-				OR ce.issued_quantity != actual_active_count
-            """;
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
-		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL, Scope.ScopeType.AS_OF_RANGE);
+		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
 	}
 
 	@Override
@@ -99,14 +84,6 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 						.addValue("eventIds", eventIds)
 						.addValue("to", to);
 				violations = jdbcTemplate.queryForList(ALL_SQL, param); // ALL_SQL로 수정
-			}
-			case AS_OF_RANGE -> {
-				LocalDateTime from = scope.getFrom();
-				LocalDateTime to = scope.getTo();
-				MapSqlParameterSource param = new MapSqlParameterSource()
-						.addValue("from", from)
-						.addValue("to", to);
-				violations = jdbcTemplate.queryForList(AS_OF_RANGE_SQL, param);
 			}
 			default -> throw new IllegalArgumentException("Unsupported scope type: " + scope.getType());
 		}

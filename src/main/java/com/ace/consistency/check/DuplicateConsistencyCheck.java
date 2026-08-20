@@ -16,7 +16,7 @@ import java.util.Set;
 /**
  * 1인 1매 제한(중복 발급) 검사.
  *
- * 동일 user_id + event_id 조합의 활성 발급 건수(ISSUED+USED+EXPIRED, CANCELED 제외)가
+ * 동일 user_id + event_id 조합의 활성 발급 건수(ISSUED+USED+EXPIRED)가
  * coupon_event.per_user_limit을 넘는 경우를 위반으로 본다.
  *
  * GROUP BY를 coupon_issue 단일 테이블에만 걸어서(서브쿼리) idx_issue_event_user_status
