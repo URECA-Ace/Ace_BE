@@ -10,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -25,6 +26,13 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
 		name = "coupon_issue",
+		indexes = {
+				// StockConsistencyCheck/DuplicateConsistencyCheck의 ALL 스코프 쿼리가
+				// event_id/user_id로 GROUP BY 하면서 status, created_at도 함께 걸러야 해서,
+				// 이 네 컬럼을 다 포함해야 인덱스만으로 커버되어(테이블 재조회 없이) 빠르게 읽힌다.
+				@Index(name = "idx_coupon_issue_event_user_status_created",
+						columnList = "event_id, user_id, status, created_at")
+		},
 		uniqueConstraints = {
 				@UniqueConstraint(
 						name = "uk_coupon_issue_event_user",
