@@ -1,6 +1,7 @@
 package com.ace.coupon.repository;
 
 import com.ace.coupon.entity.CouponEvent;
+import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -25,6 +26,24 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	List<CouponEvent> findAllByStatusInAndCloseAtAfter(
 			List<CouponEventStatus> statuses,
 			LocalDateTime closeAt);
+
+	@Query("""
+			select event
+			from CouponEvent event
+			where event.status in :statuses
+			  and event.closeAt > :now
+			  and not exists (
+			      select initialization.eventId
+			      from CampaignRedisInitialization initialization
+			      where initialization.eventId = event.id
+			        and initialization.status = :initializedStatus
+			  )
+			order by event.id
+			""")
+	List<CouponEvent> findRedisInitializationRecoveryCandidates(
+			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("now") LocalDateTime now,
+			@Param("initializedStatus") CampaignRedisInitializationStatus initializedStatus);
 
 	// Stream 을 소비해야 할 회차
 	@Query("select e.id from CouponEvent e where e.openAt <= :now and e.closeAt >= :since order by e.id")

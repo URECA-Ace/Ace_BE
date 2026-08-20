@@ -19,8 +19,11 @@ public interface CampaignRedisInitializationRepository
 			     last_error_code, last_error_message, updated_at)
 			VALUES (:eventId, 'PENDING', 1, :attemptedAt, NULL, NULL, NULL, :attemptedAt)
 			ON DUPLICATE KEY UPDATE
+			    status = CASE WHEN status = 'INITIALIZED' THEN status ELSE 'PENDING' END,
 			    attempt_count = attempt_count + 1,
 			    last_attempted_at = VALUES(last_attempted_at),
+			    last_error_code = CASE WHEN status = 'INITIALIZED' THEN last_error_code ELSE NULL END,
+			    last_error_message = CASE WHEN status = 'INITIALIZED' THEN last_error_message ELSE NULL END,
 			    updated_at = VALUES(updated_at)
 			""", nativeQuery = true)
 	int recordAttempt(

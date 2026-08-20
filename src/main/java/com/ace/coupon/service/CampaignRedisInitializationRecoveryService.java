@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CampaignInitializationResponse;
 import com.ace.coupon.entity.CouponEvent;
+import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CampaignInitializationResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
@@ -33,7 +34,10 @@ public class CampaignRedisInitializationRecoveryService {
 	public int recoverActiveCampaigns() {
 		LocalDateTime now = LocalDateTime.now(properties.zoneId());
 		List<CouponEvent> campaigns = couponEventRepository
-				.findAllByStatusInAndCloseAtAfter(RECOVERABLE_STATUSES, now);
+				.findRedisInitializationRecoveryCandidates(
+						RECOVERABLE_STATUSES,
+						now,
+						CampaignRedisInitializationStatus.INITIALIZED);
 
 		int recoveredCount = 0;
 		for (CouponEvent campaign : campaigns) {
