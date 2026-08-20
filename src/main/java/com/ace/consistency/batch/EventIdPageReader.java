@@ -8,6 +8,7 @@ import org.springframework.batch.infrastructure.item.ItemStreamException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -28,13 +29,15 @@ public class EventIdPageReader implements ItemReader<List<Long>>, ItemStream {
 	private static final String QUERY = """
             SELECT event_id
             FROM coupon_event
-            WHERE event_id > :lastSeenId
+            WHERE event_id > :lastSeenId 
+            	AND created_at < :to
             ORDER BY event_id
             LIMIT :pageSize
             """;
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final int pageSize;
+	private final LocalDateTime to;
 
 	private long lastSeenId;
 
@@ -47,7 +50,8 @@ public class EventIdPageReader implements ItemReader<List<Long>>, ItemStream {
 	public List<Long> read() {
 		MapSqlParameterSource params = new MapSqlParameterSource()
 				.addValue("lastSeenId", lastSeenId)
-				.addValue("pageSize", pageSize);
+				.addValue("pageSize", pageSize)
+				.addValue("to", to);
 
 		List<Long> eventIds = jdbcTemplate.queryForList(QUERY, params, Long.class);
 

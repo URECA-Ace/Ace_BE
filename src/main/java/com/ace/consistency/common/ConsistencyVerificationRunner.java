@@ -1,6 +1,7 @@
 package com.ace.consistency.common;
 
 import com.ace.consistency.batch.ConsistencyBatchJobFactory;
+import com.ace.consistency.batch.ConsistencyJobExecutionListener;
 import com.ace.coupon.repository.CouponEventRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 정합성 검증의 공통 실행 엔진.
@@ -38,11 +38,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class ConsistencyVerificationRunner {
-
-	private static final String RESTART_CHECK_NAMES_KEY = "consistency.restart.checkNames";
-	private static final String RESTART_SCOPE_TO_KEY = "consistency.restart.scopeTo";
-	private static final String RESTART_TRIGGER_TYPE_KEY = "consistency.restart.triggerType";
-	private static final String CHECK_NAME_DELIMITER = ",";
 
 	private final VerificationResultPersister resultPersister;
 	private final CouponEventRepository couponEventRepository;
@@ -144,7 +139,6 @@ public class ConsistencyVerificationRunner {
 
 		try {
 			JobExecution execution = asyncJobOperator.start(job, params);
-			persistRestartContext(execution, checks, scope.getTo(), triggerType);
 			log.info("Consistency verification batch launched. jobExecutionId={}, trigger={}, scope={}",
 					execution.getId(), triggerType, scope);
 			return execution;
@@ -173,9 +167,9 @@ public class ConsistencyVerificationRunner {
 		}
 
 		ExecutionContext context = failedExecution.getExecutionContext();
-		List<ConsistencyCheck> checks = resolveChecks(context.getString(RESTART_CHECK_NAMES_KEY));
-		LocalDateTime scopeTo = LocalDateTime.parse(context.getString(RESTART_SCOPE_TO_KEY));
-		TriggerType triggerType = TriggerType.valueOf(context.getString(RESTART_TRIGGER_TYPE_KEY));
+		List<ConsistencyCheck> checks = resolveChecks(context.getString(ConsistencyJobExecutionListener.RESTART_CHECK_NAMES_KEY));
+		LocalDateTime scopeTo = LocalDateTime.parse(context.getString(ConsistencyJobExecutionListener.RESTART_SCOPE_TO_KEY));
+		TriggerType triggerType = TriggerType.valueOf(context.getString(ConsistencyJobExecutionListener.RESTART_TRIGGER_TYPE_KEY));
 		Scope scope = Scope.all(scopeTo);
 
 		Job job = jobFactory.buildJob(checks, scope, triggerType);
@@ -183,7 +177,6 @@ public class ConsistencyVerificationRunner {
 		try {
 			jobRegistry.register(job);
 			JobExecution restarted = asyncJobOperator.restart(failedExecution);
-			persistRestartContext(restarted, checks, scopeTo, triggerType);
 			log.info("Consistency verification batch restarted. previousExecutionId={}, newExecutionId={}",
 					jobExecutionId, restarted.getId());
 			return restarted;
@@ -192,25 +185,11 @@ public class ConsistencyVerificationRunner {
 		}
 	}
 
-	/**
-	 * 재시작 시 동일한 Job을 재조립할 수 있도록, 이번 실행에 쓰인 checks/scope/triggerType을
-	 * Spring Batch가 JobExecution마다 자동으로 영속화하는 ExecutionContext에 함께 저장한다.
-	 */
-	private void persistRestartContext(JobExecution execution, List<ConsistencyCheck> checks,
-										LocalDateTime scopeTo, TriggerType triggerType) {
-		ExecutionContext context = execution.getExecutionContext();
-		context.putString(RESTART_CHECK_NAMES_KEY,
-				checks.stream().map(ConsistencyCheck::getName).collect(Collectors.joining(CHECK_NAME_DELIMITER)));
-		context.putString(RESTART_SCOPE_TO_KEY, scopeTo.toString());
-		context.putString(RESTART_TRIGGER_TYPE_KEY, triggerType.name());
-		jobRepository.updateExecutionContext(execution);
-	}
-
 	private List<ConsistencyCheck> resolveChecks(String checkNamesCsv) {
 		if (checkNamesCsv == null || checkNamesCsv.isBlank()) {
 			throw new IllegalStateException("재시작에 필요한 check 정보가 저장되어 있지 않습니다.");
 		}
-		Set<String> names = Set.of(checkNamesCsv.split(CHECK_NAME_DELIMITER));
+		Set<String> names = Set.of(checkNamesCsv.split(ConsistencyJobExecutionListener.CHECK_NAME_DELIMITER));
 		List<ConsistencyCheck> resolved = allChecks.stream()
 				.filter(check -> names.contains(check.getName()))
 				.toList();

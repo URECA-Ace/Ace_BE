@@ -25,6 +25,11 @@ asyncJobOperator.start(job, params)      (BatchAsyncConfig)
         │  - TaskExecutorJobOperator가 SimpleAsyncTaskExecutor 위에서 Job을 실행
         │  - 호출부는 JobExecution을 즉시 반환받고 대기하지 않음
         ▼
+ConsistencyJobExecutionListener.beforeJob()
+        │  - 배치 스레드에서 Step보다 먼저 동기 호출됨(호출부 스레드가 죽어도 영향 없음)
+        │  - 재시작에 필요한 checks/scope/triggerType을 ExecutionContext에 저장
+        │  - 저장 실패 시 Job은 여기서 바로 FAILED로 끝나고 Step은 하나도 실행되지 않음
+        ▼
 [Step: check마다 하나씩, 순차 실행]
         │
         ├─ EventIdPageReader.read()            → event_id를 pageSize만큼 페이징 조회
@@ -53,7 +58,7 @@ ConsistencyJobExecutionListener.afterJob()
 | Processor | `ConsistencyCheckItemProcessor` | 한 페이지의 event_id로 해당 Step의 Check 실행 |
 | Writer | `CheckResultAccumulatorWriter` | 여러 페이지의 Check 결과(위반 건수, 샘플)를 Step 종료까지 누적 |
 | Step 리스너 | `ConsistencyStepCompletionListener` | Step 종료 시 누적 결과를 `VerificationResult`로 변환해 저장 |
-| Job 리스너 | `ConsistencyJobExecutionListener` | Job 전체 종료 시 최종 상태 로깅 |
+| Job 리스너 | `ConsistencyJobExecutionListener` | beforeJob에서 재시작용 checks/scope/triggerType 저장, afterJob에서 최종 상태 로깅 |
 
 ## DB에 생성되는 테이블
 
@@ -97,7 +102,7 @@ ConsistencyJobExecutionListener.afterJob()
 | IDENTIFYING | 이 파라미터가 JOB_KEY(JobInstance 식별)에 포함되는지 여부(Y/N) |
 
 **BATCH_JOB_EXECUTION_CONTEXT** — Job 레벨 `ExecutionContext` 저장소. JobExecution당
-1 row. `ConsistencyVerificationRunner.persistRestartContext()`가 저장하는
+1 row. `ConsistencyJobExecutionListener.beforeJob()`이 저장하는
 checks/scope/triggerType이 여기 들어간다.
 | 컬럼 | 의미 |
 |---|---|

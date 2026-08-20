@@ -41,7 +41,7 @@ public class ConsistencyBatchJobFactory {
     private final PlatformTransactionManager transactionManager;
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final VerificationResultPersister resultPersister;
-    private final ConsistencyJobExecutionListener jobExecutionListener;
+    private final BatchFailureLogRepository failureLogRepository;
 
     public Job buildJob(List<ConsistencyCheck> checks, Scope scope, TriggerType triggerType) {
         List<Step> steps = checks.stream()
@@ -52,6 +52,9 @@ public class ConsistencyBatchJobFactory {
         if (steps.isEmpty()) {
             throw new IllegalArgumentException("ALL 스코프를 지원하는 Check가 하나도 없습니다.");
         }
+
+        ConsistencyJobExecutionListener jobExecutionListener =
+                new ConsistencyJobExecutionListener(failureLogRepository, jobRepository, checks, scope.getTo(), triggerType);
 
         // 첫 번째 step 등록 후 차례차례 simpleJobBuilder.next(steps.get(i))로 다음  step을 붙인다.
         // 이렇게 하면 한 step이 오류로 실패하면 그 다음 step들부터는 실행을 안한다.
@@ -73,7 +76,7 @@ public class ConsistencyBatchJobFactory {
     }
 
     private Step buildStep(ConsistencyCheck check, Scope scope, TriggerType triggerType) {
-        EventIdPageReader reader = new EventIdPageReader(jdbcTemplate, PAGE_SIZE);
+        EventIdPageReader reader = new EventIdPageReader(jdbcTemplate, PAGE_SIZE, scope.getTo());
         ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(check, scope.getTo());
         CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter();
         ConsistencyStepCompletionListener listener =
