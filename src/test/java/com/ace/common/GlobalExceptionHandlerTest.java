@@ -26,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.ace.common.exception.CouponException;
 
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
@@ -179,6 +180,17 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	@DisplayName("존재하지 않는 이벤트는 404 EVENT_NOT_FOUND로 응답한다")
+	void eventNotFound() throws Exception {
+		mockMvc.perform(get("/test/event-not-found"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.result").value("error"))
+				.andExpect(jsonPath("$.error.code").value("EVENT_NOT_FOUND"))
+				.andExpect(jsonPath("$.error.message")
+						.value("해당 eventId는 존재하지 않습니다. eventId: 999"));
+	}
+
+	@Test
 	@DisplayName("매핑되지 않은 예외는 500 INTERNAL_ERROR 로 응답하고 내부 메시지를 노출하지 않는다")
 	void unhandledException() throws Exception {
 		mockMvc.perform(get("/test/boom"))
@@ -295,6 +307,11 @@ class GlobalExceptionHandlerTest {
 		@GetMapping("/test/boom")
 		void boom() {
 			throw new IllegalStateException("내부 상태 오류 - 응답에 노출되면 안 됨");
+		}
+
+		@GetMapping("/test/event-not-found")
+		void eventNotFound() {
+			throw new EntityNotFoundException("해당 eventId는 존재하지 않습니다. eventId: 999");
 		}
 
 		@GetMapping("/test/internal-coupon-error")
