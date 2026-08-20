@@ -44,7 +44,7 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 	}
 
 	@Override
-	public CheckOutcome check(Scope scope) {
+	public CheckOutcome check(Scope scope){
 		Long eventId = scope.getEventId();
 
 		// 1. 비동기 파이프라인(Stream)에 아직 처리 중인 메시지(Pending)가 있는지 확인
@@ -56,12 +56,11 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 					.sum();
 		} catch (RedisSystemException e) {
 			// 스트림 키나 컨슈머 그룹이 아직 생성되지 않은 경우 (발급 내역이 아예 없는 초기 상태 등)
-			// Redis는 "ERR no such key" 에러를 던지며, Spring은 이를 RedisSystemException으로 감쌉니다.
-			// 이 경우 PENDING이 없는 것과 동일하므로 무시하고 넘어갑니다.
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new RuntimeException(e);
 		}
-
-		// 아직 작업자(Consumer)가 DB에 밀어넣고 있는 중이라면, 오탐지를 막기 위해 1차 MVP에서는 예외를 던집니다.
-		// (2차 MVP에서는 이 예외를 상위에서 잡아 PENDING이 0이 될 때 검증을 재시도하는 이벤트로 활용합니다.)
+		
 		if (pendingCount > 0) {
 			throw new ConsistencyCheck.CheckPostponedException("PENDING 큐에 남은 메시지가 있어 검증을 수행할 수 없습니다. (pendingCount: " + pendingCount + ")");
 		}
