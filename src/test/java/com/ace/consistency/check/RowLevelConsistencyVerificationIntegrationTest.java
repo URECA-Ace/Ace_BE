@@ -30,7 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @Transactional
 @Testcontainers
-@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create")
+@TestPropertySource(properties = {
+		"spring.jpa.hibernate.ddl-auto=create",
+		"consistency.expiration.allowed-delay-ms=1800000"
+})
 class RowLevelConsistencyVerificationIntegrationTest {
 
 	@Container
