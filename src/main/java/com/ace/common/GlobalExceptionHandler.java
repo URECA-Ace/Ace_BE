@@ -47,7 +47,9 @@ public class GlobalExceptionHandler {
 		String incidentId = null;
 
 		if (errorCode.getStatus().is5xxServerError()) {
-			incidentId = logServerError(errorCode.name(), ex, request);
+			// 저장 실패처럼 이미 실패 기록을 남긴 경로는 같은 식별자를 그대로 쓴다.
+			// 여기서 새로 발급하면 응답의 incidentId 와 issue_failure_log 가 서로 다른 값이 된다
+			incidentId = logServerError(errorCode.name(), ex, request, ex.getIncidentId());
 		} else {
 			log.warn("[{}] request rejected: method={}, path={}",
 					errorCode, request.getMethod(), request.getRequestURI());
@@ -219,7 +221,17 @@ public class GlobalExceptionHandler {
 	}
 
 	private String logServerError(String code, Throwable ex, HttpServletRequest request) {
-		String incidentId = UUID.randomUUID().toString();
+		return logServerError(code, ex, request, null);
+	}
+
+	private String logServerError(
+			String code,
+			Throwable ex,
+			HttpServletRequest request,
+			String presetIncidentId) {
+		String incidentId = presetIncidentId != null
+				? presetIncidentId
+				: UUID.randomUUID().toString();
 		log.error("[{}] server error: incidentId={}, method={}, path={}, exceptionType={}\n{}",
 				code, incidentId, request.getMethod(), request.getRequestURI(),
 				ex.getClass().getName(), sanitizedStackTrace(ex));
