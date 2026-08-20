@@ -45,7 +45,7 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform {
-		excludeTags 'redis-integration', 'redis-benchmark'
+		excludeTags 'redis-integration', 'redis-benchmark', 'issuance-accuracy'
 	}
 }
 
@@ -60,6 +60,24 @@ tasks.register('redisIntegrationTest', Test) {
 	shouldRunAfter tasks.named('test')
 	systemProperty 'redis.host', System.getProperty('redis.host', 'localhost')
 	systemProperty 'redis.port', System.getProperty('redis.port', '6379')
+}
+
+tasks.register('issuanceAccuracyTest', Test) {
+	description = '임시 발급 정확성 검증 - Redis 승인 수와 MySQL 저장 수가 같은지 (MySQL + Redis 필요)'
+	group = 'verification'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform {
+		includeTags 'issuance-accuracy'
+	}
+	shouldRunAfter tasks.named('test')
+	// 기본은 과제 요구 수치. 빠르게 돌릴 때는 -Dissuance.requests= 로 줄인다
+	systemProperty 'issuance.requests', System.getProperty('issuance.requests', '20000')
+	systemProperty 'issuance.stock', System.getProperty('issuance.stock', '10000')
+	systemProperty 'issuance.threads', System.getProperty('issuance.threads', '100')
+	if (System.getProperty('issuance.debug') != null) {
+		systemProperty 'issuance.debug', System.getProperty('issuance.debug')
+	}
 }
 
 tasks.register('redisLuaBenchmark', Test) {
