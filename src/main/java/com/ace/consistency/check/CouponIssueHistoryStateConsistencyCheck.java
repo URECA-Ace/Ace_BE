@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,15 +90,21 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
 				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
-		SampledViolationQueryResult result =
-				SampledViolationQueryResult.query(jdbcTemplate, VIOLATION_SQL, params);
-		if (result.violationCount() == 0) {
+		List<Map<String, Object>> violations = jdbcTemplate.queryForList(VIOLATION_SQL, params);
+		if (violations.isEmpty()) {
 			return CheckOutcome.pass();
+		}
+		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
+		List<Map<String, Object>> sample = new ArrayList<>(violations.size());
+		for (Map<String, Object> violation : violations) {
+			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
+			sampleRow.remove("total_violation_count");
+			sample.add(sampleRow);
 		}
 
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("rule", "coupon_issue.status must equal the latest coupon_history.to_status");
-		detail.put("sample", result.sample());
-		return CheckOutcome.fail(result.violationCount(), detail);
+		detail.put("sample", sample);
+		return CheckOutcome.fail(violationCount, detail);
 	}
 }

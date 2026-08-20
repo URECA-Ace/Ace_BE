@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -151,10 +152,16 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 			default -> throw new IllegalArgumentException("Unsupported scope type: " + scope.getType());
 		}
 
-		SampledViolationQueryResult result =
-				SampledViolationQueryResult.query(jdbcTemplate, violationSql, params);
-		if (result.violationCount() == 0) {
+		List<Map<String, Object>> violations = jdbcTemplate.queryForList(violationSql, params);
+		if (violations.isEmpty()) {
 			return CheckOutcome.pass();
+		}
+		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
+		List<Map<String, Object>> sample = new ArrayList<>(violations.size());
+		for (Map<String, Object> violation : violations) {
+			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
+			sampleRow.remove("total_violation_count");
+			sample.add(sampleRow);
 		}
 
 		Map<String, Object> detail = new LinkedHashMap<>();
@@ -168,7 +175,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 		}
 		detail.put("checkedAt", checkedAt);
 		detail.put("allowedDelayMillis", allowedDelayMillis);
-		detail.put("sample", result.sample());
-		return CheckOutcome.fail(result.violationCount(), detail);
+		detail.put("sample", sample);
+		return CheckOutcome.fail(violationCount, detail);
 	}
 }
