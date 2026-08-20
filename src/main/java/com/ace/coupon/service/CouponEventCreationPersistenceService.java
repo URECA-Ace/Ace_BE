@@ -7,9 +7,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.coupon.entity.CampaignRedisInitialization;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
+import com.ace.coupon.repository.CampaignRedisInitializationRepository;
 import com.ace.coupon.repository.CouponEventRepository;
 import com.ace.coupon.repository.CouponRepository;
 
@@ -23,6 +25,7 @@ public class CouponEventCreationPersistenceService {
 
 	private final CouponRepository couponRepository;
 	private final CouponEventRepository couponEventRepository;
+	private final CampaignRedisInitializationRepository initializationRepository;
 
 	@Transactional
 	public CouponEvent create(
@@ -49,6 +52,8 @@ public class CouponEventCreationPersistenceService {
 				.createdAt(now)
 				.updatedAt(now)
 				.build();
-		return couponEventRepository.saveAndFlush(event);
+		CouponEvent saved = couponEventRepository.saveAndFlush(event);
+		initializationRepository.save(CampaignRedisInitialization.pending(saved.getId(), now));
+		return saved;
 	}
 }

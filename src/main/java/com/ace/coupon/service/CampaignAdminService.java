@@ -12,11 +12,11 @@ import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.redis.CampaignInitializationResult;
 import com.ace.coupon.redis.CampaignRedisInitializer;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
+import com.ace.coupon.persistence.relay.RelayTargetProvider;
 import com.ace.coupon.repository.CouponEventRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.ace.coupon.persistence.relay.RelayTargetProvider;
 
 /**
  * 캠페인 Redis 초기화.
@@ -33,6 +33,7 @@ public class CampaignAdminService {
 
 	private final CouponEventRepository couponEventRepository;
 	private final CampaignRedisInitializer campaignRedisInitializer;
+	private final CampaignRedisInitializationStateService initializationStateService;
 	private final CouponIssueRedisProperties properties;
 
 	@Transactional(readOnly = true)
@@ -51,29 +52,66 @@ public class CampaignAdminService {
 			throw new IllegalArgumentException("영속화된 캠페인이 필요합니다.");
 		}
 
-		CampaignInitializationResult result = campaignRedisInitializer.initialize(event);
+		initializationStateService.recordAttempt(event.getId());
+
+		CampaignInitializationResult result;
+		try {
+			result = campaignRedisInitializer.initialize(event);
+		} catch (RuntimeException exception) {
+			recordFailureSafely(event.getId(), "REDIS_CALL_FAILED", exception.getMessage(), exception);
+			throw exception;
+		}
 		log.info("캠페인 Redis 초기화: eventId={}, result={}, totalStock={}",
 				event.getId(), result, event.getTotalStock());
 
+		if (result == CampaignInitializationResult.INITIALIZED
+				|| result == CampaignInitializationResult.ALREADY_INITIALIZED) {
+			initializationStateService.recordSuccess(event.getId());
+			return response(event, result);
+		}
+
+		CouponException failure = initializationFailure(event, result);
+		recordFailureSafely(event.getId(), result.name(), failure.getMessage(), failure);
+		throw failure;
+	}
+
+	private CouponException initializationFailure(
+			CouponEvent event,
+			CampaignInitializationResult result) {
 		return switch (result) {
 			// 재실행해도 같은 설정이면 성공으로 본다. 부하테스트 스크립트가 매번 확인하고 넘어갈 수 있어야 한다
-			case INITIALIZED, ALREADY_INITIALIZED -> response(event, result);
-			case CONFIGURATION_CONFLICT -> throw new CouponException(
+			case INITIALIZED, ALREADY_INITIALIZED -> throw new IllegalArgumentException(
+					"성공한 초기화 결과는 실패로 변환할 수 없습니다: " + result);
+			case CONFIGURATION_CONFLICT -> new CouponException(
 					ErrorCode.CAMPAIGN_CONFIG_CONFLICT,
 					"회차 %d 가 이미 다른 설정으로 초기화되어 있습니다. 키를 지우고 다시 실행하세요."
 							.formatted(event.getId()));
 			// 서버 잘못이 아니라 입력 잘못
 			// 이미 마감된 회차를 올리려는 경우가 대부분이라 사유를 알려준다
-			case INVALID_CONFIGURATION -> throw new CouponException(
+			case INVALID_CONFIGURATION -> new CouponException(
 					ErrorCode.CAMPAIGN_NOT_INITIALIZABLE,
 					("회차 %d 를 초기화할 수 없습니다. 보존기간이 지났거나 설정이 올바르지 않습니다. "
 							+ "openAt=%s, closeAt=%s, totalStock=%d")
 							.formatted(event.getId(), event.getOpenAt(), event.getCloseAt(),
 									event.getTotalStock()));
-			case INTERNAL_WRITE_ERROR -> throw new CouponException(
+			case INTERNAL_WRITE_ERROR -> new CouponException(
 					ErrorCode.CAMPAIGN_INIT_FAILED,
 					ErrorCode.CAMPAIGN_INIT_FAILED.getDefaultMessage());
 		};
+	}
+
+	private void recordFailureSafely(
+			Long eventId,
+			String errorCode,
+			String errorMessage,
+			RuntimeException original) {
+		try {
+			initializationStateService.recordFailure(eventId, errorCode, errorMessage);
+		} catch (RuntimeException recordingFailure) {
+			original.addSuppressed(recordingFailure);
+			log.error("캠페인 Redis 초기화 실패 상태 기록 실패: eventId={}, errorCode={}",
+					eventId, errorCode, recordingFailure);
+		}
 	}
 
 	private CampaignInitializationResponse response(
