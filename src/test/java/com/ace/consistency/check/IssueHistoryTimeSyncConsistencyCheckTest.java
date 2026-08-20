@@ -11,13 +11,13 @@ import org.springframework.jdbc.support.KeyHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class IssueHistoryTimeSyncCheckTest extends CheckIntegrationTestBase {
+class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 
-	private IssueHistoryTimeSyncCheck check;
+	private IssueHistoryTimeSyncConsistencyCheck check;
 
 	@BeforeEach
 	void setUp() {
-		check = new IssueHistoryTimeSyncCheck(jdbcTemplate);
+		check = new IssueHistoryTimeSyncConsistencyCheck(jdbcTemplate);
 	}
 
 	@Test

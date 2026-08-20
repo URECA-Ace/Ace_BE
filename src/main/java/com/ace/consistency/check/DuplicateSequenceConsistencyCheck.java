@@ -20,7 +20,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class DuplicateSequenceCheck implements ConsistencyCheck {
+public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;

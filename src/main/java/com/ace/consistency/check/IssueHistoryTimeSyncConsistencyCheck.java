@@ -21,7 +21,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class IssueHistoryTimeSyncCheck implements ConsistencyCheck {
+public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final int SAMPLE_LIMIT = 20;
 	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간

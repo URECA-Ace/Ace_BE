@@ -16,7 +16,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * 쿼리 수준까지 완벽하게 통합 검증을 수행하도록 지원하는 Base 클래스.
  */
 @SpringBootTest
-public abstract class CheckIntegrationTestBase {
+public abstract class ConsistencyCheckIntegrationTestBase {
 
     static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("ace")

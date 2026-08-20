@@ -15,24 +15,25 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 6. 이벤트·로그 기반 검증 (Redis vs MySQL 유실 검증)
+ * 이벤트·로그 기반 검증 (Redis vs MySQL 유실 검증)
  *
- * Redis의 발급 순번(Sequence) 카운터와 MySQL의 실제 적재 건수를 대조하여,
- * Kafka 비동기 파이프라인 구간(Redis -> Relay -> Kafka -> Consumer)에서
+ * MySQL의 최초 총 재고(Total Stock)와 Redis의 실시간 잔여 재고(Remaining Stock)를 비교해 산출한 기대 발급 건수와
+ * MySQL의 실제 적재 건수를 대조하여,  비동기 파이프라인 구간에서
  * 메시지가 유실(Loss)되었는지 Cross-Datastore 방식으로 검증합니다.
+ * (Redis 장애 복구 시 잔여 재고로 재초기화되는 상황에서도 안전하게 동작하도록 설계됨)
  */
 @Component
 @RequiredArgsConstructor
-public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
+public class RedisMysqlLossConsistencyConsistencyCheck implements ConsistencyCheck {
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final StringRedisTemplate redisTemplate;
 
 	private static final String COUNT_SQL = """
-            SELECT COUNT(*) 
-            FROM coupon_issue 
-            WHERE event_id = :eventId 
-              AND issue_sequence IS NOT NULL
+            SELECT total_stock, 
+                   (SELECT COUNT(*) FROM coupon_issue WHERE event_id = :eventId AND issue_sequence IS NOT NULL) as actual_count
+            FROM coupon_event
+            WHERE event_id = :eventId
             """;
 
 	@Override
@@ -44,15 +45,13 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		Long eventId = scope.getEventId();
-		
+
 		// 1. 비동기 파이프라인(Stream)에 아직 처리 중인 메시지(Pending)가 있는지 확인
-		// 질문자님의 완벽한 직관대로, eventId에 종속된 독립적인 스트림 키를 가져옵니다!
 		String streamKey = CouponRedisKeys.campaign(eventId).issueStream();
 		try {
 			long pendingCount = redisTemplate.opsForStream().groups(streamKey).stream()
 					.mapToLong(org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroup::pendingCount)
 					.sum();
-			
 			// 아직 작업자(Consumer)가 DB에 밀어넣고 있는 중이라면, 오탐지를 막기 위해 이번 검사는 조용히 스킵합니다.
 			if (pendingCount > 0) {
 				return CheckOutcome.pass();
@@ -62,19 +61,27 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 			// PENDING이 없는 것과 동일하므로 무시하고 아래 검증 로직으로 넘어갑니다.
 		}
 
-		// 2. Redis에서 기대 발급 건수(Sequence MAX) 조회
-		String sequenceKey = CouponRedisKeys.campaign(eventId).sequence();
-		String redisValue = redisTemplate.opsForValue().get(sequenceKey);
-		
-		// Redis에 값이 없다면 쿠폰이 한 건도 발급 승인되지 않은 상태
-		long expectedCount = (redisValue == null) ? 0L : Long.parseLong(redisValue);
-
-		// 3. MySQL에서 실제 저장 건수 조회
+		// 2. MySQL에서 최초 총 재고(Total Stock)와 실제 적재 건수(Actual Count) 동시 조회
 		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventId);
-		Integer mysqlCount = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
-		long actualCount = (mysqlCount == null) ? 0L : mysqlCount;
+		List<Map<String, Object>> dbResults = jdbcTemplate.queryForList(COUNT_SQL, params);
+		if (dbResults.isEmpty()) {
+			return CheckOutcome.pass(); // 이벤트가 존재하지 않으면 검증 불필요
+		}
+		
+		long totalStock = ((Number) dbResults.get(0).get("total_stock")).longValue();
+		long actualCount = ((Number) dbResults.get(0).get("actual_count")).longValue();
 
-		// 3. 건수 비교
+		// 3. Redis에서 잔여 재고(Remaining Stock) 조회
+		String stockKey = CouponRedisKeys.campaign(eventId).stock();
+		String stockValue = redisTemplate.opsForValue().get(stockKey);
+		
+		// Redis에 값이 없다면 아직 이벤트가 시작되지 않아 재고가 차감되지 않은 상태 (또는 만료됨)
+		long remainingStock = (stockValue == null) ? totalStock : Long.parseLong(stockValue);
+		
+		// 장애 복구로 인해 Redis 잔여 재고가 재초기화 되었더라도, 절대 변하지 않는 기준점(총 재고)을 바탕으로 기대 건수 계산
+		long expectedCount = totalStock - remainingStock;
+
+		// 4. 건수 비교
 		if (expectedCount == actualCount) {
 			return CheckOutcome.pass();
 		}
@@ -82,7 +89,9 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 		// 유실 또는 불일치 발생
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("eventId", eventId);
-		detail.put("expectedCount (Redis)", expectedCount);
+		detail.put("totalStock (MySQL)", totalStock);
+		detail.put("remainingStock (Redis)", remainingStock);
+		detail.put("expectedCount (Calculated)", expectedCount);
 		detail.put("actualCount (MySQL)", actualCount);
 		detail.put("lostCount", expectedCount - actualCount);
 		detail.put("reason", "비동기 파이프라인 이벤트 유실 의심: Redis에서 승인된 쿠폰 수량과 DB에 적재된 수량이 일치하지 않습니다.");

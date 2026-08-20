@@ -11,7 +11,7 @@ import org.springframework.jdbc.support.KeyHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class StateMachineConsistencyCheckTest extends CheckIntegrationTestBase {
+class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 
 	private StateMachineConsistencyCheck check;
 

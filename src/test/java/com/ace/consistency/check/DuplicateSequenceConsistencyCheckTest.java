@@ -10,13 +10,13 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class DuplicateSequenceCheckTest extends CheckIntegrationTestBase {
+class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 
-	private DuplicateSequenceCheck check;
+	private DuplicateSequenceConsistencyCheck check;
 
 	@BeforeEach
 	void setUp() {
-		check = new DuplicateSequenceCheck(jdbcTemplate);
+		check = new DuplicateSequenceConsistencyCheck(jdbcTemplate);
 		try {
 			jdbcTemplate.getJdbcOperations().execute("ALTER TABLE coupon_issue DROP INDEX uk_coupon_issue_event_sequence");
 		} catch (Exception e) {
