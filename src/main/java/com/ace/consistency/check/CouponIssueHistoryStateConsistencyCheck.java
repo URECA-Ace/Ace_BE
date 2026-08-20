@@ -59,12 +59,11 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 			%s
 			AND (latest.history_id IS NULL OR NOT (latest.to_status <=> ci.status))
 			""".formatted(ISSUE_CONDITION);
-	private static final String COUNT_SQL = LATEST_HISTORY_CTE + "SELECT COUNT(*) FROM coupon_issue ci "
-			+ LATEST_HISTORY_JOIN + " WHERE " + CONDITION;
-	private static final String SAMPLE_SQL = """
+	private static final String VIOLATION_SQL = """
 			%s
 			SELECT ci.issue_id, ci.event_id, ci.status AS current_status,
 			       latest.history_id, latest.from_status, latest.to_status, latest.occurred_at,
+			       COUNT(*) OVER() AS total_violation_count,
 			       CASE
 			         WHEN latest.history_id IS NULL THEN 'NO_HISTORY'
 			         ELSE 'LATEST_STATUS_MISMATCH'
@@ -90,16 +89,15 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
 				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
-		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
-		int violationCount = count == null ? 0 : count;
-		if (violationCount == 0) {
+		SampledViolationQueryResult result =
+				SampledViolationQueryResult.query(jdbcTemplate, VIOLATION_SQL, params);
+		if (result.violationCount() == 0) {
 			return CheckOutcome.pass();
 		}
 
-		List<Map<String, Object>> sample = jdbcTemplate.queryForList(SAMPLE_SQL, params);
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("rule", "coupon_issue.status must equal the latest coupon_history.to_status");
-		detail.put("sample", sample);
-		return CheckOutcome.fail(violationCount, detail);
+		detail.put("sample", result.sample());
+		return CheckOutcome.fail(result.violationCount(), detail);
 	}
 }

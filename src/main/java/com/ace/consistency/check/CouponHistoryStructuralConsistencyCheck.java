@@ -42,10 +42,9 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 
 	private static final String FROM_SQL =
 			" FROM coupon_history h LEFT JOIN coupon_issue ci ON ci.issue_id = h.issue_id WHERE ";
-	private static final String COUNT_SQL = "SELECT COUNT(*)" + FROM_SQL
-			+ SCOPE_CONDITION + " AND " + BASE_CONDITION;
-	private static final String SAMPLE_SQL = ("""
+	private static final String VIOLATION_SQL = ("""
 			SELECT h.history_id, h.issue_id, h.from_status, h.to_status, h.occurred_at, h.recorded_at,
+			       COUNT(*) OVER() AS total_violation_count,
 			       CASE
 			         WHEN h.to_status IS NULL THEN 'MISSING_TO_STATUS'
 			         WHEN h.occurred_at IS NULL OR h.recorded_at IS NULL THEN 'MISSING_TIMESTAMP'
@@ -65,17 +64,16 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope);
-		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
-		int violationCount = count == null ? 0 : count;
-		if (violationCount == 0) {
+		SampledViolationQueryResult result =
+				SampledViolationQueryResult.query(jdbcTemplate, VIOLATION_SQL, params);
+		if (result.violationCount() == 0) {
 			return CheckOutcome.pass();
 		}
 
-		List<Map<String, Object>> sample = jdbcTemplate.queryForList(SAMPLE_SQL, params);
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("rule", "coupon_history structural fields and allowed transition shape");
-		detail.put("sample", sample);
-		return CheckOutcome.fail(violationCount, detail);
+		detail.put("sample", result.sample());
+		return CheckOutcome.fail(result.violationCount(), detail);
 	}
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {

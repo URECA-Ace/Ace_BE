@@ -42,11 +42,10 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 			)
 			""";
 
-	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE "
-			+ SCOPE_CONDITION + " AND " + BASE_CONDITION;
-	private static final String SAMPLE_SQL = """
+	private static final String VIOLATION_SQL = """
 			SELECT ci.issue_id, ci.event_id, ci.user_id, ci.status,
 			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at,
+			       COUNT(*) OVER() AS total_violation_count,
 			       CASE
 			         WHEN ci.user_id IS NULL THEN 'MISSING_USER_ID'
 			         WHEN ci.issue_sequence IS NULL OR ci.issue_sequence <= 0 THEN 'INVALID_ISSUE_SEQUENCE'
@@ -78,17 +77,16 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope);
-		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
-		int violationCount = count == null ? 0 : count;
-		if (violationCount == 0) {
+		SampledViolationQueryResult result =
+				SampledViolationQueryResult.query(jdbcTemplate, VIOLATION_SQL, params);
+		if (result.violationCount() == 0) {
 			return CheckOutcome.pass();
 		}
 
-		List<Map<String, Object>> sample = jdbcTemplate.queryForList(SAMPLE_SQL, params);
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("rule", "coupon_issue structural fields and status-field combination");
-		detail.put("sample", sample);
-		return CheckOutcome.fail(violationCount, detail);
+		detail.put("sample", result.sample());
+		return CheckOutcome.fail(result.violationCount(), detail);
 	}
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {

@@ -16,7 +16,6 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.sql.Timestamp;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -27,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @JdbcTest
 @Testcontainers
 class RowLevelConsistencyCheckJdbcTest {
-	private static final Duration TEST_ALLOWED_EXPIRATION_DELAY = Duration.ofMinutes(30);
+	private static final long TEST_ALLOWED_EXPIRATION_DELAY_MS = 30 * 60 * 1_000L;
 	private static final Clock TEST_CLOCK = Clock.fixed(
 			Instant.parse("2026-08-18T03:00:00Z"), ZoneId.of("Asia/Seoul"));
 	private static final LocalDateTime TEST_CHECKED_AT =
@@ -108,6 +107,20 @@ class RowLevelConsistencyCheckJdbcTest {
 				.check(Scope.all(List.of(1L), TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 전체_위반_건수는_20건_샘플_제한과_무관하게_계산한다() {
+		for (int index = 0; index < 25; index++) {
+			insertIssue(null, null, 1L);
+		}
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(25);
+		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(20);
 	}
 
 	@Test
@@ -418,7 +431,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 	private CouponExpirationLagConsistencyCheck expirationLagCheck() {
 		return new CouponExpirationLagConsistencyCheck(
-				namedJdbcTemplate, TEST_ALLOWED_EXPIRATION_DELAY, TEST_CLOCK);
+				namedJdbcTemplate, TEST_ALLOWED_EXPIRATION_DELAY_MS, TEST_CLOCK);
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {

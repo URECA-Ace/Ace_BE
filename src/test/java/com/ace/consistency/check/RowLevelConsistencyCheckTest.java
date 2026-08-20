@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -14,7 +13,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -24,8 +22,8 @@ class RowLevelConsistencyCheckTest {
 
 	@Test
 	void 구조_위반이_없으면_통과한다() {
-		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
-				.thenReturn(0);
+		when(jdbcTemplate.queryForList(anyString(), any(MapSqlParameterSource.class)))
+				.thenReturn(List.of());
 
 		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(jdbcTemplate)
 				.check(Scope.all(LocalDateTime.now()));
@@ -36,13 +34,12 @@ class RowLevelConsistencyCheckTest {
 
 	@Test
 	void 현재_상태와_최신_이력이_다르면_실패_상세를_반환한다() {
-		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
-				.thenReturn(1);
 		when(jdbcTemplate.queryForList(anyString(), any(MapSqlParameterSource.class)))
 				.thenReturn(List.of(Map.of(
 						"issue_id", 10L,
 						"current_status", "USED",
-						"to_status", "ISSUED")));
+						"to_status", "ISSUED",
+						"total_violation_count", 1L)));
 
 		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(jdbcTemplate)
 				.check(Scope.all(LocalDateTime.now()));
@@ -50,6 +47,8 @@ class RowLevelConsistencyCheckTest {
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail()).containsKey("sample");
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.doesNotContain("total_violation_count");
 	}
 
 	@Test
@@ -64,7 +63,7 @@ class RowLevelConsistencyCheckTest {
 	@Test
 	void 만료_시차_검증은_이벤트와_시간_구간과_전체_범위를_지원한다() {
 		CouponExpirationLagConsistencyCheck check =
-				new CouponExpirationLagConsistencyCheck(jdbcTemplate, Duration.ofMinutes(30));
+				new CouponExpirationLagConsistencyCheck(jdbcTemplate, 30 * 60 * 1_000L);
 
 		assertThat(check.supportedScopeTypes())
 				.containsExactlyInAnyOrder(
