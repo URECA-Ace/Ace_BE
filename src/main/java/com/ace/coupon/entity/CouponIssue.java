@@ -99,6 +99,7 @@ public class CouponIssue {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
-	@Column(name = "message_id", length = 36)
+	// campaignId-entryId 형태라 36자로는 부족
+	@Column(name = "message_id", length = 64)
 	private String messageId;
 }
