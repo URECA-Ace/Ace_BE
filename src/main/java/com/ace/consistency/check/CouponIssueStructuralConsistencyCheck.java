@@ -20,40 +20,43 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
+	private static final String SCOPE_CONDITION = """
+			(
+				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR :scopeMode = 'ALL_GLOBAL'
+				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
+			)
+			""";
 	private static final String BASE_CONDITION = """
-			(:eventId IS NULL OR ci.event_id = :eventId)
-			AND (
-				ci.event_id IS NULL OR ci.user_id IS NULL OR ci.issue_sequence IS NULL
+			(
+				ci.user_id IS NULL OR ci.issue_sequence IS NULL
 				OR ci.issue_sequence <= 0 OR ci.request_id IS NULL OR ci.request_id NOT REGEXP
 					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				OR (ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
-					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
+					'^[1-9][0-9]*-[0-9]+-[0-9]+$')
+				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
 				OR ci.issued_at IS NULL OR ci.valid_from IS NULL OR ci.valid_to IS NULL OR ci.created_at IS NULL
 				OR ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to OR ci.created_at < ci.issued_at
-				OR (ci.status IN ('ISSUED','EXPIRED') AND (ci.used_at IS NOT NULL OR ci.canceled_at IS NOT NULL))
-				OR (ci.status = 'USED' AND (ci.used_at IS NULL OR ci.canceled_at IS NOT NULL
-					OR ci.used_at < ci.valid_from))
-				OR (ci.status = 'CANCELED' AND (ci.canceled_at IS NULL OR ci.used_at IS NOT NULL
-					OR ci.canceled_at < ci.issued_at))
+				OR (ci.status IN ('ISSUED','EXPIRED') AND ci.used_at IS NOT NULL)
+				OR (ci.status = 'USED' AND (ci.used_at IS NULL OR ci.used_at < ci.valid_from))
 			)
 			""";
 
-	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE " + BASE_CONDITION;
+	private static final String COUNT_SQL = "SELECT COUNT(*) FROM coupon_issue ci WHERE "
+			+ SCOPE_CONDITION + " AND " + BASE_CONDITION;
 	private static final String SAMPLE_SQL = """
 			SELECT ci.issue_id, ci.event_id, ci.user_id, ci.status,
-			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at, ci.canceled_at,
+			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at,
 			       CASE
-			         WHEN ci.event_id IS NULL THEN 'MISSING_EVENT_ID'
 			         WHEN ci.user_id IS NULL THEN 'MISSING_USER_ID'
 			         WHEN ci.issue_sequence IS NULL OR ci.issue_sequence <= 0 THEN 'INVALID_ISSUE_SEQUENCE'
 				         WHEN ci.request_id IS NULL OR ci.request_id NOT REGEXP
 				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				              THEN 'INVALID_REQUEST_ID'
 				         WHEN ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
-				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+				              '^[1-9][0-9]*-[0-9]+-[0-9]+$'
 				              THEN 'INVALID_MESSAGE_ID_FORMAT'
-			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
+			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
 			              THEN 'INVALID_STATUS'
 			         WHEN ci.issued_at IS NULL OR ci.valid_from IS NULL
 			              OR ci.valid_to IS NULL OR ci.created_at IS NULL THEN 'MISSING_TIMESTAMP'
@@ -62,10 +65,10 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 			         ELSE 'INVALID_STATUS_FIELDS'
 			       END AS violation_type
 			FROM coupon_issue ci
-			WHERE %s
+			WHERE %s AND %s
 			ORDER BY ci.issue_id
 			LIMIT %d
-			""".formatted(BASE_CONDITION, SAMPLE_LIMIT);
+			""".formatted(SCOPE_CONDITION, BASE_CONDITION, SAMPLE_LIMIT);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
@@ -74,7 +77,7 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		MapSqlParameterSource params = eventParameter(scope);
+		MapSqlParameterSource params = scopeParameters(scope);
 		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
 		int violationCount = count == null ? 0 : count;
 		if (violationCount == 0) {
@@ -88,8 +91,13 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 		return CheckOutcome.fail(violationCount, detail);
 	}
 
-	private MapSqlParameterSource eventParameter(Scope scope) {
-		Long eventId = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-		return new MapSqlParameterSource("eventId", eventId);
+	private MapSqlParameterSource scopeParameters(Scope scope) {
+		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
+		return new MapSqlParameterSource()
+				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("eventId", eventScope ? scope.getEventId() : null)
+				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
+				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
 	}
 }

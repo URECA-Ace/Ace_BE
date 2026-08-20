@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -25,7 +27,8 @@ class RowLevelConsistencyCheckTest {
 		when(jdbcTemplate.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Integer.class)))
 				.thenReturn(0);
 
-		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(jdbcTemplate).check(Scope.all());
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(jdbcTemplate)
+				.check(Scope.all(LocalDateTime.now()));
 
 		assertThat(outcome.isPass()).isTrue();
 		assertThat(outcome.getViolationCount()).isZero();
@@ -41,7 +44,8 @@ class RowLevelConsistencyCheckTest {
 						"current_status", "USED",
 						"to_status", "ISSUED")));
 
-		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(jdbcTemplate).check(Scope.all());
+		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(jdbcTemplate)
+				.check(Scope.all(LocalDateTime.now()));
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
@@ -55,5 +59,17 @@ class RowLevelConsistencyCheckTest {
 
 		assertThat(check.supportedScopeTypes())
 				.containsExactlyInAnyOrder(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+	}
+
+	@Test
+	void 만료_시차_검증은_이벤트와_시간_구간과_전체_범위를_지원한다() {
+		CouponExpirationLagConsistencyCheck check =
+				new CouponExpirationLagConsistencyCheck(jdbcTemplate, Duration.ofMinutes(30));
+
+		assertThat(check.supportedScopeTypes())
+				.containsExactlyInAnyOrder(
+						Scope.ScopeType.EVENT,
+						Scope.ScopeType.AS_OF_RANGE,
+						Scope.ScopeType.ALL);
 	}
 }

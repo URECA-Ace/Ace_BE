@@ -24,6 +24,21 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
+	private static final String SCOPED_ISSUE_CONDITION = """
+			(
+				(:scopeMode = 'EVENT' AND scoped_issue.event_id = :eventId)
+				OR :scopeMode = 'ALL_GLOBAL'
+				OR (:scopeMode = 'ALL_PAGE' AND scoped_issue.event_id IN (:eventIds)
+				    AND scoped_issue.created_at < :to)
+			)
+			""";
+	private static final String ISSUE_CONDITION = """
+			(
+				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR :scopeMode = 'ALL_GLOBAL'
+				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
+			)
+			""";
 	private static final String LATEST_HISTORY_CTE = """
 			WITH latest_history AS (
 				SELECT h.history_id, h.issue_id, h.from_status, h.to_status, h.occurred_at,
@@ -33,17 +48,17 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 				       ) AS rn
 				FROM coupon_history h
 				JOIN coupon_issue scoped_issue ON scoped_issue.issue_id = h.issue_id
-				WHERE (:eventId IS NULL OR scoped_issue.event_id = :eventId)
+				WHERE %s
 			)
-			""";
+			""".formatted(SCOPED_ISSUE_CONDITION);
 	private static final String LATEST_HISTORY_JOIN = """
 			LEFT JOIN latest_history latest
 			  ON latest.issue_id = ci.issue_id AND latest.rn = 1
 			""";
 	private static final String CONDITION = """
-			(:eventId IS NULL OR ci.event_id = :eventId)
+			%s
 			AND (latest.history_id IS NULL OR NOT (latest.to_status <=> ci.status))
-			""";
+			""".formatted(ISSUE_CONDITION);
 	private static final String COUNT_SQL = LATEST_HISTORY_CTE + "SELECT COUNT(*) FROM coupon_issue ci "
 			+ LATEST_HISTORY_JOIN + " WHERE " + CONDITION;
 	private static final String SAMPLE_SQL = """
@@ -68,8 +83,13 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		Long eventId = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventId);
+		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
+		MapSqlParameterSource params = new MapSqlParameterSource()
+				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("eventId", eventScope ? scope.getEventId() : null)
+				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
+				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
 		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
 		int violationCount = count == null ? 0 : count;
 		if (violationCount == 0) {

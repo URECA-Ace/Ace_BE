@@ -20,16 +20,21 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
+	private static final String SCOPE_CONDITION = """
+			(
+				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR :scopeMode = 'ALL_GLOBAL'
+				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
+			)
+			""";
 	private static final String BASE_CONDITION = """
-			(:eventId IS NULL OR ci.event_id = :eventId)
-			AND (
-				h.issue_id IS NULL OR ci.issue_id IS NULL
-				OR h.to_status IS NULL OR h.occurred_at IS NULL OR h.recorded_at IS NULL
+			(
+				h.to_status IS NULL OR h.occurred_at IS NULL OR h.recorded_at IS NULL
 				OR h.recorded_at < h.occurred_at
-				OR h.to_status NOT IN ('ISSUED','USED','CANCELED','EXPIRED')
+				OR h.to_status NOT IN ('ISSUED','USED','EXPIRED')
 				OR (h.from_status IS NULL AND h.to_status <> 'ISSUED')
 				OR (h.from_status IS NOT NULL AND NOT (
-					(h.from_status = 'ISSUED' AND h.to_status IN ('USED','CANCELED','EXPIRED'))
+					(h.from_status = 'ISSUED' AND h.to_status IN ('USED','EXPIRED'))
 					OR (h.from_status = 'USED' AND h.to_status = 'ISSUED')
 				))
 			)
@@ -37,21 +42,20 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 
 	private static final String FROM_SQL =
 			" FROM coupon_history h LEFT JOIN coupon_issue ci ON ci.issue_id = h.issue_id WHERE ";
-	private static final String COUNT_SQL = "SELECT COUNT(*)" + FROM_SQL + BASE_CONDITION;
+	private static final String COUNT_SQL = "SELECT COUNT(*)" + FROM_SQL
+			+ SCOPE_CONDITION + " AND " + BASE_CONDITION;
 	private static final String SAMPLE_SQL = ("""
 			SELECT h.history_id, h.issue_id, h.from_status, h.to_status, h.occurred_at, h.recorded_at,
 			       CASE
-			         WHEN h.issue_id IS NULL THEN 'MISSING_ISSUE_ID'
-			         WHEN ci.issue_id IS NULL THEN 'ORPHAN_HISTORY'
 			         WHEN h.to_status IS NULL THEN 'MISSING_TO_STATUS'
 			         WHEN h.occurred_at IS NULL OR h.recorded_at IS NULL THEN 'MISSING_TIMESTAMP'
 			         WHEN h.recorded_at < h.occurred_at THEN 'INVALID_TIMESTAMP_ORDER'
-			         WHEN h.to_status NOT IN ('ISSUED','USED','CANCELED','EXPIRED') THEN 'INVALID_TO_STATUS'
+			         WHEN h.to_status NOT IN ('ISSUED','USED','EXPIRED') THEN 'INVALID_TO_STATUS'
 			         WHEN h.from_status IS NULL AND h.to_status <> 'ISSUED' THEN 'INVALID_INITIAL_TRANSITION'
 			         ELSE 'INVALID_STATUS_TRANSITION'
 			       END AS violation_type
-			%s%s ORDER BY h.history_id LIMIT %d
-			""").formatted(FROM_SQL, BASE_CONDITION, SAMPLE_LIMIT);
+			%s%s AND %s ORDER BY h.history_id LIMIT %d
+			""").formatted(FROM_SQL, SCOPE_CONDITION, BASE_CONDITION, SAMPLE_LIMIT);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
@@ -60,7 +64,7 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		MapSqlParameterSource params = eventParameter(scope);
+		MapSqlParameterSource params = scopeParameters(scope);
 		Integer count = jdbcTemplate.queryForObject(COUNT_SQL, params, Integer.class);
 		int violationCount = count == null ? 0 : count;
 		if (violationCount == 0) {
@@ -74,8 +78,13 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 		return CheckOutcome.fail(violationCount, detail);
 	}
 
-	private MapSqlParameterSource eventParameter(Scope scope) {
-		Long eventId = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-		return new MapSqlParameterSource("eventId", eventId);
+	private MapSqlParameterSource scopeParameters(Scope scope) {
+		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
+		return new MapSqlParameterSource()
+				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("eventId", eventScope ? scope.getEventId() : null)
+				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
+				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
 	}
 }
