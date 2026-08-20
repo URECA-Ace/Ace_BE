@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -35,19 +36,21 @@ public final class Scope {
 
 	private final ScopeType type;
 	private final Long eventId;          // EVENT 스코프일 때만 값 존재
+	private final List<Long> eventIds;   // ALL 스코프일 때만 값 존재
 	private final LocalDateTime from;    // AS_OF_RANGE 스코프일 때만 값 존재
-	private final LocalDateTime to;      // AS_OF_RANGE 스코프일 때만 값 존재
+	private final LocalDateTime to;      // AS_OF_RANGE 스코프 및 ALL 스코프일때 사용
 
-	private Scope(ScopeType type, Long eventId, LocalDateTime from, LocalDateTime to) {
+	private Scope(ScopeType type, Long eventId, List<Long> eventIds, LocalDateTime from, LocalDateTime to) {
 		this.type = type;
 		this.eventId = eventId;
+		this.eventIds = eventIds;
 		this.from = from;
 		this.to = to;
 	}
 
 	public static Scope ofEvent(Long eventId) {
 		Objects.requireNonNull(eventId, "eventId must not be null");
-		return new Scope(ScopeType.EVENT, eventId, null, null);
+		return new Scope(ScopeType.EVENT, eventId, null, null, null);
 	}
 
 	public static Scope ofAsOfRange(LocalDateTime from, LocalDateTime to) {
@@ -56,11 +59,18 @@ public final class Scope {
 		if (!from.isBefore(to)) {
 			throw new IllegalArgumentException("from must be strictly before to: from=" + from + ", to=" + to);
 		}
-		return new Scope(ScopeType.AS_OF_RANGE, null, from, to);
+		return new Scope(ScopeType.AS_OF_RANGE, null, null, from, to);
 	}
 
-	public static Scope all() {
-		return new Scope(ScopeType.ALL, null, null, null);
+	public static Scope all(List<Long> eventIds, LocalDateTime to) {
+		Objects.requireNonNull(eventIds, "eventIds must not be null");
+		Objects.requireNonNull(to, "to must not be null");
+		return new Scope(ScopeType.ALL, null, eventIds, null, to);
+	}
+
+	public static Scope all(LocalDateTime to) {
+		Objects.requireNonNull(to, "to must not be null");
+		return new Scope(ScopeType.ALL, null, null, null, to);
 	}
 
 	/** [내부 로직 전용] EVENT 스코프가 아닐 때 호출하면 예외를 던진다. JSON 직렬화 대상 아님. */
@@ -77,10 +87,12 @@ public final class Scope {
 		return from;
 	}
 
-	/** [내부 로직 전용] AS_OF_RANGE 스코프가 아닐 때 호출하면 예외를 던진다. JSON 직렬화 대상 아님. */
+	/** [내부 로직 전용] AS_OF_RANGE 또는 ALL 스코프가 아닐 때 호출하면 예외를 던진다. JSON 직렬화 대상 아님. */
 	@JsonIgnore
 	public LocalDateTime getTo() {
-		requireType(ScopeType.AS_OF_RANGE);
+		if (type != ScopeType.AS_OF_RANGE && type != ScopeType.ALL) {
+			throw new IllegalStateException("This accessor is only available for AS_OF_RANGE or ALL scope, but was " + type);
+		}
 		return to;
 	}
 
@@ -99,7 +111,7 @@ public final class Scope {
 	/** [JSON 직렬화 전용] AS_OF_RANGE 스코프가 아니면 예외 대신 null을 반환한다. */
 	@JsonProperty("to")
 	public LocalDateTime getToOrNull() {
-		return type == ScopeType.AS_OF_RANGE ? to : null;
+		return (type == ScopeType.AS_OF_RANGE || type == ScopeType.ALL) ? to : null;
 	}
 
 	private void requireType(ScopeType expected) {
