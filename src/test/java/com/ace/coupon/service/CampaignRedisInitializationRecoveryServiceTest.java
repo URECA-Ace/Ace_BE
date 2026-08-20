@@ -17,6 +17,7 @@ import org.mockito.Mockito;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import com.ace.coupon.entity.CouponEvent;
+import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.dto.response.CampaignInitializationResponse;
 import com.ace.coupon.redis.CampaignInitializationResult;
@@ -43,17 +44,16 @@ class CampaignRedisInitializationRecoveryServiceTest {
 	@DisplayName("활성 캠페인 중 Redis 상태가 없는 캠페인을 멱등 초기화한다")
 	void recoversActiveCampaigns() {
 		CouponEvent missing = event(1L);
-		CouponEvent initialized = event(2L);
-		given(couponEventRepository.findAllByStatusInAndCloseAtAfter(any(), any()))
-				.willReturn(List.of(missing, initialized));
+		given(couponEventRepository.findRedisInitializationRecoveryCandidates(
+				any(), any(), any()))
+				.willReturn(List.of(missing));
 		given(campaignAdminService.initialize(missing))
 				.willReturn(response(missing, CampaignInitializationResult.INITIALIZED));
-		given(campaignAdminService.initialize(initialized))
-				.willReturn(response(initialized, CampaignInitializationResult.ALREADY_INITIALIZED));
 
 		assertThat(service.recoverActiveCampaigns()).isOne();
 		verify(campaignAdminService).initialize(missing);
-		verify(campaignAdminService).initialize(initialized);
+		verify(couponEventRepository).findRedisInitializationRecoveryCandidates(
+				any(), any(), Mockito.eq(CampaignRedisInitializationStatus.INITIALIZED));
 	}
 
 	@Test
@@ -61,7 +61,7 @@ class CampaignRedisInitializationRecoveryServiceTest {
 	void continuesAfterOneCampaignFails() {
 		CouponEvent failed = event(1L);
 		CouponEvent recovered = event(2L);
-		given(couponEventRepository.findAllByStatusInAndCloseAtAfter(any(), any()))
+		given(couponEventRepository.findRedisInitializationRecoveryCandidates(any(), any(), any()))
 				.willReturn(List.of(failed, recovered));
 		given(campaignAdminService.initialize(failed))
 				.willThrow(new RedisConnectionFailureException("redis unavailable"));
