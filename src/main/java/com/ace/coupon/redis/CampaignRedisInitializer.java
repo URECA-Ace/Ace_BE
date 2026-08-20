@@ -14,16 +14,19 @@ import com.ace.coupon.entity.CouponEvent;
 public class CampaignRedisInitializer {
 
 	private final StringRedisTemplate redisTemplate;
-	private final RedisScript<Long> initializeScript;
+	private final RedisScript<List> initializeScript;
 	private final CouponIssueRedisProperties properties;
+	private final RedisLuaFailureObserver failureObserver;
 
 	public CampaignRedisInitializer(
 			StringRedisTemplate redisTemplate,
-			@Qualifier("couponCampaignInitializeScript") RedisScript<Long> initializeScript,
-			CouponIssueRedisProperties properties) {
+			@Qualifier("couponCampaignInitializeScript") RedisScript<List> initializeScript,
+			CouponIssueRedisProperties properties,
+			RedisLuaFailureObserver failureObserver) {
 		this.redisTemplate = redisTemplate;
 		this.initializeScript = initializeScript;
 		this.properties = properties;
+		this.failureObserver = failureObserver;
 	}
 
 	public CampaignInitializationResult initialize(CouponEvent campaign) {
@@ -52,7 +55,7 @@ public class CampaignRedisInitializer {
 
 		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
 		long expireAt = closeAt.plus(properties.retention()).toEpochMilli();
-		Long code = redisTemplate.execute(
+		List<?> response = redisTemplate.execute(
 				initializeScript,
 				List.of(
 						keys.metadata(),
@@ -66,9 +69,25 @@ public class CampaignRedisInitializer {
 				String.valueOf(expireAt),
 				String.valueOf(CouponRedisKeys.BITMAP_SEGMENT_BITS));
 
-		if (code == null) {
+		if (response == null || response.size() != 3) {
 			throw new IllegalStateException("캠페인 Redis 초기화 결과가 없습니다.");
 		}
-		return CampaignInitializationResult.from(code);
+		CampaignInitializationResult result = CampaignInitializationResult.from(number(response.get(0)));
+		RedisLuaDiagnosticStage stage = RedisLuaDiagnosticStage.from(number(response.get(1)));
+		failureObserver.observe(stage, result.name(), text(response.get(2)));
+		return result;
+	}
+
+	private long number(Object value) {
+		return value instanceof Number number
+				? number.longValue()
+				: Long.parseLong(text(value));
+	}
+
+	private String text(Object value) {
+		if (value instanceof byte[] bytes) {
+			return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+		}
+		return String.valueOf(value);
 	}
 }

@@ -22,6 +22,20 @@ local PERSISTENCE_FAILED = 8
 local INVALID_ARGUMENT = 9
 local INTERNAL_WRITE_ERROR = 10
 
+local DIAG_NONE = 0
+local DIAG_REQUEST_READ = 101
+local DIAG_METADATA_READ = 102
+local DIAG_STOCK_READ = 103
+local DIAG_SEQUENCE_READ = 104
+local DIAG_BITMAP_READ = 105
+local DIAG_REQUEST_WRITE = 111
+local DIAG_STREAM_WRITE = 112
+local DIAG_BITMAP_WRITE = 113
+local DIAG_BITMAP_EXPIRE = 114
+local DIAG_STREAM_EXPIRE = 115
+local DIAG_STOCK_DECREMENT = 116
+local DIAG_SEQUENCE_INCREMENT = 117
+
 local PENDING = 0
 local CONFIRMED = 1
 local COMPENSATED = 2
@@ -34,8 +48,15 @@ local requestId = ARGV[3]
 local campaignId = ARGV[4]
 local bitmapSegmentId = ARGV[5]
 
-local function response(code, sequence, remaining, decidedAt)
-    return {code, sequence or -1, remaining or -1, decidedAt or 0}
+local function response(code, sequence, remaining, decidedAt, diagnosticStage, diagnosticMessage)
+    return {
+        code,
+        sequence or -1,
+        remaining or -1,
+        decidedAt or 0,
+        diagnosticStage or DIAG_NONE,
+        diagnosticMessage or ''
+    }
 end
 
 local function isInteger(value)
@@ -44,6 +65,13 @@ end
 
 local function isError(result)
     return type(result) == 'table' and result['err'] ~= nil
+end
+
+local function errorDetail(result)
+    if isError(result) then
+        return string.sub(tostring(result['err']), 1, 256)
+    end
+    return string.sub('unexpected result: ' .. tostring(result), 1, 256)
 end
 
 local function validToken(value, maxLength)
@@ -82,9 +110,8 @@ local function packRecord(decisionCode, lifecycle, sequence, remaining, decidedA
 end
 
 local function remember(decisionCode, lifecycle, sequence, remaining, decidedAt)
-    local result = redis.pcall('HSET', KEYS[5], requestId,
+    return redis.pcall('HSET', KEYS[5], requestId,
             packRecord(decisionCode, lifecycle, sequence, remaining, decidedAt, decidedAt))
-    return not isError(result) and result == 1
 end
 
 local function validStoredState(code, lifecycle)
@@ -109,7 +136,8 @@ end
 -- requestId 기반 멱등 재요청 우선 처리
 local requestState = redis.pcall('HMGET', KEYS[5], requestId, '__schema__')
 if isError(requestState) then
-    return response(CORRUPTED_STATE, -1, -1, 0)
+    return response(CORRUPTED_STATE, -1, -1, 0,
+            DIAG_REQUEST_READ, errorDetail(requestState))
 end
 
 local previous = requestState[1]
@@ -152,8 +180,17 @@ local metadata = redis.pcall('HMGET', KEYS[1],
 local stockValue = redis.pcall('GET', KEYS[2])
 local sequenceValue = redis.pcall('GET', KEYS[3])
 
-if isError(metadata) or isError(stockValue) or isError(sequenceValue) then
-    return response(CORRUPTED_STATE, -1, -1, 0)
+if isError(metadata) then
+    return response(CORRUPTED_STATE, -1, -1, 0,
+            DIAG_METADATA_READ, errorDetail(metadata))
+end
+if isError(stockValue) then
+    return response(CORRUPTED_STATE, -1, -1, 0,
+            DIAG_STOCK_READ, errorDetail(stockValue))
+end
+if isError(sequenceValue) then
+    return response(CORRUPTED_STATE, -1, -1, 0,
+            DIAG_SEQUENCE_READ, errorDetail(sequenceValue))
 end
 
 if not metadata[1] and not metadata[2] and not metadata[3]
@@ -186,15 +223,19 @@ end
 
 -- Redis 서버 시각 기반 캠페인 구간 판정
 if now < openAt then
-    if not remember(EVENT_NOT_OPEN, TERMINAL, -1, stock, now) then
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    local rememberResult = remember(EVENT_NOT_OPEN, TERMINAL, -1, stock, now)
+    if isError(rememberResult) or rememberResult ~= 1 then
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_REQUEST_WRITE, errorDetail(rememberResult))
     end
     return response(EVENT_NOT_OPEN, -1, stock, now)
 end
 
 if now >= closeAt then
-    if not remember(EVENT_CLOSED, TERMINAL, -1, stock, now) then
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    local rememberResult = remember(EVENT_CLOSED, TERMINAL, -1, stock, now)
+    if isError(rememberResult) or rememberResult ~= 1 then
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_REQUEST_WRITE, errorDetail(rememberResult))
     end
     return response(EVENT_CLOSED, -1, stock, now)
 end
@@ -202,20 +243,25 @@ end
 -- 저장 대기 상태 포함 사용자 중복 차단
 local issued = redis.pcall('GETBIT', KEYS[4], bitOffset)
 if isError(issued) then
-    return response(CORRUPTED_STATE, -1, -1, now)
+    return response(CORRUPTED_STATE, -1, -1, now,
+            DIAG_BITMAP_READ, errorDetail(issued))
 end
 
 if issued == 1 then
-    if not remember(ALREADY_ISSUED, TERMINAL, -1, stock, now) then
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    local rememberResult = remember(ALREADY_ISSUED, TERMINAL, -1, stock, now)
+    if isError(rememberResult) or rememberResult ~= 1 then
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_REQUEST_WRITE, errorDetail(rememberResult))
     end
     return response(ALREADY_ISSUED, -1, stock, now)
 end
 
 -- 0 재고 선확인 기반 음수 재고 차단
 if stock == 0 then
-    if not remember(SOLD_OUT, TERMINAL, -1, stock, now) then
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    local rememberResult = remember(SOLD_OUT, TERMINAL, -1, stock, now)
+    if isError(rememberResult) or rememberResult ~= 1 then
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_REQUEST_WRITE, errorDetail(rememberResult))
     end
     return response(SOLD_OUT, -1, stock, now)
 end
@@ -255,7 +301,8 @@ end
 -- 가변 메모리 쓰기 선행과 역순 롤백 기반 승인 상태 갱신
 local result = redis.pcall('HSET', KEYS[5], requestId, acceptedRecord)
 if isError(result) or result ~= 1 then
-    return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+            DIAG_REQUEST_WRITE, errorDetail(result))
 end
 
 result = redis.pcall('XADD', KEYS[6], '*',
@@ -269,14 +316,16 @@ result = redis.pcall('XADD', KEYS[6], '*',
         'decidedAt', tostring(now))
 if isError(result) then
     rollbackAccepted()
-    return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+            DIAG_STREAM_WRITE, errorDetail(result))
 end
 streamEntryId = result
 
 result = redis.pcall('SETBIT', KEYS[4], bitOffset, 1)
 if isError(result) or result ~= 0 then
     rollbackAccepted()
-    return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+            DIAG_BITMAP_WRITE, errorDetail(result))
 end
 bitmapChanged = true
 
@@ -285,7 +334,8 @@ if bitmapWasMissing then
     result = redis.pcall('PEXPIREAT', KEYS[4], expireAt)
     if isError(result) or result ~= 1 then
         rollbackAccepted()
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_BITMAP_EXPIRE, errorDetail(result))
     end
 end
 
@@ -293,7 +343,8 @@ if streamWasMissing then
     result = redis.pcall('PEXPIREAT', KEYS[6], expireAt)
     if isError(result) or result ~= 1 then
         rollbackAccepted()
-        return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+        return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+                DIAG_STREAM_EXPIRE, errorDetail(result))
     end
 end
 
@@ -302,14 +353,16 @@ result = redis.pcall('DECR', KEYS[2])
 if not isError(result) then stockChanged = true end
 if isError(result) or result ~= remaining then
     rollbackAccepted()
-    return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+            DIAG_STOCK_DECREMENT, errorDetail(result))
 end
 
 result = redis.pcall('INCR', KEYS[3])
 if not isError(result) then sequenceChanged = true end
 if isError(result) or result ~= sequence then
     rollbackAccepted()
-    return response(INTERNAL_WRITE_ERROR, -1, -1, now)
+    return response(INTERNAL_WRITE_ERROR, -1, -1, now,
+            DIAG_SEQUENCE_INCREMENT, errorDetail(result))
 end
 
 return response(ACCEPTED, sequence, remaining, now)
