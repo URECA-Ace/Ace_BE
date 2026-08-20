@@ -72,8 +72,7 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 			LEFT JOIN coupon_issue ci
 				   ON ci.event_id = ce.event_id
 				  AND ci.created_at < :to
-				  AND ci.created_at > :from
-			WHERE ce.event_id IN (:eventIds)
+				  AND ci.created_at >= :from
 			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
 			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
 				OR ce.issued_quantity != actual_active_count

@@ -67,7 +67,7 @@ public class DuplicateConsistencyCheck implements ConsistencyCheck {
                 FROM coupon_issue
                 WHERE status IN ('ISSUED','USED','EXPIRED')
                   AND created_at < :to
-                  AND created_at > :from
+                  AND created_at >= :from
                 GROUP BY event_id, user_id
             ) sub
             JOIN coupon_event ce ON ce.event_id = sub.event_id
