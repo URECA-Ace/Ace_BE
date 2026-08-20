@@ -12,26 +12,32 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.coupon.entity.CampaignRedisInitialization;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.coupon.repository.CampaignRedisInitializationRepository;
 import com.ace.coupon.repository.CouponRepository;
 
 class CouponEventCreationPersistenceServiceTest {
 
 	private CouponRepository couponRepository;
 	private CouponEventRepository couponEventRepository;
+	private CampaignRedisInitializationRepository initializationRepository;
 	private CouponEventCreationPersistenceService service;
 
 	@BeforeEach
 	void setUp() {
 		couponRepository = Mockito.mock(CouponRepository.class);
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
-		service = new CouponEventCreationPersistenceService(couponRepository, couponEventRepository);
+		initializationRepository = Mockito.mock(CampaignRedisInitializationRepository.class);
+		service = new CouponEventCreationPersistenceService(
+				couponRepository, couponEventRepository, initializationRepository);
 	}
 
 	@Test
@@ -43,7 +49,11 @@ class CouponEventCreationPersistenceServiceTest {
 		LocalDateTime closeAt = openAt.plusHours(12);
 		given(couponRepository.findById(1L)).willReturn(Optional.of(coupon));
 		given(couponEventRepository.saveAndFlush(Mockito.any(CouponEvent.class)))
-				.willAnswer(invocation -> invocation.getArgument(0));
+				.willAnswer(invocation -> {
+					CouponEvent event = invocation.getArgument(0);
+					ReflectionTestUtils.setField(event, "id", 10L);
+					return event;
+				});
 
 		service.create(1L, 24, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now);
 
@@ -56,6 +66,14 @@ class CouponEventCreationPersistenceServiceTest {
 		assertThat(saved.getIssuedQuantity()).isZero();
 		assertThat(saved.getPerUserLimit()).isOne();
 		assertThat(saved.getStatus()).isEqualTo(CouponEventStatus.SCHEDULED);
+
+		ArgumentCaptor<CampaignRedisInitialization> initializationCaptor =
+				ArgumentCaptor.forClass(CampaignRedisInitialization.class);
+		Mockito.verify(initializationRepository).save(initializationCaptor.capture());
+		CampaignRedisInitialization initialization = initializationCaptor.getValue();
+		assertThat(initialization.getEventId()).isEqualTo(10L);
+		assertThat(initialization.getStatus().name()).isEqualTo("PENDING");
+		assertThat(initialization.getAttemptCount()).isZero();
 	}
 
 	@Test

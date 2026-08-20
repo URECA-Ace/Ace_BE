@@ -148,7 +148,12 @@ class RedisCouponIssueIntegrationTest {
 		given(persistenceService.create(any(), any(), any(), any(), any(), any(), any()))
 				.willReturn(event);
 		CampaignAdminService campaignAdminService =
-				new CampaignAdminService(repository, initializer, redisProperties);
+				new CampaignAdminService(
+						repository,
+						initializer,
+						org.mockito.Mockito.mock(
+								com.ace.coupon.service.CampaignRedisInitializationStateService.class),
+						redisProperties);
 		CouponEventCreationService creationService = new CouponEventCreationService(
 				persistenceService,
 				repository,
