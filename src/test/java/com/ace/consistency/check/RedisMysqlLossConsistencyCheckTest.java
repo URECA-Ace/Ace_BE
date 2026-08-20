@@ -15,26 +15,32 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class RedisMysqlLossConsistencyConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
+class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 
 	@MockitoBean
 	private StringRedisTemplate redisTemplate;
 
-	private RedisMysqlLossConsistencyConsistencyCheck check;
+	private RedisMysqlLossConsistencyCheck check;
 	private ValueOperations<String, String> valueOperations;
 	private StreamOperations<String, Object, Object> streamOperations;
 
 	@BeforeEach
 	void setUp() {
-		check = new RedisMysqlLossConsistencyConsistencyCheck(jdbcTemplate, redisTemplate);
+		check = new RedisMysqlLossConsistencyCheck(jdbcTemplate, redisTemplate);
 		valueOperations = mock(ValueOperations.class);
 		streamOperations = mock(StreamOperations.class);
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 		when(redisTemplate.opsForStream()).thenReturn(streamOperations);
+		
+		// 기본적으로 스트림 키가 없을 때 던지는 예외를 모킹하여 Pending=0 상태를 시뮬레이션
+		org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroups emptyGroups = mock(org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroups.class);
+		when(emptyGroups.stream()).thenReturn(java.util.stream.Stream.empty());
+		when(streamOperations.groups(anyString())).thenReturn(emptyGroups);
 	}
 
 	@Test
@@ -75,8 +81,8 @@ class RedisMysqlLossConsistencyConsistencyCheckTest extends ConsistencyCheckInte
 	}
 
 	@Test
-	@DisplayName("Redis 키가 만료되거나 없는 경우(0건), MySQL 건수와 다르면 FAIL 반환")
-	void failWhenRedisKeyIsNullAndMysqlHasRecords() {
+	@DisplayName("Redis 키가 만료된 경우(Redis=null, MySQL>0) 영구 검증 불가(CheckImpossibleException) 예외 발생")
+	void throwExceptionWhenRedisKeyExpired() {
 		long eventId = generateUniqueId();
 		insertDummyEvent(eventId, 10L);
 		
@@ -86,14 +92,14 @@ class RedisMysqlLossConsistencyConsistencyCheckTest extends ConsistencyCheckInte
 		// Insert some records into MySQL
 		insertDummyIssue(eventId, 1L);
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
+		assertThatThrownBy(() -> check.check(Scope.ofEvent(eventId)))
+				.isInstanceOf(com.ace.consistency.common.ConsistencyCheck.CheckImpossibleException.class)
+				.hasMessageContaining("만료");
 	}
 
 	@Test
-	@DisplayName("작업 중(Pending > 0)일 때는 유실로 보지 않고 검사를 스킵(PASS)한다")
-	void passWhenPendingIsGreaterThanZero() {
+	@DisplayName("작업 중(Pending > 0)일 때는 가짜 알람 방지를 위해 검증 보류(CheckPostponedException) 예외 발생")
+	void throwExceptionWhenPendingIsGreaterThanZero() {
 		long eventId = generateUniqueId();
 		insertDummyEvent(eventId, 10L);
 		
@@ -107,9 +113,9 @@ class RedisMysqlLossConsistencyConsistencyCheckTest extends ConsistencyCheckInte
 		// Mock Redis remainingStock = 0 (But it shouldn't matter since it skips)
 		when(valueOperations.get(anyString())).thenReturn("0");
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isTrue();
+		assertThatThrownBy(() -> check.check(Scope.ofEvent(eventId)))
+				.isInstanceOf(com.ace.consistency.common.ConsistencyCheck.CheckPostponedException.class)
+				.hasMessageContaining("PENDING");
 	}
 
 	@Test

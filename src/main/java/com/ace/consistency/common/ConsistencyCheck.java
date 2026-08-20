@@ -79,4 +79,24 @@ public interface ConsistencyCheck {
 			super(String.format("%s does not support scope type %s (expected %s)", checkName, given, supported));
 		}
 	}
+
+	/**
+	 * 아직 데이터가 처리 중이어서(Pending) 현재 검증을 수행할 수 없을 때 던지는 예외.
+	 * Runner가 이 예외를 잡으면 주기적 스케줄링 환경에서 특별한 처리(이벤트 발행 등)를 할 수 있다.
+	 */
+	class CheckPostponedException extends RuntimeException {
+		public CheckPostponedException(String message) {
+			super(message);
+		}
+	}
+
+	/**
+	 * 데이터 만료(TTL) 등으로 인해 검증에 필요한 원본 데이터가 영구적으로 유실되어
+	 * 더 이상 정합성 검증 자체가 불가능할 때 던지는 예외.
+	 */
+	class CheckImpossibleException extends RuntimeException {
+		public CheckImpossibleException(String message) {
+			super(message);
+		}
+	}
 }

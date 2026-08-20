@@ -4,6 +4,7 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
 import com.ace.coupon.redis.CouponRedisKeys;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -24,7 +25,7 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class RedisMysqlLossConsistencyConsistencyCheck implements ConsistencyCheck {
+public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final StringRedisTemplate redisTemplate;
@@ -48,17 +49,21 @@ public class RedisMysqlLossConsistencyConsistencyCheck implements ConsistencyChe
 
 		// 1. 비동기 파이프라인(Stream)에 아직 처리 중인 메시지(Pending)가 있는지 확인
 		String streamKey = CouponRedisKeys.campaign(eventId).issueStream();
+		long pendingCount = 0;
 		try {
-			long pendingCount = redisTemplate.opsForStream().groups(streamKey).stream()
+			pendingCount = redisTemplate.opsForStream().groups(streamKey).stream()
 					.mapToLong(org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroup::pendingCount)
 					.sum();
-			// 아직 작업자(Consumer)가 DB에 밀어넣고 있는 중이라면, 오탐지를 막기 위해 이번 검사는 조용히 스킵합니다.
-			if (pendingCount > 0) {
-				return CheckOutcome.pass();
-			}
-		} catch (Exception e) {
+		} catch (RedisSystemException e) {
 			// 스트림 키나 컨슈머 그룹이 아직 생성되지 않은 경우 (발급 내역이 아예 없는 초기 상태 등)
-			// PENDING이 없는 것과 동일하므로 무시하고 아래 검증 로직으로 넘어갑니다.
+			// Redis는 "ERR no such key" 에러를 던지며, Spring은 이를 RedisSystemException으로 감쌉니다.
+			// 이 경우 PENDING이 없는 것과 동일하므로 무시하고 넘어갑니다.
+		}
+
+		// 아직 작업자(Consumer)가 DB에 밀어넣고 있는 중이라면, 오탐지를 막기 위해 1차 MVP에서는 예외를 던집니다.
+		// (2차 MVP에서는 이 예외를 상위에서 잡아 PENDING이 0이 될 때 검증을 재시도하는 이벤트로 활용합니다.)
+		if (pendingCount > 0) {
+			throw new ConsistencyCheck.CheckPostponedException("PENDING 큐에 남은 메시지가 있어 검증을 수행할 수 없습니다. (pendingCount: " + pendingCount + ")");
 		}
 
 		// 2. MySQL에서 최초 총 재고(Total Stock)와 실제 적재 건수(Actual Count) 동시 조회
@@ -75,8 +80,18 @@ public class RedisMysqlLossConsistencyConsistencyCheck implements ConsistencyChe
 		String stockKey = CouponRedisKeys.campaign(eventId).stock();
 		String stockValue = redisTemplate.opsForValue().get(stockKey);
 		
-		// Redis에 값이 없다면 아직 이벤트가 시작되지 않아 재고가 차감되지 않은 상태 (또는 만료됨)
-		long remainingStock = (stockValue == null) ? totalStock : Long.parseLong(stockValue);
+		// Redis에 값이 없다면 두 가지 경우가 있습니다:
+		// 1. 이벤트 시작 전: DB 적재 건수(actualCount)도 0이어야 함 -> totalStock 반환
+		// 2. 이벤트 마감 후 만료됨: DB 적재 건수가 0보다 큼 -> 비교 불가(예외 던짐)
+		long remainingStock;
+		if (stockValue == null) {
+			if (actualCount > 0) {
+				throw new ConsistencyCheck.CheckImpossibleException("Redis 잔여 재고 데이터가 만료되어 정합성 검증을 수행할 수 없습니다.");
+			}
+			remainingStock = totalStock;
+		} else {
+			remainingStock = Long.parseLong(stockValue);
+		}
 		
 		// 장애 복구로 인해 Redis 잔여 재고가 재초기화 되었더라도, 절대 변하지 않는 기준점(총 재고)을 바탕으로 기대 건수 계산
 		long expectedCount = totalStock - remainingStock;
