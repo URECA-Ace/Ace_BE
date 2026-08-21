@@ -58,9 +58,6 @@ public class CampaignRedisInitializationRecoveryService {
 				log.info("쿠폰 캠페인 Redis 상태를 복구했습니다. eventId={}", campaign.getId());
 				return true;
 			}
-			if (response.result() == CampaignInitializationResult.ALREADY_INITIALIZED) {
-				return false;
-			}
 			return false;
 		} catch (CouponException | DataAccessException | IllegalStateException | IllegalArgumentException exception) {
 			log.error("쿠폰 캠페인 Redis 상태 복구 중 오류가 발생했습니다. eventId={}",
