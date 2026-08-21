@@ -72,6 +72,27 @@ class CouponEventCreationServiceTest {
 	}
 
 	@Test
+	@DisplayName("회차를 생략하면 DB에서 다음 회차를 배정하고 Redis를 초기화한다")
+	void assignsNextRoundWhenRoundIsMissing() {
+		CouponEvent event = event(25L, 10_000, OPEN_AT, CLOSE_AT);
+		given(persistenceService.createNextRound(
+				ArgumentMatchers.eq(1L), ArgumentMatchers.eq(10_000),
+				ArgumentMatchers.any(), ArgumentMatchers.any(),
+				ArgumentMatchers.eq(CouponEventStatus.SCHEDULED), ArgumentMatchers.any()))
+				.willReturn(event);
+
+		CouponEventCreateResponse response = service.create(
+				1L, new CouponEventCreateRequest(null, 10_000, OPEN_AT, CLOSE_AT));
+
+		assertThat(response.eventId()).isEqualTo(25L);
+		verify(persistenceService).createNextRound(
+				ArgumentMatchers.eq(1L), ArgumentMatchers.eq(10_000),
+				ArgumentMatchers.any(), ArgumentMatchers.any(),
+				ArgumentMatchers.eq(CouponEventStatus.SCHEDULED), ArgumentMatchers.any());
+		verify(campaignAdminService).initialize(event);
+	}
+
+	@Test
 	@DisplayName("동일 회차의 동일 설정 재요청은 기존 캠페인으로 Redis 초기화를 재시도한다")
 	void retriesInitializationForIdenticalCampaign() {
 		CouponEvent existing = event(24L, 10_000, OPEN_AT, CLOSE_AT);

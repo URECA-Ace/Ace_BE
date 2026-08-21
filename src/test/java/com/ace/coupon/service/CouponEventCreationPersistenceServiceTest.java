@@ -77,6 +77,29 @@ class CouponEventCreationPersistenceServiceTest {
 	}
 
 	@Test
+	@DisplayName("쿠폰 행을 잠그고 마지막 회차의 다음 번호를 배정한다")
+	void assignsNextRoundWhileCouponIsLocked() {
+		Coupon coupon = Coupon.builder().id(1L).build();
+		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
+		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository.findMaxRoundByCouponId(1L)).willReturn(2);
+		given(couponEventRepository.saveAndFlush(Mockito.any(CouponEvent.class)))
+				.willAnswer(invocation -> {
+					CouponEvent event = invocation.getArgument(0);
+					ReflectionTestUtils.setField(event, "id", 11L);
+					return event;
+				});
+
+		CouponEvent saved = service.createNextRound(
+				1L, 10_000, now.plusHours(1), now.plusHours(2),
+				CouponEventStatus.SCHEDULED, now);
+
+		assertThat(saved.getRound()).isEqualTo(3);
+		Mockito.verify(couponRepository).findByIdForUpdate(1L);
+		Mockito.verify(couponEventRepository).findMaxRoundByCouponId(1L);
+	}
+
+	@Test
 	@DisplayName("존재하지 않는 쿠폰에는 캠페인을 생성하지 않는다")
 	void rejectsMissingCoupon() {
 		given(couponRepository.findById(99L)).willReturn(Optional.empty());
