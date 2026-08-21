@@ -15,7 +15,7 @@ import java.util.Set;
 /**
  * 4. 연동 도메인 정합성 (Issue vs History 시간 동기화 검증)
  *
- * 태연님이 작성하신 상태(Status) 검증에 더하여, 두 테이블 간의 **상태 전이 시간(Timestamp)**이 정확히 동기화되어 있는지 검증합니다.
+ * CouponIssueHistoryStateConsistencyCheck의 상태(Status) 검증에 더하여, 두 테이블 간의 **상태 전이 시간(Timestamp)**이 정확히 동기화되어 있는지 검증합니다.
  * 트랜잭션 분리나 비동기 처리 지연으로 인해 coupon_issue의 시간(used_at 등)과 coupon_history의 시간(occurred_at)이
  * 1초(허용 오차) 이상 크게 벌어지는 원자성(Atomicity) 붕괴 현상을 식별합니다.
  */
@@ -29,17 +29,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
-	// 상태는 일치하지만, 시간이 1초 이상 차이나는 경우를 검출
-	private static final String SCOPE_CONDITION = """
-			(
-				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
-				OR :scopeMode = 'ALL_GLOBAL'
-				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
-			)
-			""";
-
-	// 상태는 일치하지만, 시간이 누락되었거나 1초 이상 차이나는 경우를 검출
-	private static final String SQL = """
+	private static final String SELECT_CLAUSE = """
             SELECT ci.issue_id, ci.status, 
                    CASE ci.status 
                        WHEN 'USED' THEN ci.used_at 
@@ -57,12 +47,32 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                    )) / 1000000.0 as time_diff_seconds,
                    COUNT(*) OVER() AS total_violation_count
             FROM coupon_issue ci
+            """;
+
+	private static final String ALL_JOIN_CLAUSE = """
             JOIN (
-                SELECT issue_id, to_status, occurred_at,
+                SELECT issue_id, from_status, to_status, occurred_at,
                        ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
-            WHERE %s
+            WHERE (
+                :scopeMode = 'ALL_GLOBAL'
+                OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
+            )
+            """;
+
+	private static final String EVENT_JOIN_CLAUSE = """
+            JOIN LATERAL (
+                SELECT from_status, to_status, occurred_at
+                FROM coupon_history ch
+                WHERE ch.issue_id = ci.issue_id
+                ORDER BY occurred_at DESC, history_id DESC
+                LIMIT 1
+            ) latest_history ON TRUE
+            WHERE ci.event_id = :eventId
+            """;
+
+	private static final String FILTER_CLAUSE = """
               AND ci.status = latest_history.to_status
               AND ci.status IN ('ISSUED', 'USED', 'EXPIRED')
               AND (
@@ -77,8 +87,13 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                   
                   -- 2) 시간 차이 검증 (상태별 특성 반영)
                   (
-                      -- [실시간 처리] ISSUED, USED는 1초 오차만 허용
-                      ci.status IN ('ISSUED', 'USED') AND
+                      -- [실시간 처리] 
+                      -- USED는 1초 오차 허용
+                      -- ISSUED는 최초 발급(from_status IS NULL)일 때만 1초 오차 허용 (USED->ISSUED 복원 건은 제외)
+                      (
+                          ci.status = 'USED' 
+                          OR (ci.status = 'ISSUED' AND latest_history.from_status IS NULL)
+                      ) AND
                       ABS(TIMESTAMPDIFF(MICROSECOND, 
                            CASE ci.status 
                                WHEN 'USED' THEN ci.used_at 
@@ -101,7 +116,10 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
               )
             ORDER BY ci.issue_id
             LIMIT %d
-            """.formatted(SCOPE_CONDITION, SAMPLE_LIMIT);
+            """.formatted(SAMPLE_LIMIT);
+
+	private static final String ALL_SQL = SELECT_CLAUSE + ALL_JOIN_CLAUSE + FILTER_CLAUSE;
+	private static final String EVENT_SQL = SELECT_CLAUSE + EVENT_JOIN_CLAUSE + FILTER_CLAUSE;
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
@@ -113,7 +131,8 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 		MapSqlParameterSource params = scopeParameters(scope)
 				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS);
 
-		List<Map<String, Object>> violations = jdbcTemplate.queryForList(SQL, params);
+		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
+		List<Map<String, Object>> violations = jdbcTemplate.queryForList(sql, params);
 
 		if (violations.isEmpty()) {
 			return CheckOutcome.pass();

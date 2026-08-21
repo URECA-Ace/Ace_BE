@@ -33,7 +33,7 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 	void passWhenTimeDifferenceIsWithinOneSecond() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
-		insertDummyHistory(issueId, "2024-01-01 10:00:00");
+		insertDummyHistory(issueId, null, "ISSUED", "2024-01-01 10:00:00");
 
 		for (Scope scope : createTestScopes(eventId)) {
 			CheckOutcome outcome = check.check(scope);
@@ -46,12 +46,28 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 	void failWhenTimeDifferenceExceedsOneSecond() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
-		insertDummyHistory(issueId, "2024-01-01 10:00:02"); // 2초 차이
+		insertDummyHistory(issueId, null, "ISSUED", "2024-01-01 10:00:02"); // 2초 차이
 
 		for (Scope scope : createTestScopes(eventId)) {
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
 			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
+	}
+
+	@Test
+	@DisplayName("복원(USED -> ISSUED) 시에는 1초 이상 차이가 나더라도 시간 검증을 생략하므로 PASS 반환")
+	void passWhenRestoredEvenIfTimeDifferenceExceedsOneSecond() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
+		// 최초 발급 (10시) -> 사용 (11시) -> 복원 (12시)
+		insertDummyHistory(issueId, null, "ISSUED", "2024-01-01 10:00:00");
+		insertDummyHistory(issueId, "ISSUED", "USED", "2024-01-01 11:00:00");
+		insertDummyHistory(issueId, "USED", "ISSUED", "2024-01-01 12:00:00"); 
+
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
 		}
 	}
 
@@ -72,13 +88,15 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 		return keyHolder.getKey().longValue();
 	}
 
-	private void insertDummyHistory(long issueId, String occurredAt) {
+	private void insertDummyHistory(long issueId, String fromStatus, String toStatus, String occurredAt) {
 		String sql = """
                 INSERT INTO coupon_history (issue_id, from_status, to_status, occurred_at, recorded_at)
-                VALUES (:issueId, NULL, 'ISSUED', :occurredAt, NOW())
+                VALUES (:issueId, :fromStatus, :toStatus, :occurredAt, NOW())
                 """;
 		MapSqlParameterSource params = new MapSqlParameterSource()
 				.addValue("issueId", issueId)
+				.addValue("fromStatus", fromStatus)
+				.addValue("toStatus", toStatus)
 				.addValue("occurredAt", occurredAt);
 		jdbcTemplate.update(sql, params);
 	}

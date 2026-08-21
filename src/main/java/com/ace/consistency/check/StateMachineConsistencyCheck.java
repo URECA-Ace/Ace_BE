@@ -42,6 +42,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
                        ch.from_status, 
                        ch.to_status,
                        LAG(ch.to_status) OVER (PARTITION BY ch.issue_id ORDER BY ch.occurred_at, ch.history_id) as prev_to_status,
+                       ROW_NUMBER() OVER (PARTITION BY ch.issue_id ORDER BY ch.occurred_at, ch.history_id) as rn,
                        ci.event_id,
                        ci.created_at
                 FROM coupon_history ch
@@ -49,14 +50,17 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
             ) sub
             WHERE %s
               AND (
-                  -- 1. 상태 연속성 붕괴 (바통 터치 실패)
-                  (sub.prev_to_status IS NOT NULL AND NOT (sub.from_status <=> sub.prev_to_status))
+                  -- 1. 첫 번째 이력은 반드시 NULL -> ISSUED 여야 함
+                  (sub.rn = 1 AND NOT (sub.from_status IS NULL AND sub.to_status = 'ISSUED'))
                   OR
-                  -- 2. 허용되지 않은 비정상 상태 전이 (비즈니스 룰 위반)
-                  (sub.from_status IS NOT NULL AND (sub.from_status, sub.to_status) NOT IN (
-                      ('ISSUED', 'USED'),
-                      ('USED', 'ISSUED'),
-                      ('ISSUED', 'EXPIRED')
+                  -- 2. 두 번째 이력부터는 상태 연속성 보장 및 허용된 전이만 가능
+                  (sub.rn > 1 AND (
+                      NOT (sub.from_status <=> sub.prev_to_status)
+                      OR (sub.from_status, sub.to_status) NOT IN (
+                          ('ISSUED', 'USED'),
+                          ('USED', 'ISSUED'),
+                          ('ISSUED', 'EXPIRED')
+                      )
                   ))
               )
             ORDER BY sub.issue_id

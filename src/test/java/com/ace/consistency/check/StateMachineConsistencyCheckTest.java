@@ -36,12 +36,18 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 	void passWhenStatusChainIsValid() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, null, "ISSUED"); // 최초 발급
 		insertDummyHistory(issueId, "ISSUED", "USED");
 		insertDummyHistory(issueId, "USED", "ISSUED"); // 취소 역할(발급으로 돌아감)
 		insertDummyHistory(issueId, "ISSUED", "USED"); // 다시 사용
 
 		for (Scope scope : createTestScopes(eventId)) {
 			CheckOutcome outcome = check.check(scope);
+			if (outcome.isPass()) {
+				System.out.println("DEBUG PASS in failWhenLostUpdateHappens: expected fail");
+			} else {
+				System.out.println("DEBUG FAIL (EXPECTED) in failWhenLostUpdateHappens: " + outcome.getDiffDetail());
+			}
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
 		}
 	}
@@ -51,6 +57,7 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 	void failWhenLostUpdateHappens() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, null, "ISSUED"); // 최초 발급
 		insertDummyHistory(issueId, "ISSUED", "USED");
 		insertDummyHistory(issueId, "ISSUED", "USED"); // 락 뚫림, 이전 상태(USED)와 현재 출발(ISSUED) 불일치
 
@@ -66,6 +73,7 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 	void failWhenInvalidStateTransitionHappens() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, null, "ISSUED"); // 최초 발급
 		insertDummyHistory(issueId, "ISSUED", "USED");
 		insertDummyHistory(issueId, "USED", "EXPIRED"); // 연속성은 맞지만 허용되지 않은 전이!
 
@@ -81,6 +89,7 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 	void failWhenStaleDataOverwrittenByBatch() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
+		insertDummyHistory(issueId, null, "ISSUED"); // 최초 발급
 		insertDummyHistory(issueId, "ISSUED", "USED"); // 낮 12시 유저 사용
 		insertDummyHistory(issueId, "ISSUED", "EXPIRED"); // 자정 배치 잘못된 덮어쓰기 (연속성 붕괴 및 무효전이)
 
