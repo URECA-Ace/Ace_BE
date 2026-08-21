@@ -1,5 +1,6 @@
 package com.ace.coupon.service;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -37,7 +38,7 @@ class CampaignRedisInitializationStateServiceTest {
 	@Test
 	@DisplayName("Redis 초기화 시도와 성공을 별도 트랜잭션용 저장소에 기록한다")
 	void recordsAttemptAndSuccess() {
-		given(repository.recordAttempt(eq(1L), any())).willReturn(1);
+		given(repository.recordAttempt(eq(1L), any())).willReturn(2);
 		given(repository.recordSuccess(eq(1L), any())).willReturn(1);
 
 		service.recordAttempt(1L);
@@ -45,6 +46,15 @@ class CampaignRedisInitializationStateServiceTest {
 
 		verify(repository).recordAttempt(eq(1L), any());
 		verify(repository).recordSuccess(eq(1L), any());
+	}
+
+	@Test
+	@DisplayName("Redis 초기화 시도 기록이 0건이면 실패한다")
+	void rejectsMissingAttemptRecord() {
+		given(repository.recordAttempt(eq(1L), any())).willReturn(0);
+
+		assertThatThrownBy(() -> service.recordAttempt(1L))
+				.isInstanceOf(IllegalStateException.class);
 	}
 
 	@Test
