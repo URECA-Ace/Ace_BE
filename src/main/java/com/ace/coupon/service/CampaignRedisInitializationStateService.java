@@ -23,7 +23,7 @@ public class CampaignRedisInitializationStateService {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void recordAttempt(Long eventId) {
 		LocalDateTime now = now();
-		if (repository.recordAttempt(eventId, now) != 1) {
+		if (repository.recordAttempt(eventId, now) == 0) {
 			throw new IllegalStateException("Redis 초기화 시도를 기록할 수 없습니다: " + eventId);
 		}
 	}
