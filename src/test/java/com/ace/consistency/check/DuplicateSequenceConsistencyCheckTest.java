@@ -24,6 +24,14 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 		}
 	}
 
+	private java.util.List<Scope> createTestScopes(long eventId) {
+		return java.util.List.of(
+				Scope.ofEvent(eventId),
+				Scope.all(java.time.LocalDateTime.now()),
+				Scope.all(java.util.List.of(eventId), java.time.LocalDateTime.now())
+		);
+	}
+
 	@Test
 	@DisplayName("동일 이벤트 내에서 발급 순번이 중복되지 않으면 PASS 반환")
 	void passWhenNoDuplicateSequence() {
@@ -31,9 +39,10 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 		insertDummyIssue(eventId, 1L, 1001L);
 		insertDummyIssue(eventId, 2L, 1002L);
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isTrue();
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
 	}
 
 	@Test
@@ -43,10 +52,11 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 		insertDummyIssue(eventId, 1L, 1001L);
 		insertDummyIssue(eventId, 1L, 1002L); // Sequence 1 duplicated
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
 	}
 
 	@Test
@@ -57,9 +67,10 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 		insertDummyIssue(eventId, null, 1001L);
 		insertDummyIssue(eventId, null, 1002L);
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isTrue();
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
 	}
 
 	private void insertDummyIssue(long eventId, Long issueSequence, long userId) {

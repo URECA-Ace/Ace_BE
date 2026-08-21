@@ -20,6 +20,14 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 		check = new IssueHistoryTimeSyncConsistencyCheck(jdbcTemplate);
 	}
 
+	private java.util.List<Scope> createTestScopes(long eventId) {
+		return java.util.List.of(
+				Scope.ofEvent(eventId),
+				Scope.all(java.time.LocalDateTime.now()),
+				Scope.all(java.util.List.of(eventId), java.time.LocalDateTime.now())
+		);
+	}
+
 	@Test
 	@DisplayName("Issue의 updated_at과 History의 occurred_at이 1초 이내면 정상")
 	void passWhenTimeDifferenceIsWithinOneSecond() {
@@ -27,9 +35,10 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
 		insertDummyHistory(issueId, "2024-01-01 10:00:00");
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isTrue();
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
 	}
 
 	@Test
@@ -39,10 +48,11 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
 		insertDummyHistory(issueId, "2024-01-01 10:00:02"); // 2초 차이
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
 	}
 
 	private long insertDummyIssue(long eventId, String updatedAt) {

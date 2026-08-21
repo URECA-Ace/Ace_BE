@@ -9,6 +9,9 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
@@ -20,61 +23,57 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 		check = new StateMachineConsistencyCheck(jdbcTemplate);
 	}
 
+	private List<Scope> createTestScopes(long eventId) {
+		return List.of(
+				Scope.ofEvent(eventId),
+				Scope.all(LocalDateTime.now()),
+				Scope.all(List.of(eventId), LocalDateTime.now())
+		);
+	}
+
 	@Test
-	@DisplayName("정상적인 이력 체인이면 PASS 반환")
+	@DisplayName("정상적인 이력 체인이면 PASS 반환 (발급 -> 사용 -> 발급 -> 사용)")
 	void passWhenStatusChainIsValid() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "USED", "CANCELED");
-		insertDummyHistory(issueId, "CANCELED", "USED"); // 취소 후 재사용 정상 케이스
+		insertDummyHistory(issueId, "USED", "ISSUED"); // 취소 역할(발급으로 돌아감)
+		insertDummyHistory(issueId, "ISSUED", "USED"); // 다시 사용
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isTrue();
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
 	}
 
 	@Test
-	@DisplayName("따닥 클릭 - 잃어버린 업데이트 발생 시 FAIL 반환")
+	@DisplayName("따닥 클릭 - 잃어버린 업데이트 발생 시 FAIL 반환 (연속성 붕괴)")
 	void failWhenLostUpdateHappens() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "ISSUED", "USED"); // 락 뚫림
+		insertDummyHistory(issueId, "ISSUED", "USED"); // 락 뚫림, 이전 상태(USED)와 현재 출발(ISSUED) 불일치
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
 	}
 
 	@Test
-	@DisplayName("이기종 상태 동시성 충돌 발생 시 FAIL 반환")
-	void failWhenHeterogeneousRaceConditionHappens() {
+	@DisplayName("비정상 상태 전이 발생 시 FAIL 반환 (USED -> EXPIRED 비즈니스 룰 위반)")
+	void failWhenInvalidStateTransitionHappens() {
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "ISSUED", "CANCELED"); // 락 뚫림 (이기종 충돌)
+		insertDummyHistory(issueId, "USED", "EXPIRED"); // 연속성은 맞지만 허용되지 않은 전이!
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
-	}
-
-	@Test
-	@DisplayName("멱등성 처리 실패 (네트워크 타임아웃 재시도) 발생 시 FAIL 반환")
-	void failWhenIdempotencyFails() {
-		long eventId = generateUniqueId();
-		long issueId = insertDummyIssue(eventId);
-		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "USED", "CANCELED");
-		insertDummyHistory(issueId, "USED", "CANCELED"); // 멱등성 방어 뚫림
-
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
 	}
 
 	@Test
@@ -83,12 +82,13 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 		long eventId = generateUniqueId();
 		long issueId = insertDummyIssue(eventId);
 		insertDummyHistory(issueId, "ISSUED", "USED"); // 낮 12시 유저 사용
-		insertDummyHistory(issueId, "ISSUED", "EXPIRED"); // 자정 배치 잘못된 덮어쓰기
+		insertDummyHistory(issueId, "ISSUED", "EXPIRED"); // 자정 배치 잘못된 덮어쓰기 (연속성 붕괴 및 무효전이)
 
-		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
-
-		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+		}
 	}
 
 	private long insertDummyIssue(long eventId) {

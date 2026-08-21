@@ -37,6 +37,7 @@ public abstract class ConsistencyCheckIntegrationTestBase {
         registry.add("spring.datasource.password", mysql::getPassword);
         registry.add("spring.datasource.driver-class-name", mysql::getDriverClassName);
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "update");
+        registry.add("consistency.expiration.allowed-delay-ms", () -> "1800000");
     }
 
     @Autowired
@@ -48,5 +49,13 @@ public abstract class ConsistencyCheckIntegrationTestBase {
      */
     protected long generateUniqueId() {
         return ThreadLocalRandom.current().nextLong(1000000L, 999999999L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    protected void tearDown() {
+        // ALL_GLOBAL 스코프 테스트 시, 이전 테스트에서 고의로 삽입한 위반 데이터가 
+        // 테이블 전체 조회 쿼리에 잡혀서 정상 케이스가 실패하는 것을 방지합니다.
+        jdbcTemplate.update("DELETE FROM coupon_history", new org.springframework.jdbc.core.namedparam.MapSqlParameterSource());
+        jdbcTemplate.update("DELETE FROM coupon_issue", new org.springframework.jdbc.core.namedparam.MapSqlParameterSource());
     }
 }
