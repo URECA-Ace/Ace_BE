@@ -40,12 +40,15 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.StatefulRedisConnection;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @Tag("redis-benchmark")
 class RedisLuaPerformanceBenchmarkTest {
 
 	private static final String BASELINE_SCRIPT = "scripts/coupon-issue-before-optimization.lua";
 	private static final String OPTIMIZED_SCRIPT = "scripts/coupon-issue.lua";
+	private static final int BASELINE_RESPONSE_FIELD_COUNT = 4;
+	private static final int OPTIMIZED_RESPONSE_FIELD_COUNT = 6;
 	private static final AtomicLong CAMPAIGN_ID =
 			new AtomicLong(8_100_000_000_000_000L + System.currentTimeMillis());
 
@@ -69,8 +72,9 @@ class RedisLuaPerformanceBenchmarkTest {
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				new RedisLuaFailureObserver(new SimpleMeterRegistry()));
 	}
 
 	@AfterAll
@@ -88,8 +92,8 @@ class RedisLuaPerformanceBenchmarkTest {
 		int workers = Integer.parseInt(System.getProperty("benchmark.workers", "128"));
 		validateConfiguration(totalRequests, workers);
 
-		LuaVariant baselineScript = variant(BASELINE_SCRIPT);
-		LuaVariant optimizedScript = variant(OPTIMIZED_SCRIPT);
+		LuaVariant baselineScript = variant(BASELINE_SCRIPT, BASELINE_RESPONSE_FIELD_COUNT);
+		LuaVariant optimizedScript = variant(OPTIMIZED_SCRIPT, OPTIMIZED_RESPONSE_FIELD_COUNT);
 
 		BenchmarkResult baseline;
 		BenchmarkResult optimized = null;
@@ -197,7 +201,7 @@ class RedisLuaPerformanceBenchmarkTest {
 								String.valueOf(campaignId),
 								"0");
 						latencies[sampleIndex] = System.nanoTime() - startedAt;
-						CouponIssueLuaCode code = CouponIssueLuaCode.from(resultCode(result));
+						CouponIssueLuaCode code = CouponIssueLuaCode.from(resultCode(result, issueScript));
 						if (code == CouponIssueLuaCode.ACCEPTED) {
 							accepted.increment();
 						} else if (code == CouponIssueLuaCode.SOLD_OUT) {
@@ -410,8 +414,8 @@ class RedisLuaPerformanceBenchmarkTest {
 		}
 	}
 
-	private long resultCode(List<?> result) {
-		if (result == null || result.size() != 4) {
+	private long resultCode(List<?> result, LuaVariant variant) {
+		if (result == null || result.size() != variant.responseFieldCount()) {
 			throw new IllegalStateException("Lua 벤치마크 결과 형식 오류");
 		}
 		Object code = result.get(0);
@@ -420,14 +424,14 @@ class RedisLuaPerformanceBenchmarkTest {
 				: Long.parseLong(String.valueOf(code));
 	}
 
-	private static LuaVariant variant(String location) throws IOException {
+	private static LuaVariant variant(String location, int responseFieldCount) throws IOException {
 		ClassPathResource resource = new ClassPathResource(location);
 		String source;
 		try (var input = resource.getInputStream()) {
 			source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
 		}
 		try (StatefulRedisConnection<String, String> connection = redisClient.connect()) {
-			return new LuaVariant(connection.sync().scriptLoad(source));
+			return new LuaVariant(connection.sync().scriptLoad(source), responseFieldCount);
 		}
 	}
 
@@ -447,7 +451,7 @@ class RedisLuaPerformanceBenchmarkTest {
 			long[] latencies) {
 	}
 
-	private record LuaVariant(String sha) {
+	private record LuaVariant(String sha, int responseFieldCount) {
 	}
 
 	private record BenchmarkResult(

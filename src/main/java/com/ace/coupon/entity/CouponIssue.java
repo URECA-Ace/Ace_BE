@@ -99,7 +99,7 @@ public class CouponIssue {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
-	// campaignId-entryId 형태라 36자로는 부족
-	@Column(name = "message_id", length = 64)
+	// Stream 원본 위치를 결정적 UUID로 변환하므로 표준 UUID 문자열 길이와 일치한다.
+	@Column(name = "message_id", length = 36)
 	private String messageId;
 }

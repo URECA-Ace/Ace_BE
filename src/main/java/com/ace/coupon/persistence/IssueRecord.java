@@ -1,5 +1,6 @@
 package com.ace.coupon.persistence;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
@@ -18,6 +19,9 @@ public record IssueRecord(
 		long issueSequence,
 		Instant decidedAt,
 		String messageId) {
+
+	private static final int MESSAGE_ID_LENGTH = 36;
+	private static final String MESSAGE_ID_NAMESPACE = "coupon-issue-stream:";
 
 	// coupon-issue.lua 의 XADD 필드명
 	// 여기서만 정의하고 소비 계층에서 사용할 때 이 것을 사용
@@ -58,6 +62,9 @@ public record IssueRecord(
 		// uk_coupon_issue_message_id 가 UNIQUE 라 빈 문자열은 두 번째 저장에서 충돌한다
 		if (messageId != null && messageId.isBlank()) {
 			messageId = null;
+		}
+		if (messageId != null && messageId.length() > MESSAGE_ID_LENGTH) {
+			throw new IllegalArgumentException("messageId는 36자를 초과할 수 없습니다.");
 		}
 	}
 
@@ -107,13 +114,14 @@ public record IssueRecord(
 				messageId(number(fields, FIELD_CAMPAIGN_ID), entryId)));
 	}
 
-	// campaignId-entryId
-	// 전역 UNIQUE 인 message_id 컬럼에 그대로 들어간다
+	// Stream 엔트리 ID는 Stream 내부에서만 유일하므로 campaignId를 함께 해시한다.
+	// 같은 엔트리를 다시 소비하면 같은 UUID가 생성되어 message_id UNIQUE가 멱등성을 보장한다.
 	public static String messageId(long campaignId, String entryId) {
 		if (entryId == null || entryId.isBlank()) {
 			throw new IllegalArgumentException("Stream 엔트리 식별자가 필요합니다.");
 		}
-		return campaignId + "-" + entryId;
+		String source = MESSAGE_ID_NAMESPACE + campaignId + ":" + entryId;
+		return UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8)).toString();
 	}
 
 	private static String required(Map<String, String> fields, String name) {

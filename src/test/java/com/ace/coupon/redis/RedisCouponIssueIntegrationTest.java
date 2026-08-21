@@ -2,9 +2,14 @@ package com.ace.coupon.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +35,17 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
 
+import com.ace.coupon.dto.request.CouponEventCreateRequest;
+import com.ace.coupon.dto.response.CouponEventCreateResponse;
+import com.ace.coupon.entity.CouponEvent;
+import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.enums.IssueRequestStatus;
+import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.coupon.service.CampaignAdminService;
+import com.ace.coupon.service.CouponEventCreationPersistenceService;
+import com.ace.coupon.service.CouponEventCreationService;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @Tag("redis-integration")
 class RedisCouponIssueIntegrationTest {
@@ -44,6 +59,7 @@ class RedisCouponIssueIntegrationTest {
 	private static CampaignRedisInitializer initializer;
 	private static RedisCouponIssueProcessor processor;
 	private static RedisCouponEventStatsReader statsReader;
+	private static SimpleMeterRegistry meterRegistry;
 
 	@BeforeAll
 	static void setUpRedis() {
@@ -58,14 +74,18 @@ class RedisCouponIssueIntegrationTest {
 
 		CouponIssueRedisProperties properties =
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
+		meterRegistry = new SimpleMeterRegistry();
+		RedisLuaFailureObserver failureObserver = new RedisLuaFailureObserver(meterRegistry);
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				failureObserver);
 		processor = new RedisCouponIssueProcessor(
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
-				script("scripts/coupon-issue-compensate.lua", Long.class));
+				script("scripts/coupon-issue-compensate.lua", List.class),
+				failureObserver);
 		statsReader = new RedisCouponEventStatsReader(
 				redisTemplate,
 				script("scripts/coupon-event-stats.lua", List.class));
@@ -105,6 +125,57 @@ class RedisCouponIssueIntegrationTest {
 		assertThat(conflict).isEqualTo(CampaignInitializationResult.CONFIGURATION_CONFLICT);
 		assertThat(redisTemplate.opsForValue().get(CouponRedisKeys.campaign(campaignId).stock()))
 				.isEqualTo("100");
+	}
+
+	@Test
+	@DisplayName("캠페인 생성 서비스가 Redis를 초기화하면 기존 발급 API 판정을 즉시 수행할 수 있다")
+	void createsCampaignThenIssuesCoupon() {
+		long campaignId = nextCampaignId();
+		Instant now = Instant.now();
+		OffsetDateTime openAt = OffsetDateTime.ofInstant(now.minusSeconds(60), ZoneId.of("Asia/Seoul"));
+		OffsetDateTime closeAt = OffsetDateTime.ofInstant(now.plusSeconds(600), ZoneId.of("Asia/Seoul"));
+		CouponEvent event = CouponEvent.builder()
+				.id(campaignId)
+				.round(24)
+				.openAt(LocalDateTime.ofInstant(openAt.toInstant(), ZoneId.of("Asia/Seoul")))
+				.closeAt(LocalDateTime.ofInstant(closeAt.toInstant(), ZoneId.of("Asia/Seoul")))
+				.totalStock(1)
+				.remainingStock(1)
+				.issuedQuantity(0)
+				.perUserLimit(1)
+				.status(CouponEventStatus.OPEN)
+				.createdAt(LocalDateTime.now())
+				.updatedAt(LocalDateTime.now())
+				.build();
+		CouponEventCreationPersistenceService persistenceService =
+				mock(CouponEventCreationPersistenceService.class);
+		CouponEventRepository repository = mock(CouponEventRepository.class);
+		CouponIssueRedisProperties redisProperties =
+				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
+		given(persistenceService.create(any(), any(), any(), any(), any(), any(), any()))
+				.willReturn(event);
+		CampaignAdminService campaignAdminService =
+				new CampaignAdminService(
+						repository,
+						initializer,
+						org.mockito.Mockito.mock(
+								com.ace.coupon.service.CampaignRedisInitializationStateService.class),
+						redisProperties);
+		CouponEventCreationService creationService = new CouponEventCreationService(
+				persistenceService,
+				repository,
+				campaignAdminService,
+				redisProperties);
+
+		CouponEventCreateResponse created = creationService.create(
+				1L,
+				new CouponEventCreateRequest(24, 1, openAt, closeAt));
+		CouponIssueDecision issued = processor.issue(campaignId, 1L, UUID.randomUUID());
+
+		assertThat(created.eventId()).isEqualTo(campaignId);
+		assertThat(created.status()).isEqualTo(CouponEventStatus.OPEN);
+		assertThat(issued.code()).isEqualTo(CouponIssueLuaCode.ACCEPTED);
+		assertThat(issued.remainingStock()).isZero();
 	}
 
 	@Test
@@ -241,6 +312,27 @@ class RedisCouponIssueIntegrationTest {
 		assertThat(bitCount(keys.bitmap(1L).key())).isOne();
 		assertThat(processor.compensate(campaignId, 1L, requestId))
 				.isEqualTo(CouponIssueCompensationResult.COMPENSATED);
+	}
+
+	@Test
+	@DisplayName("Redis pcall 오류는 외부 결과와 분리해 실패 단계 메트릭에 기록한다")
+	void recordsPcallDiagnosticWithoutExposingRawError() {
+		long campaignId = initializeOpenCampaign(1);
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		redisTemplate.delete(keys.requests());
+		redisTemplate.opsForValue().set(keys.requests(), "wrong-type");
+
+		CouponIssueDecision decision = processor.issue(campaignId, 1L, UUID.randomUUID());
+
+		assertThat(decision.code()).isEqualTo(CouponIssueLuaCode.CORRUPTED_STATE);
+		double count = meterRegistry.get("coupon.redis.lua.failures")
+				.tag("script", "issue")
+				.tag("stage", "ISSUE_REQUEST_READ")
+				.tag("command", "HMGET")
+				.tag("result", "CORRUPTED_STATE")
+				.counter()
+				.count();
+		assertThat(count).isEqualTo(1.0);
 	}
 
 	@Test

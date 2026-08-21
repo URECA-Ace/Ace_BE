@@ -14,7 +14,8 @@ import com.ace.coupon.enums.IssueRequestStatus;
 @Component
 public class RedisCouponIssueProcessor {
 
-	private static final int DECISION_FIELD_COUNT = 4;
+	private static final int DECISION_FIELD_COUNT = 6;
+	private static final int COMPENSATION_FIELD_COUNT = 3;
 	private static final int VERSIONED_REQUEST_STATE_FIELD_COUNT = 10;
 	private static final int COMPACT_REQUEST_STATE_FIELD_COUNT = 6;
 	private static final int LEGACY_REQUEST_STATE_FIELD_COUNT = 7;
@@ -22,15 +23,18 @@ public class RedisCouponIssueProcessor {
 
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> issueScript;
-	private final RedisScript<Long> compensateScript;
+	private final RedisScript<List> compensateScript;
+	private final RedisLuaFailureObserver failureObserver;
 
 	public RedisCouponIssueProcessor(
 			StringRedisTemplate redisTemplate,
 			@Qualifier("couponIssueScript") RedisScript<List> issueScript,
-			@Qualifier("couponIssueCompensateScript") RedisScript<Long> compensateScript) {
+			@Qualifier("couponIssueCompensateScript") RedisScript<List> compensateScript,
+			RedisLuaFailureObserver failureObserver) {
 		this.redisTemplate = redisTemplate;
 		this.issueScript = issueScript;
 		this.compensateScript = compensateScript;
+		this.failureObserver = failureObserver;
 	}
 
 	public CouponIssueDecision issue(Long campaignId, Long userId, UUID requestId) {
@@ -63,6 +67,8 @@ public class RedisCouponIssueProcessor {
 		long sequence = number(result.get(1));
 		long remainingStock = number(result.get(2));
 		long decidedAt = number(result.get(3));
+		RedisLuaDiagnosticStage diagnosticStage = RedisLuaDiagnosticStage.from(number(result.get(4)));
+		failureObserver.observe(diagnosticStage, code.name(), text(result.get(5)));
 		if (code == CouponIssueLuaCode.ACCEPTED
 				&& (sequence <= 0 || remainingStock < 0 || decidedAt <= 0)) {
 			throw new IllegalStateException("승인된 쿠폰 발급 결과가 올바르지 않습니다.");
@@ -178,7 +184,7 @@ public class RedisCouponIssueProcessor {
 		}
 		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
 		CouponRedisKeys.BitmapLocation bitmap = keys.bitmap(userId);
-		Long code = redisTemplate.execute(
+		List<?> response = redisTemplate.execute(
 				compensateScript,
 				List.of(
 						keys.metadata(),
@@ -191,10 +197,14 @@ public class RedisCouponIssueProcessor {
 				requestId.toString(),
 				String.valueOf(bitmap.segment()));
 
-		if (code == null) {
+		if (response == null || response.size() != COMPENSATION_FIELD_COUNT) {
 			throw new IllegalStateException("쿠폰 발급 보상 결과가 없습니다.");
 		}
-		return CouponIssueCompensationResult.from(code);
+		CouponIssueCompensationResult result =
+				CouponIssueCompensationResult.from(number(response.get(0)));
+		RedisLuaDiagnosticStage stage = RedisLuaDiagnosticStage.from(number(response.get(1)));
+		failureObserver.observe(stage, result.name(), text(response.get(2)));
+		return result;
 	}
 
 	private long number(Object value) {
@@ -206,5 +216,12 @@ public class RedisCouponIssueProcessor {
 		} catch (NumberFormatException exception) {
 			throw new IllegalStateException("쿠폰 발급 Lua 숫자 결과가 올바르지 않습니다.", exception);
 		}
+	}
+
+	private String text(Object value) {
+		if (value instanceof byte[] bytes) {
+			return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+		}
+		return String.valueOf(value);
 	}
 }

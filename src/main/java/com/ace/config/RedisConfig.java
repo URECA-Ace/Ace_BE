@@ -21,13 +21,13 @@ public class RedisConfig {
 	}
 
 	@Bean
-	public RedisScript<Long> couponCampaignInitializeScript() {
-		return script("scripts/coupon-campaign-initialize.lua", Long.class);
+	public RedisScript<List> couponCampaignInitializeScript() {
+		return script("scripts/coupon-campaign-initialize.lua", List.class);
 	}
 
 	@Bean
-	public RedisScript<Long> couponIssueCompensateScript() {
-		return script("scripts/coupon-issue-compensate.lua", Long.class);
+	public RedisScript<List> couponIssueCompensateScript() {
+		return script("scripts/coupon-issue-compensate.lua", List.class);
 	}
 
 	@Bean

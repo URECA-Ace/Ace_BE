@@ -29,8 +29,13 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.PendingMessages;
+import org.springframework.data.redis.connection.stream.ReadOffset;
+import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -41,12 +46,15 @@ import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponRedisKeys;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
+import com.ace.coupon.redis.RedisLuaFailureObserver;
 import com.ace.coupon.persistence.CouponIssuePersistenceProperties;
 import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceService;
 import com.ace.coupon.persistence.IssueRecord;
 import com.ace.coupon.persistence.PersistenceMode;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 // Stream 소비 계층을 실제 Redis 에 대고 검증
 @Tag("redis-integration")
@@ -80,14 +88,18 @@ class IssueStreamRelayIntegrationTest {
 
 		CouponIssueRedisProperties properties =
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
+		RedisLuaFailureObserver failureObserver =
+				new RedisLuaFailureObserver(new SimpleMeterRegistry());
 		initializer = new CampaignRedisInitializer(
 				redisTemplate,
-				script("scripts/coupon-campaign-initialize.lua", Long.class),
-				properties);
+				script("scripts/coupon-campaign-initialize.lua", List.class),
+				properties,
+				failureObserver);
 		processor = new RedisCouponIssueProcessor(
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
-				script("scripts/coupon-issue-compensate.lua", Long.class));
+				script("scripts/coupon-issue-compensate.lua", List.class),
+				failureObserver);
 	}
 
 	@AfterAll
@@ -218,7 +230,40 @@ class IssueStreamRelayIntegrationTest {
 		relay(3, Duration.ofSeconds(30)).runOnce();
 
 		assertThat(pendingCount()).isEqualTo(1);
+		assertThat(redisTemplate.opsForStream().size(streamKey)).isEqualTo(1);
 		verify(coordinator, never()).abandon(any(), any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("모든 Consumer Group이 ACK한 안전한 ID 이전만 XTRIM으로 제거한다")
+	void trimsOnlyEntriesAcknowledgedByEveryGroup() {
+		String auditGroup = "issue-audit-test";
+		issue(1L);
+		issue(2L);
+		issue(3L);
+		redisTemplate.opsForStream().createGroup(streamKey, ReadOffset.from("0"), auditGroup);
+		IssueStreamRelay relay = relay(3, Duration.ofSeconds(30));
+
+		// 저장 그룹만 처리한 상태라 다른 그룹이 보지 않은 엔트리는 제거할 수 없다.
+		relay.runOnce();
+		assertThat(redisTemplate.opsForStream().size(streamKey)).isEqualTo(3);
+
+		List<MapRecord<String, String, String>> auditRecords =
+				redisTemplate.<String, String>opsForStream().read(
+						Consumer.from(auditGroup, "audit-consumer"),
+						StreamReadOptions.empty().count(10),
+						StreamOffset.create(streamKey, ReadOffset.lastConsumed()));
+		assertThat(auditRecords).hasSize(3);
+		RecordId[] auditIds = auditRecords.stream()
+				.map(MapRecord::getId)
+				.toArray(RecordId[]::new);
+		redisTemplate.opsForStream().acknowledge(streamKey, auditGroup, auditIds);
+
+		// 모든 그룹이 ACK한 뒤에는 마지막 ID 이전 엔트리가 제거되고 경계 엔트리 하나만 남는다.
+		relay.runOnce();
+		assertThat(redisTemplate.opsForStream().size(streamKey)).isEqualTo(1);
+		assertThat(redisTemplate.opsForStream().pending(
+				streamKey, GROUP, Range.unbounded(), 100)).isEmpty();
 	}
 
 	@Test
