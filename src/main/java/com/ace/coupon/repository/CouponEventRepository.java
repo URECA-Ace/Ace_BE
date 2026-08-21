@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -26,20 +27,18 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	@Query("""
 			select event
 			from CouponEvent event
+			left join CampaignRedisInitialization initialization
+			  on initialization.eventId = event.id
 			where event.status in :statuses
 			  and event.closeAt > :now
-			  and not exists (
-			      select initialization.eventId
-			      from CampaignRedisInitialization initialization
-			      where initialization.eventId = event.id
-			        and initialization.status = :initializedStatus
-			  )
-			order by event.id
+			  and (initialization.eventId is null or initialization.status <> :initializedStatus)
+			order by coalesce(initialization.attemptCount, 0), event.id
 			""")
 	List<CouponEvent> findRedisInitializationRecoveryCandidates(
 			@Param("statuses") List<CouponEventStatus> statuses,
 			@Param("now") LocalDateTime now,
-			@Param("initializedStatus") CampaignRedisInitializationStatus initializedStatus);
+			@Param("initializedStatus") CampaignRedisInitializationStatus initializedStatus,
+			Pageable pageable);
 
 	// Stream 을 소비해야 할 회차
 	@Query("select e.id from CouponEvent e where e.openAt <= :now and e.closeAt >= :since order by e.id")

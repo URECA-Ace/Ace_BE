@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.ace.common.exception.CouponException;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CampaignRedisInitializationRecoveryService {
 
+	private static final int RECOVERY_BATCH_SIZE = 100;
 	private static final List<CouponEventStatus> RECOVERABLE_STATUSES = List.of(
 			CouponEventStatus.SCHEDULED,
 			CouponEventStatus.OPEN);
@@ -37,7 +39,8 @@ public class CampaignRedisInitializationRecoveryService {
 				.findRedisInitializationRecoveryCandidates(
 						RECOVERABLE_STATUSES,
 						now,
-						CampaignRedisInitializationStatus.INITIALIZED);
+						CampaignRedisInitializationStatus.INITIALIZED,
+						PageRequest.of(0, RECOVERY_BATCH_SIZE));
 
 		int recoveredCount = 0;
 		for (CouponEvent campaign : campaigns) {

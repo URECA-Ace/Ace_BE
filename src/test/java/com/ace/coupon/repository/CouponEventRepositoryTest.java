@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.data.domain.PageRequest;
 
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
@@ -94,7 +95,8 @@ class CouponEventRepositoryTest {
 		List<CouponEvent> result = couponEventRepository.findRedisInitializationRecoveryCandidates(
 				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN),
 				databaseNow,
-				CampaignRedisInitializationStatus.INITIALIZED);
+				CampaignRedisInitializationStatus.INITIALIZED,
+				PageRequest.of(0, 100));
 
 		assertThat(result).extracting(CouponEvent::getId)
 				.containsExactlyInAnyOrder(scheduled.getId(), open.getId());

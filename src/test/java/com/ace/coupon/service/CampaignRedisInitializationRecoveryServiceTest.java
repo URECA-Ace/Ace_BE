@@ -45,7 +45,7 @@ class CampaignRedisInitializationRecoveryServiceTest {
 	void recoversActiveCampaigns() {
 		CouponEvent missing = event(1L);
 		given(couponEventRepository.findRedisInitializationRecoveryCandidates(
-				any(), any(), any()))
+				any(), any(), any(), any()))
 				.willReturn(List.of(missing));
 		given(campaignAdminService.initialize(missing))
 				.willReturn(response(missing, CampaignInitializationResult.INITIALIZED));
@@ -53,7 +53,8 @@ class CampaignRedisInitializationRecoveryServiceTest {
 		assertThat(service.recoverActiveCampaigns()).isOne();
 		verify(campaignAdminService).initialize(missing);
 		verify(couponEventRepository).findRedisInitializationRecoveryCandidates(
-				any(), any(), Mockito.eq(CampaignRedisInitializationStatus.INITIALIZED));
+				any(), any(), Mockito.eq(CampaignRedisInitializationStatus.INITIALIZED),
+				Mockito.eq(org.springframework.data.domain.PageRequest.of(0, 100)));
 	}
 
 	@Test
@@ -61,7 +62,7 @@ class CampaignRedisInitializationRecoveryServiceTest {
 	void continuesAfterOneCampaignFails() {
 		CouponEvent failed = event(1L);
 		CouponEvent recovered = event(2L);
-		given(couponEventRepository.findRedisInitializationRecoveryCandidates(any(), any(), any()))
+		given(couponEventRepository.findRedisInitializationRecoveryCandidates(any(), any(), any(), any()))
 				.willReturn(List.of(failed, recovered));
 		given(campaignAdminService.initialize(failed))
 				.willThrow(new RedisConnectionFailureException("redis unavailable"));
