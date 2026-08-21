@@ -13,6 +13,8 @@ import com.ace.coupon.entity.CouponEvent;
 @Component
 public class CampaignRedisInitializer {
 
+	private static final int INITIALIZATION_FIELD_COUNT = 3;
+
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> initializeScript;
 	private final CouponIssueRedisProperties properties;
@@ -69,7 +71,7 @@ public class CampaignRedisInitializer {
 				String.valueOf(expireAt),
 				String.valueOf(CouponRedisKeys.BITMAP_SEGMENT_BITS));
 
-		if (response == null || response.size() != 3) {
+		if (response == null || response.size() != INITIALIZATION_FIELD_COUNT) {
 			throw new IllegalStateException("캠페인 Redis 초기화 결과가 없습니다.");
 		}
 		CampaignInitializationResult result = CampaignInitializationResult.from(number(response.get(0)));
