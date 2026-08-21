@@ -1,7 +1,5 @@
 package com.ace.coupon.redis;
 
-import java.util.Arrays;
-
 public enum RedisLuaDiagnosticStage {
 
 	NONE(0, "NONE", "none"),
@@ -36,6 +34,8 @@ public enum RedisLuaDiagnosticStage {
 
 	UNKNOWN(-1, "UNKNOWN", "unknown");
 
+	private static final RedisLuaDiagnosticStage[] LOOKUP = values();
+
 	private final long code;
 	private final String command;
 	private final String script;
@@ -55,9 +55,11 @@ public enum RedisLuaDiagnosticStage {
 	}
 
 	public static RedisLuaDiagnosticStage from(long code) {
-		return Arrays.stream(values())
-				.filter(stage -> stage.code == code)
-				.findFirst()
-				.orElse(UNKNOWN);
+		for (RedisLuaDiagnosticStage stage : LOOKUP) {
+			if (stage.code == code) {
+				return stage;
+			}
+		}
+		return UNKNOWN;
 	}
 }
