@@ -24,7 +24,7 @@
 | 2 | `ALREADY_ISSUED` | 409 Conflict |
 | 3 | `EVENT_NOT_OPEN` | 400 Bad Request |
 | 4 | `EVENT_CLOSED` | 400 Bad Request |
-| 5 | `CAMPAIGN_NOT_INITIALIZED` | 503 Service Unavailable |
+| 5 | `CAMPAIGN_NOT_INITIALIZED` | DB에도 없으면 404, DB에 존재하면 503 |
 | 6 | `IDEMPOTENCY_CONFLICT` | 409 Conflict |
 | 7 | `CORRUPTED_STATE` | 503 Service Unavailable |
 | 8 | `PERSISTENCE_FAILED` | 500 Internal Server Error |
@@ -40,6 +40,29 @@ Redis Lua는 실행 중 다른 명령의 개입은 차단하지만 런타임 오
 요청 상태는 `userId|resultCode|statusCode|sequence|remainingStock|decidedAt` 6필드로 저장한다. 숫자 상태 코드와 미사용 Stream ID 제거로 직렬화 크기를 줄였으며, 롤링 배포 중의 기존 7필드·문자열 상태 데이터도 계속 읽을 수 있다.
 
 초기화 Lua는 동일 설정 재실행만 멱등 성공으로 처리한다. 다른 재고나 시간 설정 및 부분 잔존 키는 덮어쓰지 않고 충돌로 종료한다. 모든 판정 키는 캠페인 마감 시각과 보존 기간을 합친 절대 시각에 만료된다.
+
+## 캠페인 생성 API
+
+기존 쿠폰 마스터에 발급 캠페인을 추가하려면 `POST /api/v1/coupons/{couponId}/events`를 호출한다.
+
+```json
+{
+  "round": 24,
+  "totalStock": 10000,
+  "openAt": "2026-08-20T00:00:00+09:00",
+  "closeAt": "2026-08-20T23:59:59+09:00"
+}
+```
+
+캠페인은 1인 1매 정책으로 생성된다. 서비스는 MySQL 트랜잭션을 먼저 커밋해 `eventId`를 확보한 다음 `CampaignAdminService`의 공통 초기화 경로로 Redis 판정 상태를 초기화한다. 신규 생성 API, 내부 운영 API, 복구 스케줄러가 같은 결과 코드 해석을 사용한다. 동일 `(couponId, round)`와 동일 설정의 재요청은 기존 캠페인을 재사용하고 Redis 초기화를 다시 시도한다. 다른 설정의 동일 회차 요청은 기존 재고를 덮어쓰지 않고 `409 EVENT_CONFIGURATION_CONFLICT`로 거절한다.
+
+DB 커밋 후 Redis 초기화에 실패하면 캠페인 데이터는 복구 기준으로 유지되고 API는 `503 CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE`를 반환한다. `coupon.campaign.redis-initialization-recovery.enabled=true`이면 복구 스케줄러가 마감 전 `SCHEDULED`, `OPEN` 캠페인을 대상으로 멱등 초기화를 재시도한다. 여러 애플리케이션 인스턴스가 동시에 재시도해도 초기화 Lua가 동일 설정만 허용하므로 재고를 다시 채우지 않는다.
+
+## MySQL 발급 확정
+
+`coupon.issue.persistence.mode=SYNC`이면 Redis 승인 직후 같은 요청 흐름에서 MySQL 저장까지 끝낸 후 `202 Accepted`를 반환한다. `RELAY`이면 요청은 Redis 승인까지만 처리하고 `issue-stream` Consumer가 MySQL에 저장한다. 두 모드 모두 DB UNIQUE 제약이 사용자 중복, 발급 순번 중복, `requestId` 중복을 2차로 방어한다.
+
+MySQL 저장 호출이 예외로 끝났더라도 커밋 후 응답 유실일 수 있으므로 보상 전에 DB를 다시 조회한다. 이때 `requestId` 행의 존재만 확인하지 않고 캠페인, 사용자, 발급 순번까지 현재 `IssueRecord`와 같을 때만 `PERSISTED`로 판단한다. 같은 `requestId`를 가진 다른 발급이면 현재 요청은 `ABSENT`로 판단하여 현재 캠페인의 재고와 Bitmap을 보상한다. 조회 자체가 실패하면 초과 발급 위험을 피하기 위해 `UNVERIFIED`로 남기고 자동 보상을 건너뛴다.
 
 ## STS 실행 및 검증
 

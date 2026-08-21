@@ -40,6 +40,9 @@ class CampaignAdminServiceTest {
 	@Mock
 	private CampaignRedisInitializer campaignRedisInitializer;
 
+	@Mock
+	private CampaignRedisInitializationStateService initializationStateService;
+
 	private CampaignAdminService service;
 
 	@BeforeEach
@@ -47,6 +50,7 @@ class CampaignAdminServiceTest {
 		service = new CampaignAdminService(
 				couponEventRepository,
 				campaignRedisInitializer,
+				initializationStateService,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")));
 	}
 
@@ -86,6 +90,8 @@ class CampaignAdminServiceTest {
 		assertThat(response.totalStock()).isEqualTo(10_000);
 		assertThat(response.openAt().toLocalDateTime()).isEqualTo(OPEN_AT);
 		assertThat(response.closeAt().toLocalDateTime()).isEqualTo(OPEN_AT.plusHours(1));
+		verify(initializationStateService).recordAttempt(1L);
+		verify(initializationStateService).recordSuccess(1L);
 	}
 
 	@Test
@@ -95,6 +101,7 @@ class CampaignAdminServiceTest {
 
 		assertThat(service.initialize(1L).result())
 				.isEqualTo(CampaignInitializationResult.ALREADY_INITIALIZED);
+		verify(initializationStateService).recordSuccess(1L);
 	}
 
 	@Test
@@ -108,6 +115,7 @@ class CampaignAdminServiceTest {
 								.isEqualTo(ErrorCode.EVENT_NOT_FOUND));
 
 		verify(campaignRedisInitializer, never()).initialize(any(CouponEvent.class));
+		verify(initializationStateService, never()).recordAttempt(any());
 	}
 
 	@Test
@@ -121,6 +129,10 @@ class CampaignAdminServiceTest {
 							.isEqualTo(ErrorCode.CAMPAIGN_CONFIG_CONFLICT);
 					assertThat(exception.getMessage()).contains("키를 지우고");
 				});
+		verify(initializationStateService).recordFailure(
+				org.mockito.ArgumentMatchers.eq(1L),
+				org.mockito.ArgumentMatchers.eq("CONFIGURATION_CONFLICT"),
+				org.mockito.ArgumentMatchers.anyString());
 	}
 
 	@Test
@@ -136,6 +148,10 @@ class CampaignAdminServiceTest {
 							.contains("보존기간이 지났거나")
 							.contains("totalStock=10000");
 				});
+		verify(initializationStateService).recordFailure(
+				org.mockito.ArgumentMatchers.eq(1L),
+				org.mockito.ArgumentMatchers.eq("INVALID_CONFIGURATION"),
+				org.mockito.ArgumentMatchers.anyString());
 	}
 
 	@Test
@@ -147,5 +163,24 @@ class CampaignAdminServiceTest {
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode())
 								.isEqualTo(ErrorCode.CAMPAIGN_INIT_FAILED));
+		verify(initializationStateService).recordFailure(
+				org.mockito.ArgumentMatchers.eq(1L),
+				org.mockito.ArgumentMatchers.eq("INTERNAL_WRITE_ERROR"),
+				org.mockito.ArgumentMatchers.anyString());
+	}
+
+	@Test
+	@DisplayName("Redis 호출 예외도 실패 상태로 기록한다")
+	void recordsRedisCallFailure() {
+		given(couponEventRepository.findById(1L)).willReturn(Optional.of(event()));
+		given(campaignRedisInitializer.initialize(any(CouponEvent.class)))
+				.willThrow(new IllegalStateException("Redis unavailable"));
+
+		assertThatThrownBy(() -> service.initialize(1L))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessage("Redis unavailable");
+
+		verify(initializationStateService).recordFailure(
+				1L, "REDIS_CALL_FAILED", "Redis unavailable");
 	}
 }

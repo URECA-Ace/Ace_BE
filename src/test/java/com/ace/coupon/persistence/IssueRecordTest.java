@@ -130,8 +130,9 @@ class IssueRecordTest {
 			assertThat(record.get().userId()).isEqualTo(7L);
 			assertThat(record.get().issueSequence()).isEqualTo(3L);
 			assertThat(record.get().decidedAt()).isEqualTo(DECIDED_AT);
-			// Stream 엔트리 ID 는 Stream 안에서만 유일하므로 캠페인 식별자를 붙인다
-			assertThat(record.get().messageId()).isEqualTo("1-1755-0");
+			assertThat(record.get().messageId())
+					.hasSize(36)
+					.isEqualTo(IssueRecord.messageId(1L, "1755-0"));
 		}
 
 		@Test
@@ -187,8 +188,8 @@ class IssueRecordTest {
 	}
 
 	@Test
-	@DisplayName("캠페인이 다르면 같은 엔트리 ID 라도 messageId 가 달라진다")
-	void messageIdIncludesCampaign() {
+	@DisplayName("messageId는 동일 Stream 위치에 결정적이고 캠페인이 다르면 달라진다")
+	void messageIdIsDeterministicAndIncludesCampaign() {
 		Map<String, String> first = streamFields();
 		Map<String, String> second = streamFields();
 		second.put(IssueRecord.FIELD_CAMPAIGN_ID, "2");
@@ -197,8 +198,18 @@ class IssueRecordTest {
 		String firstId = IssueRecord.fromStreamEntry(first, "1755-0").orElseThrow().messageId();
 		String secondId = IssueRecord.fromStreamEntry(second, "1755-0").orElseThrow().messageId();
 
-		assertThat(firstId).isEqualTo("1-1755-0");
-		assertThat(secondId).isEqualTo("2-1755-0");
+		assertThat(firstId).isEqualTo(IssueRecord.messageId(1L, "1755-0"));
+		assertThat(firstId).isEqualTo(IssueRecord.messageId(1L, "1755-0"));
 		assertThat(firstId).isNotEqualTo(secondId);
+		assertThat(UUID.fromString(firstId).toString()).isEqualTo(firstId);
+	}
+
+	@Test
+	@DisplayName("messageId가 DB 컬럼 길이를 넘으면 저장 입력에서 거절한다")
+	void rejectsTooLongMessageId() {
+		assertThatThrownBy(() -> new IssueRecord(
+				REQUEST_ID, 1L, 1L, 0L, 0L, 1L, DECIDED_AT, "x".repeat(37)))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("36자");
 	}
 }

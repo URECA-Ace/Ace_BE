@@ -36,10 +36,12 @@ import com.ace.coupon.redis.CouponIssueLuaCode;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
+import com.ace.coupon.repository.CouponEventRepository;
 
 class CouponIssueServiceImplTest {
 
 	private RedisCouponIssueProcessor processor;
+	private CouponEventRepository couponEventRepository;
 	private IssuePersistenceCoordinator coordinator;
 	private CouponIssueService service;
 
@@ -50,10 +52,12 @@ class CouponIssueServiceImplTest {
 
 	private CouponIssueService serviceWithMode(PersistenceMode mode) {
 		processor = Mockito.mock(RedisCouponIssueProcessor.class);
+		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		coordinator = Mockito.mock(IssuePersistenceCoordinator.class);
 		return new CouponIssueServiceImpl(
 				processor,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
+				couponEventRepository,
 				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
 				coordinator);
 	}
@@ -86,6 +90,36 @@ class CouponIssueServiceImplTest {
 		assertThatThrownBy(() -> service.issue(1L, 2L, requestId))
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.SOLD_OUT));
+	}
+
+	@Test
+	@DisplayName("Redis와 DB에 모두 없는 캠페인은 404로 구분한다")
+	void mapsMissingCampaignToNotFound() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(99L, 2L, requestId))
+				.willReturn(new CouponIssueDecision(
+						CouponIssueLuaCode.CAMPAIGN_NOT_INITIALIZED, null, null, null));
+		given(couponEventRepository.existsById(99L)).willReturn(false);
+
+		assertThatThrownBy(() -> service.issue(99L, 2L, requestId))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode())
+								.isEqualTo(ErrorCode.EVENT_NOT_FOUND));
+	}
+
+	@Test
+	@DisplayName("DB에는 있지만 Redis 초기화 전인 캠페인은 503으로 구분한다")
+	void mapsUninitializedCampaignToUnavailable() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId))
+				.willReturn(new CouponIssueDecision(
+						CouponIssueLuaCode.CAMPAIGN_NOT_INITIALIZED, null, null, null));
+		given(couponEventRepository.existsById(1L)).willReturn(true);
+
+		assertThatThrownBy(() -> service.issue(1L, 2L, requestId))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode())
+								.isEqualTo(ErrorCode.ISSUE_TEMPORARILY_UNAVAILABLE));
 	}
 
 	@Test
