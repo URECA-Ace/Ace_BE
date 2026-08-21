@@ -14,6 +14,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
+import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 
 import jakarta.persistence.EntityManager;
@@ -90,9 +91,10 @@ class CouponEventRepositoryTest {
 				CouponEventStatus.SOLD_OUT, databaseNow);
 		entityManager.flush();
 
-		List<CouponEvent> result = couponEventRepository.findAllByStatusInAndCloseAtAfter(
+		List<CouponEvent> result = couponEventRepository.findRedisInitializationRecoveryCandidates(
 				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN),
-				databaseNow);
+				databaseNow,
+				CampaignRedisInitializationStatus.INITIALIZED);
 
 		assertThat(result).extracting(CouponEvent::getId)
 				.containsExactlyInAnyOrder(scheduled.getId(), open.getId());

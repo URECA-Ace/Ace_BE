@@ -23,10 +23,6 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
 
-	List<CouponEvent> findAllByStatusInAndCloseAtAfter(
-			List<CouponEventStatus> statuses,
-			LocalDateTime closeAt);
-
 	@Query("""
 			select event
 			from CouponEvent event
