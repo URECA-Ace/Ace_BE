@@ -38,7 +38,31 @@ public class CouponEventCreationPersistenceService {
 			LocalDateTime now) {
 		Coupon coupon = couponRepository.findById(couponId)
 				.orElseThrow(() -> new CouponException(ErrorCode.COUPON_NOT_FOUND));
+		return save(coupon, round, totalStock, openAt, closeAt, status, now);
+	}
 
+	@Transactional
+	public CouponEvent createNextRound(
+			Long couponId,
+			Integer totalStock,
+			LocalDateTime openAt,
+			LocalDateTime closeAt,
+			CouponEventStatus status,
+			LocalDateTime now) {
+		Coupon coupon = couponRepository.findByIdForUpdate(couponId)
+				.orElseThrow(() -> new CouponException(ErrorCode.COUPON_NOT_FOUND));
+		Integer nextRound = couponEventRepository.findMaxRoundByCouponId(couponId) + 1;
+		return save(coupon, nextRound, totalStock, openAt, closeAt, status, now);
+	}
+
+	private CouponEvent save(
+			Coupon coupon,
+			Integer round,
+			Integer totalStock,
+			LocalDateTime openAt,
+			LocalDateTime closeAt,
+			CouponEventStatus status,
+			LocalDateTime now) {
 		CouponEvent event = CouponEvent.builder()
 				.coupon(coupon)
 				.round(round)

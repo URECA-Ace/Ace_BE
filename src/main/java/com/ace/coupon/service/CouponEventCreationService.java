@@ -33,10 +33,26 @@ public class CouponEventCreationService {
 	public CouponEventCreateResponse create(Long couponId, CouponEventCreateRequest request) {
 		Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 		NormalizedConfiguration configuration = normalize(request, properties.zoneId(), now);
-		CouponEvent event = persistOrReuse(couponId, request, configuration, now);
+		CouponEvent event = request.round() == null
+				? persistNextRound(couponId, request, configuration, now)
+				: persistOrReuse(couponId, request, configuration, now);
 
 		initializeRedis(event);
 		return CouponEventCreateResponse.from(event, couponId, properties.zoneId());
+	}
+
+	private CouponEvent persistNextRound(
+			Long couponId,
+			CouponEventCreateRequest request,
+			NormalizedConfiguration configuration,
+			Instant now) {
+		return persistenceService.createNextRound(
+				couponId,
+				request.totalStock(),
+				configuration.openAt(),
+				configuration.closeAt(),
+				configuration.status(),
+				LocalDateTime.ofInstant(now, properties.zoneId()));
 	}
 
 	private CouponEvent persistOrReuse(

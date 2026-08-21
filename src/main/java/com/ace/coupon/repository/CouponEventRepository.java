@@ -19,6 +19,9 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	Optional<CouponEvent> findByCoupon_IdAndRound(Long couponId, Integer round);
 
+	@Query("select coalesce(max(event.round), 0) from CouponEvent event where event.coupon.id = :couponId")
+	Integer findMaxRoundByCouponId(@Param("couponId") Long couponId);
+
 	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
 	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
 
