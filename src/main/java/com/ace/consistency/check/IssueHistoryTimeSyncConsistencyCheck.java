@@ -24,18 +24,25 @@ import java.util.Set;
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final int SAMPLE_LIMIT = 20;
-	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간
+	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간 .env로 일괄 관리예정 !!!!!
 	private static final int MAX_BATCH_LAG_SECONDS = 86400; 
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	// 상태는 일치하지만, 시간이 1초 이상 차이나는 경우를 검출
+	private static final String SCOPE_CONDITION = """
+			(
+				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR :scopeMode = 'ALL_GLOBAL'
+				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
+			)
+			""";
+
 	// 상태는 일치하지만, 시간이 누락되었거나 1초 이상 차이나는 경우를 검출
 	private static final String SQL = """
             SELECT ci.issue_id, ci.status, 
                    CASE ci.status 
                        WHEN 'USED' THEN ci.used_at 
-                       WHEN 'CANCELED' THEN ci.canceled_at 
                        WHEN 'ISSUED' THEN ci.issued_at 
                        WHEN 'EXPIRED' THEN ci.valid_to
                    END as issue_time,
@@ -43,26 +50,25 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                    ABS(TIMESTAMPDIFF(MICROSECOND, 
                        CASE ci.status 
                            WHEN 'USED' THEN ci.used_at 
-                           WHEN 'CANCELED' THEN ci.canceled_at 
                            WHEN 'ISSUED' THEN ci.issued_at 
                            WHEN 'EXPIRED' THEN ci.valid_to
                        END, 
                        latest_history.occurred_at
-                   )) / 1000000.0 as time_diff_seconds
+                   )) / 1000000.0 as time_diff_seconds,
+                   COUNT(*) OVER() AS total_violation_count
             FROM coupon_issue ci
             JOIN (
                 SELECT issue_id, to_status, occurred_at,
                        ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
-            WHERE (:eventId IS NULL OR ci.event_id = :eventId)
+            WHERE %s
               AND ci.status = latest_history.to_status
-              AND ci.status IN ('ISSUED', 'USED', 'CANCELED', 'EXPIRED')
+              AND ci.status IN ('ISSUED', 'USED', 'EXPIRED')
               AND (
                   -- 1) 리뷰 반영: 기준 시간이 누락된 경우 즉시 위반 처리
                   CASE ci.status 
                        WHEN 'USED' THEN ci.used_at 
-                       WHEN 'CANCELED' THEN ci.canceled_at 
                        WHEN 'ISSUED' THEN ci.issued_at 
                        WHEN 'EXPIRED' THEN ci.valid_to
                   END IS NULL
@@ -71,12 +77,11 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                   
                   -- 2) 시간 차이 검증 (상태별 특성 반영)
                   (
-                      -- [실시간 처리] ISSUED, USED, CANCELED는 1초 오차만 허용
-                      ci.status IN ('ISSUED', 'USED', 'CANCELED') AND
+                      -- [실시간 처리] ISSUED, USED는 1초 오차만 허용
+                      ci.status IN ('ISSUED', 'USED') AND
                       ABS(TIMESTAMPDIFF(MICROSECOND, 
                            CASE ci.status 
                                WHEN 'USED' THEN ci.used_at 
-                               WHEN 'CANCELED' THEN ci.canceled_at 
                                WHEN 'ISSUED' THEN ci.issued_at 
                            END, 
                            latest_history.occurred_at)) > 1000000
@@ -94,7 +99,9 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                       )
                   )
               )
-            """;
+            ORDER BY ci.issue_id
+            LIMIT %d
+            """.formatted(SCOPE_CONDITION, SAMPLE_LIMIT);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
@@ -103,9 +110,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		Long eventIdFilter = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-		MapSqlParameterSource params = new MapSqlParameterSource()
-				.addValue("eventId", eventIdFilter)
+		MapSqlParameterSource params = scopeParameters(scope)
 				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS);
 
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(SQL, params);
@@ -114,18 +119,28 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 			return CheckOutcome.pass();
 		}
 
+		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
+		List<Map<String, Object>> sample = new java.util.ArrayList<>(violations.size());
+		for (Map<String, Object> violation : violations) {
+			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
+			sampleRow.remove("total_violation_count");
+			sample.add(sampleRow);
+		}
+
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("sample", violations.stream()
-				.limit(SAMPLE_LIMIT)
-				.map(row -> Map.of(
-						"issueId", row.get("issue_id"),
-						"status", row.get("status"),
-						"issueTime", row.get("issue_time"),
-						"historyTime", row.get("history_time"),
-						"timeDiffSeconds", row.get("time_diff_seconds")
-				)).toList());
+		diff.put("sample", sample);
 		diff.put("reason", "연동 도메인 시간 동기화 위반: coupon_issue와 coupon_history 간의 상태 변경 시간이 1초 이상 불일치합니다. (트랜잭션 원자성 의심)");
 
-		return CheckOutcome.fail(violations.size(), diff);
+		return CheckOutcome.fail(violationCount, diff);
+	}
+
+	private MapSqlParameterSource scopeParameters(Scope scope) {
+		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
+		return new MapSqlParameterSource()
+				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("eventId", eventScope ? scope.getEventId() : null)
+				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
+				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
 	}
 }
