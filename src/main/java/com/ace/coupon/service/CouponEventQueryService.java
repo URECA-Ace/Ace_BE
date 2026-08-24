@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.coupon.dto.response.CouponEventSummaryResponse;
+import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponEventRepository;
 
@@ -22,8 +23,12 @@ public class CouponEventQueryService {
 	private final CouponIssueRedisProperties properties;
 
 	@Transactional(readOnly = true)
-	public List<CouponEventSummaryResponse> findRecentEvents() {
-		return couponEventRepository.findRecentWithCoupon(PageRequest.of(0, RECENT_EVENT_LIMIT)).stream()
+	public List<CouponEventSummaryResponse> findRecentEvents(CouponEventStatus status) {
+		PageRequest pageRequest = PageRequest.of(0, RECENT_EVENT_LIMIT);
+		var events = status == null
+				? couponEventRepository.findRecentWithCoupon(pageRequest)
+				: couponEventRepository.findRecentWithCouponByStatus(status, pageRequest);
+		return events.stream()
 				.map(event -> CouponEventSummaryResponse.from(event, properties.zoneId()))
 				.toList();
 	}

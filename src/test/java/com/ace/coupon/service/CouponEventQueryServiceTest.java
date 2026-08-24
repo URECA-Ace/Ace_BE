@@ -62,7 +62,7 @@ class CouponEventQueryServiceTest {
 		given(couponEventRepository.findRecentWithCoupon(PageRequest.of(0, 5)))
 				.willReturn(List.of(event));
 
-		var result = couponEventQueryService.findRecentEvents();
+		var result = couponEventQueryService.findRecentEvents(null);
 
 		assertThat(result).singleElement().satisfies(response -> {
 			assertThat(response.eventId()).isEqualTo(51L);
@@ -70,5 +70,19 @@ class CouponEventQueryServiceTest {
 			assertThat(response.round()).isEqualTo(3);
 		});
 		verify(couponEventRepository).findRecentWithCoupon(PageRequest.of(0, 5));
+	}
+
+	@Test
+	@DisplayName("OPEN 상태의 최근 발급 회차만 최대 5개 조회한다")
+	void findsFiveRecentOpenEvents() {
+		given(couponEventRepository.findRecentWithCouponByStatus(
+				CouponEventStatus.OPEN, PageRequest.of(0, 5)))
+				.willReturn(List.of());
+
+		var result = couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN);
+
+		assertThat(result).isEmpty();
+		verify(couponEventRepository).findRecentWithCouponByStatus(
+				CouponEventStatus.OPEN, PageRequest.of(0, 5));
 	}
 }

@@ -33,6 +33,17 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			""")
 	List<CouponEvent> findRecentWithCoupon(Pageable pageable);
 
+	@Query("""
+			select event
+			from CouponEvent event
+			join fetch event.coupon
+			where event.status = :status
+			order by event.createdAt desc, event.id desc
+			""")
+	List<CouponEvent> findRecentWithCouponByStatus(
+			@Param("status") CouponEventStatus status,
+			Pageable pageable);
+
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
 
 	@Query("""
