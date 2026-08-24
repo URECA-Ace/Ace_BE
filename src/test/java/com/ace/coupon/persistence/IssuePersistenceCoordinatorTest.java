@@ -120,6 +120,69 @@ class IssuePersistenceCoordinatorTest {
 	}
 
 	@Test
+	@DisplayName("RELAY 확정은 호출이 실패하면 예외를 올린다 - XACK 를 막아 재처리시킨다")
+	void confirmPersistedRethrowsCallFailure() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willThrow(new IllegalStateException("Redis 연결 실패"));
+
+		assertThatThrownBy(() -> coordinator.confirmPersisted(record, INCIDENT_ID))
+				.isInstanceOf(IllegalStateException.class);
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		assertThat(captor.getValue().stage()).isEqualTo(IssueFailureStage.CONFIRM);
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 Redis 쓰기 실패도 예외로 올린다 - 재시도하면 성공할 수 있다")
+	void confirmPersistedRethrowsInternalWriteError() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.INTERNAL_WRITE_ERROR);
+
+		assertThatThrownBy(() -> coordinator.confirmPersisted(record, INCIDENT_ID))
+				.isInstanceOf(IllegalStateException.class);
+
+		verify(failureRecorder).record(any());
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 결정론적 거절을 삼킨다 - 재시도해도 결과가 같아 XACK 해야 한다")
+	void confirmPersistedSwallowsDeterministicRejection() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.NOT_CONFIRMABLE);
+
+		coordinator.confirmPersisted(record, INCIDENT_ID);
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		assertThat(captor.getValue().compensationResult()).isEqualTo("NOT_CONFIRMABLE");
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 이미 확정된 건에 예외를 올리지 않는다")
+	void confirmPersistedAcceptsAlreadyConfirmed() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.ALREADY_CONFIRMED);
+
+		coordinator.confirmPersisted(record, INCIDENT_ID);
+
+		verify(failureRecorder, never()).record(any());
+	}
+
+	@Test
+	@DisplayName("SYNC 저장은 Redis 쓰기 실패에도 예외를 올리지 않는다 - 저장은 이미 커밋됐다")
+	void syncPersistSwallowsInternalWriteError() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.INTERNAL_WRITE_ERROR);
+
+		assertThat(coordinator.persist(record, IssueFailureStage.DB_INSERT, INCIDENT_ID))
+				.isEqualTo(42L);
+
+		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
+	}
+
+	@Test
 	@DisplayName("확정 실패 기록까지 실패해도 예외를 올리지 않는다")
 	void swallowsFailureRecorderError() {
 		given(persistenceService.persist(record)).willReturn(42L);

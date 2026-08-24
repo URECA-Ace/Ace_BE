@@ -233,36 +233,53 @@ public class IssueStreamRelay implements SmartLifecycle {
 		}
 
 		IssueRecord issueRecord = parsed.get();
+		IssueFailureStage stage = IssueFailureStage.RELAY;
 		try {
 			persistenceService.persist(issueRecord);
 			// 저장 실패에 보상하면 안 되므로 coordinator.persist() 대신 확정만 따로 부른다
+			// 확정 실패는 XACK 하지 않고 재처리
+			// 저장은 멱등이라 다시 돌아도 안전
+			stage = IssueFailureStage.CONFIRM;
 			coordinator.confirmPersisted(issueRecord, record.getId().getValue());
 			acknowledge(key, record.getId());
 		} catch (RuntimeException exception) {
-			handleFailure(key, record.getId(), issueRecord, deliveryCount, exception);
+			handleFailure(key, record.getId(), issueRecord, deliveryCount, stage, exception);
 		}
 	}
 
 	// 한도 전에는 원복 X
+	// stage 가 CONFIRM 이면 저장은 이미 커밋된 상태
+	// abandon 안의 probe 가 원복을 건너뛴다
 	private void handleFailure(
 			String key,
 			RecordId recordId,
 			IssueRecord issueRecord,
 			long deliveryCount,
+			IssueFailureStage stage,
 			RuntimeException exception) {
 
+		boolean persisted = stage == IssueFailureStage.CONFIRM;
+		String phase = persisted ? "발급 확정" : "발급 저장";
+
 		if (deliveryCount < properties.maxDeliveryAttempts()) {
-			log.warn("발급 저장 실패, 재처리 예정: requestId={}, delivery={}/{}",
-					issueRecord.requestId(), deliveryCount, properties.maxDeliveryAttempts(), exception);
+			log.warn("{} 실패, 재처리 예정: requestId={}, delivery={}/{}",
+					phase, issueRecord.requestId(), deliveryCount,
+					properties.maxDeliveryAttempts(), exception);
 			return;
 		}
 
 		String incidentId = UUID.randomUUID().toString();
-		log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
-				issueRecord.requestId(), incidentId, exception);
+		if (persisted) {
+			// 저장은 끝났고 확정만 못 했다. 재고를 되돌리면 반대 방향 불일치가 된다
+			log.error("발급 확정 재시도 한도 초과, 저장은 유지합니다: requestId={}, incidentId={}",
+					issueRecord.requestId(), incidentId, exception);
+		} else {
+			log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
+					issueRecord.requestId(), incidentId, exception);
+		}
 
 		CouponIssueCompensationResult compensation =
-				coordinator.abandon(issueRecord, IssueFailureStage.RELAY, incidentId, exception);
+				coordinator.abandon(issueRecord, stage, incidentId, exception);
 
 		// 원복 결과가 불확실하면 XACK 하지 않는다
 		// 여기서 지우면 저장도 원복도 안 된 채 재처리 수단만 사라진다

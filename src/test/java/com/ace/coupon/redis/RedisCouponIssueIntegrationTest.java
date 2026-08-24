@@ -308,6 +308,19 @@ class RedisCouponIssueIntegrationTest {
 	}
 
 	@Test
+	@DisplayName("발급 현황은 숫자가 아닌 확정 수를 0 으로 뭉개지 않고 손상 상태로 거절한다")
+	void rejectsNonNumericConfirmedQuantity() {
+		long campaignId = initializeOpenCampaign(1);
+		processor.issue(campaignId, 1L, UUID.randomUUID());
+		redisTemplate.opsForHash()
+				.put(CouponRedisKeys.campaign(campaignId).metadata(), "confirmedQuantity", "broken");
+
+		assertThatThrownBy(() -> statsReader.read(campaignId))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("Redis 상태");
+	}
+
+	@Test
 	@DisplayName("발급 현황은 전체 수량보다 큰 잔여 재고를 손상 상태로 거절한다")
 	void rejectsCorruptedRealtimeStats() {
 		long campaignId = initializeOpenCampaign(1);

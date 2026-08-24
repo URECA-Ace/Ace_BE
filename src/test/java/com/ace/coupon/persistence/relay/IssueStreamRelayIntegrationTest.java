@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
@@ -180,6 +183,63 @@ class IssueStreamRelayIntegrationTest {
 		assertThat(record.issueSequence()).isEqualTo(1L);
 		// Stream 엔트리 식별자가 message_id 로 들어가 같은 엔트리의 중복 처리를 막는다
 		assertThat(record.messageId()).isNotBlank();
+
+		// 저장 -> 확정 -> XACK 순서. 확정 배선이 빠지면 여기서 걸린다
+		InOrder inOrder = inOrder(persistenceService, coordinator);
+		inOrder.verify(persistenceService).persist(any());
+		inOrder.verify(coordinator).confirmPersisted(any(), any());
+		assertThat(pendingCount()).isZero();
+	}
+
+	@Test
+	@DisplayName("확정에 실패하면 XACK 하지 않고 재처리한다 - 저장만 되고 확정이 누락되면 안 된다")
+	void keepsPendingWhenConfirmFails() {
+		issue(1L);
+		willThrow(new IllegalStateException("확정 실패"))
+				.given(coordinator).confirmPersisted(any(), any());
+
+		relay(3, Duration.ofSeconds(30)).runOnce();
+
+		verify(persistenceService).persist(any());
+		assertThat(pendingCount()).isEqualTo(1);
+		// 저장은 끝났으므로 원복하면 안 된다
+		verify(coordinator, never()).abandon(any(), any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("첫 확정이 실패해도 재처리에서 성공하면 XACK 한다")
+	void acknowledgesAfterConfirmRetrySucceeds() {
+		issue(1L);
+		willThrow(new IllegalStateException("확정 실패"))
+				.willDoNothing()
+				.given(coordinator).confirmPersisted(any(), any());
+
+		IssueStreamRelay relay = relay(3, Duration.ofMillis(1));
+		relay.runOnce();
+		assertThat(pendingCount()).isEqualTo(1);
+
+		// 유휴 pending 을 회수해 다시 시도한다
+		relay.runOnce();
+
+		verify(coordinator, times(2)).confirmPersisted(any(), any());
+		assertThat(pendingCount()).isZero();
+	}
+
+	@Test
+	@DisplayName("확정 실패가 한도를 넘겨도 저장된 건은 원복하지 않는다")
+	void doesNotCompensatePersistedIssueWhenConfirmKeepsFailing() {
+		issue(1L);
+		willThrow(new IllegalStateException("확정 실패"))
+				.given(coordinator).confirmPersisted(any(), any());
+		given(coordinator.abandon(any(), any(), any(), any()))
+				.willReturn(CouponIssueCompensationResult.NOT_COMPENSABLE);
+
+		IssueStreamRelay relay = relay(1, Duration.ofMillis(1));
+		relay.runOnce();
+
+		// 한도가 1이라 첫 실패에서 바로 포기 단계로 간다
+		// 단계는 CONFIRM 이어야 한다
+		verify(coordinator).abandon(any(), eq(IssueFailureStage.CONFIRM), any(), any());
 		assertThat(pendingCount()).isZero();
 	}
 

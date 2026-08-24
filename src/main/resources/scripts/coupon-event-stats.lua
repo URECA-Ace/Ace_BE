@@ -77,7 +77,15 @@ local allocatedQuantity = totalStock - remainingStock
 
 -- 확정 처리 전 캠페인에는 필드가 X
 -- 없는 것은 결함이 아니라 0
-local confirmedQuantity = tonumber(metadata[4]) or 0
+-- 값이 있는데 숫자가 아니면 손상
+-- 0 으로 뭉개면 아래 불변식 검증을 그냥 통과한다
+local confirmedQuantity = 0
+if metadata[4] then
+    confirmedQuantity = tonumber(metadata[4])
+    if confirmedQuantity == nil then
+        return errorResponse(CORRUPTED_STATE)
+    end
+end
 if not isInteger(confirmedQuantity)
         or confirmedQuantity < 0 or confirmedQuantity > allocatedQuantity then
     return errorResponse(CORRUPTED_STATE)

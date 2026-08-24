@@ -41,31 +41,60 @@ public class IssuePersistenceCoordinator {
 		return issueId;
 	}
 
-	// 저장이 커밋된 뒤 요청 상태를 CONFIRMED 로 올린다
-	// RELAY 는 저장 실패에 보상하면 안 되므로 persist() 를 쓰지 못한다. 확정만 따로 부른다
+	// 저장이 커밋된 뒤 요청 상태를 CONFIRMED(RELAY 전용)
+	// 보상은 하지 않지만 재시도는 함
+	// 재시도해도 결과가 같은 거절은 그대로 삼킴 안 그러면 엔트리가 Stream 에서 빠지지 X
 	public void confirmPersisted(IssueRecord record, String incidentId) {
-		confirmQuietly(record, incidentId);
+		CouponIssueConfirmResult result;
+		try {
+			result = issueProcessor.confirm(
+					record.campaignId(), record.userId(), record.requestId());
+		} catch (RuntimeException confirmFailure) {
+			log.warn("확정 호출 실패, 재처리 대상입니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, confirmFailure);
+			recordConfirmFailure(record, incidentId, CALL_FAILED, summary(confirmFailure));
+			throw confirmFailure;
+		}
+
+		if (isConfirmed(result)) {
+			return;
+		}
+
+		recordRejectedConfirm(record, incidentId, result);
+		if (result == CouponIssueConfirmResult.INTERNAL_WRITE_ERROR) {
+			// 예외는 아니지만 Redis 쓰기 실패라 재시도하면 성공할 수 있다
+			throw new IllegalStateException(
+					"발급 확정 쓰기에 실패했습니다: requestId=" + record.requestId());
+		}
 	}
 
-	// 커밋이 끝난 뒤에만 호출
-	// 확정에 실패해도 보상하지 않는다. MySQL 은 이미 커밋됐고 재고를 되돌리면 반대 방향 불일치가 된다
-	// 예외를 밖으로 던지지 않는다. RELAY 가 XACK 를 못 해서 저장된 건이 무한 재처리된다
+	// 커밋이 끝난 뒤에만 호출(SYNC 전용)
+	// 예외를 밖으로 던지지 않는다. 저장은 이미 커밋됐는데 요청 스레드가 500 을 응답하게 된다
 	private void confirmQuietly(IssueRecord record, String incidentId) {
 		try {
 			CouponIssueConfirmResult result = issueProcessor.confirm(
 					record.campaignId(), record.userId(), record.requestId());
-			if (result == CouponIssueConfirmResult.CONFIRMED_NOW
-					|| result == CouponIssueConfirmResult.ALREADY_CONFIRMED) {
+			if (isConfirmed(result)) {
 				return;
 			}
-			log.warn("확정되지 않았습니다: requestId={}, result={}, incidentId={}",
-					record.requestId(), result, incidentId);
-			recordConfirmFailure(record, incidentId, String.valueOf(result), "확정 거절: " + result);
+			recordRejectedConfirm(record, incidentId, result);
 		} catch (RuntimeException confirmFailure) {
 			log.warn("확정 처리 실패 - 상태 조회만 어긋납니다: requestId={}, incidentId={}",
 					record.requestId(), incidentId, confirmFailure);
 			recordConfirmFailure(record, incidentId, CALL_FAILED, summary(confirmFailure));
 		}
+	}
+
+	private boolean isConfirmed(CouponIssueConfirmResult result) {
+		return result == CouponIssueConfirmResult.CONFIRMED_NOW
+				|| result == CouponIssueConfirmResult.ALREADY_CONFIRMED;
+	}
+
+	private void recordRejectedConfirm(
+			IssueRecord record, String incidentId, CouponIssueConfirmResult result) {
+		log.warn("확정되지 않았습니다: requestId={}, result={}, incidentId={}",
+				record.requestId(), result, incidentId);
+		recordConfirmFailure(record, incidentId, String.valueOf(result), "확정 거절: " + result);
 	}
 
 	// 여기서 예외가 나가면 RELAY 가 저장된 건을 무한 재처리
