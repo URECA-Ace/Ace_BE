@@ -13,11 +13,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 2. 상태 머신 정합성 (이력 연속성 검증, Used->Expired검증)
+ * 2. 상태 머신 정합성 (이력 연속성 검증)
  *
  * 쿠폰 이력(coupon_history) 테이블에서 상태 전이의 체인이 끊어지거나 과거 상태로 덮어씌워진 경우를 식별합니다.
  * "현재 레코드의 출발지(from_status)는 반드시 직전 레코드의 목적지(prev_to_status)와 일치해야 한다"는
  * 불변의 법칙을 검증하여, 동시성 충돌이나 멱등성 실패, 잘못된 로직으로 인한 덮어쓰기를 모두 잡아냅니다.
+ *
+ * from_status/to_status 쌍 자체가 허용된 전이인지(예: USED -> EXPIRED 같은 무효 전이)는
+ * {@link CouponHistoryStructuralConsistencyCheck}의 책임이라 여기서는 다루지 않는다 —
+ * 두 Check의 검증 범위가 겹치지 않도록 분리했다.
  */
 @Component
 @RequiredArgsConstructor
@@ -49,18 +53,12 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
             ) sub
             WHERE %s
               AND (
-                  -- 1. 첫 번째 이력은 반드시 NULL -> ISSUED 여야 함
+                  -- 1. 첫 번째 이력은 반드시 NULL -> ISSUED 여야 함 (체인의 시작점 검증)
                   (sub.rn = 1 AND NOT (sub.from_status IS NULL AND sub.to_status = 'ISSUED'))
                   OR
-                  -- 2. 두 번째 이력부터는 상태 연속성 보장 및 허용된 전이만 가능
-                  (sub.rn > 1 AND (
-                      NOT (sub.from_status <=> sub.prev_to_status)
-                      OR (sub.from_status, sub.to_status) NOT IN (
-                          ('ISSUED', 'USED'),
-                          ('USED', 'ISSUED'),
-                          ('ISSUED', 'EXPIRED')
-                      )
-                  ))
+                  -- 2. 두 번째 이력부터는 직전 이력과 연속성이 이어지는지만 검증한다
+                  --    (from/to 쌍 자체의 유효성은 CouponHistoryStructuralConsistencyCheck의 책임)
+                  (sub.rn > 1 AND NOT (sub.from_status <=> sub.prev_to_status))
               )
             ORDER BY sub.issue_id
             LIMIT %d
@@ -90,7 +88,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
 		Map<String, Object> diff = new LinkedHashMap<>();
 		diff.put("sample", sample);
-		diff.put("reason", "상태 머신 위반: 이전 상태와 현재 출발 상태가 이어지지 않거나(연속성 붕괴), 비즈니스 로직상 허용되지 않은 무효한 상태 전이가 발생했습니다.");
+		diff.put("reason", "상태 머신 위반: 이전 이력의 도착 상태와 현재 이력의 출발 상태가 이어지지 않습니다(연속성 붕괴).");
 
 		return CheckOutcome.fail(violationCount, diff);
 	}
