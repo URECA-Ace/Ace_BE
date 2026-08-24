@@ -10,5 +10,7 @@ public record CouponEventStatsSnapshot(
 		Long allocatedQuantity,
 		Long remainingStock,
 		CouponEventStatus status,
-		Instant observedAt) {
+		Instant observedAt,
+		Long confirmedQuantity,
+		Long pendingQuantity) {
 }
