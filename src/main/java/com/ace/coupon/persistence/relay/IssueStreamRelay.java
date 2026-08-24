@@ -248,8 +248,9 @@ public class IssueStreamRelay implements SmartLifecycle {
 	}
 
 	// 한도 전에는 원복 X
-	// stage 가 CONFIRM 이면 저장은 이미 커밋된 상태
-	// abandon 안의 probe 가 원복을 건너뛴다
+	// stage 로 두 경로가 갈린다
+	//   RELAY   저장 실패. 한도 초과 시 원복 후 XACK
+	//   CONFIRM 저장은 커밋됨. 원복 금지, XACK 도 하지 않고 pending 에 남겨 재확정을 기다린다
 	private void handleFailure(
 			String key,
 			RecordId recordId,
@@ -269,14 +270,22 @@ public class IssueStreamRelay implements SmartLifecycle {
 		}
 
 		String incidentId = UUID.randomUUID().toString();
+
+		// 확정 실패는 보상 경로를 타지 않는다
+		// 저장이 이미 커밋됐는데 probe 가 ABSENT 를 내면 재고가 복구돼 초과 발급이 된다
+		// XACK 하지 않고 pending 에 남기면 Redis 회복 후 XCLAIM 이 회수해 다시 확정한다
 		if (persisted) {
-			// 저장은 끝났고 확정만 못 했다. 재고를 되돌리면 반대 방향 불일치가 된다
-			log.error("발급 확정 재시도 한도 초과, 저장은 유지합니다: requestId={}, incidentId={}",
+			log.error("발급 확정 재시도 한도 초과, pending 을 유지합니다: requestId={}, incidentId={}",
 					issueRecord.requestId(), incidentId, exception);
-		} else {
-			log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
-					issueRecord.requestId(), incidentId, exception);
+			if (deliveryCount == properties.maxDeliveryAttempts()) {
+				// 한도에 처음 닿았을 때만 기록한다. 매 주기 남기면 실패 로그가 부푼다
+				coordinator.recordConfirmAbandoned(issueRecord, incidentId, exception);
+			}
+			return;
 		}
+
+		log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
+				issueRecord.requestId(), incidentId, exception);
 
 		CouponIssueCompensationResult compensation =
 				coordinator.abandon(issueRecord, stage, incidentId, exception);

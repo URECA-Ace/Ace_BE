@@ -109,6 +109,15 @@ public class IssuePersistenceCoordinator {
 		}
 	}
 
+	// 확정을 포기하고 흔적만(RELAY 전용)
+	// 저장이 이미 커밋된 상태라 보상 경로를 타면 안 된다
+	// probe 는 같은 requestId 의 다른 발급을 ABSENT 로 판정하므로, 그 경로에 들어가면
+	// MySQL 에 행이 있는 채로 재고가 복구돼 초과 발급이 된다
+	public void recordConfirmAbandoned(
+			IssueRecord record, String incidentId, RuntimeException cause) {
+		recordConfirmFailure(record, incidentId, CALL_FAILED, summary(cause));
+	}
+
 	// 저장을 포기하고 되돌림
 	// RELAY 가 재시도 한도를 넘겼을 때만 사용
 	// 반환값이 null 이면 원복 여부가 불확실하다는 뜻이라 호출부가 ACK 를 미뤄야 한다

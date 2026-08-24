@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willDoNothing;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -226,21 +227,56 @@ class IssueStreamRelayIntegrationTest {
 	}
 
 	@Test
-	@DisplayName("확정 실패가 한도를 넘겨도 저장된 건은 원복하지 않는다")
-	void doesNotCompensatePersistedIssueWhenConfirmKeepsFailing() {
+	@DisplayName("확정 실패가 한도를 넘겨도 보상 경로를 타지 않고 pending 을 유지한다")
+	void neverCompensatesAndKeepsPendingWhenConfirmExceedsLimit() {
 		issue(1L);
 		willThrow(new IllegalStateException("확정 실패"))
 				.given(coordinator).confirmPersisted(any(), any());
-		given(coordinator.abandon(any(), any(), any(), any()))
-				.willReturn(CouponIssueCompensationResult.NOT_COMPENSABLE);
 
+		// 한도가 1이라 첫 실패에서 바로 포기 단계로 간다
 		IssueStreamRelay relay = relay(1, Duration.ofMillis(1));
 		relay.runOnce();
 
-		// 한도가 1이라 첫 실패에서 바로 포기 단계로 간다
-		// 단계는 CONFIRM 이어야 한다
-		verify(coordinator).abandon(any(), eq(IssueFailureStage.CONFIRM), any(), any());
+		// 저장이 커밋된 건을 보상하면 MySQL 에 행이 있는 채로 재고가 복구된다
+		verify(coordinator, never()).abandon(any(), any(), any(), any());
+		// XACK 하면 재확정 수단이 사라진다. pending 에 남아야 한다
+		assertThat(pendingCount()).isEqualTo(1);
+		verify(coordinator).recordConfirmAbandoned(any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("한도를 넘긴 확정도 Redis 가 회복되면 다시 확정하고 XACK 한다")
+	void recoversAbandonedConfirmAfterRedisRecovers() {
+		issue(1L);
+		willThrow(new IllegalStateException("확정 실패"))
+				.given(coordinator).confirmPersisted(any(), any());
+
+		IssueStreamRelay relay = relay(1, Duration.ofMillis(1));
+		relay.runOnce();
+		assertThat(pendingCount()).isEqualTo(1);
+
+		// Redis 회복. XCLAIM 이 회수해 다시 확정한다
+		willDoNothing().given(coordinator).confirmPersisted(any(), any());
+		relay.runOnce();
+
 		assertThat(pendingCount()).isZero();
+		verify(coordinator, never()).abandon(any(), any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("확정 실패가 여러 주기 이어져도 실패 기록은 한도 도달 시 한 번만 남긴다")
+	void recordsConfirmAbandonOnlyOnceAtThreshold() {
+		issue(1L);
+		willThrow(new IllegalStateException("확정 실패"))
+				.given(coordinator).confirmPersisted(any(), any());
+
+		IssueStreamRelay relay = relay(1, Duration.ofMillis(1));
+		relay.runOnce();
+		relay.runOnce();
+		relay.runOnce();
+
+		assertThat(pendingCount()).isEqualTo(1);
+		verify(coordinator, times(1)).recordConfirmAbandoned(any(), any(), any());
 	}
 
 	@Test
