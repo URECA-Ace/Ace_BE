@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.coupon.persistence.IssueRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,7 +61,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				  valid_to DATETIME(6),
 				  used_at DATETIME(6),
 				  created_at DATETIME(6),
-				  message_id VARCHAR(64)
+				  message_id VARCHAR(36)
 				)
 				""");
 		jdbcTemplate.execute("""
@@ -124,13 +125,15 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
-	void campaignId와_Stream_Entry_ID로_구성된_message_id는_구조_검증을_통과한다() {
+	void 이전_campaignId_Stream_Entry_ID_message_id는_계약_위반으로_검출한다() {
 		insertIssue("ISSUED", null, 1L, "1-1755000000000-0");
 
 		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
 				.check(Scope.all(TEST_CHECKED_AT));
 
-		assertThat(outcome.isPass()).isTrue();
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("INVALID_MESSAGE_ID_FORMAT");
 	}
 
 	@Test
@@ -147,8 +150,41 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
-	void UUID_형식의_message_id는_최신_Persistence_계약_위반으로_검출한다() {
-		insertIssue("ISSUED", null, 1L, "10000000-0000-0000-0000-000000000001");
+	void PR26_결정적_UUID_message_id는_구조_검증을_통과한다() {
+		String messageId = IssueRecord.messageId(1L, "1755000000000-0");
+		insertIssue("ISSUED", null, 1L, messageId);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void SYNC_경로의_null_message_id는_구조_검증을_통과한다() {
+		insertIssue("ISSUED", null, 1L, null);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 빈_message_id는_계약_위반으로_검출한다() {
+		insertIssue("ISSUED", null, 1L, "");
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("INVALID_MESSAGE_ID_FORMAT");
+	}
+
+	@Test
+	void 공백_message_id는_계약_위반으로_검출한다() {
+		insertIssue("ISSUED", null, 1L, "   ");
 
 		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
 				.check(Scope.all(TEST_CHECKED_AT));
@@ -436,7 +472,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {
 		return insertIssue(status, usedAt, eventId,
-				eventId + "-1755000000000-0");
+				IssueRecord.messageId(eventId, "1755000000000-0"));
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId, String messageId) {
