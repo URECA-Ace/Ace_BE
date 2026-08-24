@@ -235,6 +235,8 @@ public class IssueStreamRelay implements SmartLifecycle {
 		IssueRecord issueRecord = parsed.get();
 		try {
 			persistenceService.persist(issueRecord);
+			// 저장 실패에 보상하면 안 되므로 coordinator.persist() 대신 확정만 따로 부른다
+			coordinator.confirmPersisted(issueRecord, record.getId().getValue());
 			acknowledge(key, record.getId());
 		} catch (RuntimeException exception) {
 			handleFailure(key, record.getId(), issueRecord, deliveryCount, exception);

@@ -41,6 +41,12 @@ public class IssuePersistenceCoordinator {
 		return issueId;
 	}
 
+	// 저장이 커밋된 뒤 요청 상태를 CONFIRMED 로 올린다
+	// RELAY 는 저장 실패에 보상하면 안 되므로 persist() 를 쓰지 못한다. 확정만 따로 부른다
+	public void confirmPersisted(IssueRecord record, String incidentId) {
+		confirmQuietly(record, incidentId);
+	}
+
 	// 커밋이 끝난 뒤에만 호출
 	// 확정에 실패해도 보상하지 않는다. MySQL 은 이미 커밋됐고 재고를 되돌리면 반대 방향 불일치가 된다
 	// 예외를 밖으로 던지지 않는다. RELAY 가 XACK 를 못 해서 저장된 건이 무한 재처리된다
