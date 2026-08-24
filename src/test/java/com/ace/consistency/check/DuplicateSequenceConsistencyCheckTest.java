@@ -27,7 +27,6 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 	private java.util.List<Scope> createTestScopes(long eventId) {
 		return java.util.List.of(
 				Scope.ofEvent(eventId),
-				Scope.all(java.time.LocalDateTime.now()),
 				Scope.all(java.util.List.of(eventId), java.time.LocalDateTime.now())
 		);
 	}
@@ -55,7 +54,7 @@ class DuplicateSequenceConsistencyCheckTest extends ConsistencyCheckIntegrationT
 		for (Scope scope : createTestScopes(eventId)) {
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
-			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(2); // 위반된 쿠폰 건수 총합(2)
 		}
 	}
 

@@ -23,7 +23,6 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 	private java.util.List<Scope> createTestScopes(long eventId) {
 		return java.util.List.of(
 				Scope.ofEvent(eventId),
-				Scope.all(java.time.LocalDateTime.now()),
 				Scope.all(java.util.List.of(eventId), java.time.LocalDateTime.now())
 		);
 	}

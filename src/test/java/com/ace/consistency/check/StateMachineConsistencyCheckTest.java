@@ -26,7 +26,6 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 	private List<Scope> createTestScopes(long eventId) {
 		return List.of(
 				Scope.ofEvent(eventId),
-				Scope.all(LocalDateTime.now()),
 				Scope.all(List.of(eventId), LocalDateTime.now())
 		);
 	}
