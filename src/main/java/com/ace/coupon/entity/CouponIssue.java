@@ -27,9 +27,6 @@ import java.time.LocalDateTime;
 @Table(
 		name = "coupon_issue",
 		indexes = {
-				// StockConsistencyCheck/DuplicateConsistencyCheck의 ALL 스코프 쿼리가
-				// event_id/user_id로 GROUP BY 하면서 status, created_at도 함께 걸러야 해서,
-				// 이 네 컬럼을 다 포함해야 인덱스만으로 커버되어(테이블 재조회 없이) 빠르게 읽힌다.
 				@Index(name = "idx_coupon_issue_event_user_status_created",
 						columnList = "event_id, user_id, status, created_at")
 		},
@@ -102,4 +99,25 @@ public class CouponIssue {
 	// Stream 원본 위치를 결정적 UUID로 변환하므로 표준 UUID 문자열 길이와 일치한다.
 	@Column(name = "message_id", length = 36)
 	private String messageId;
+
+
+	public void use(LocalDateTime usedAt) {
+		validateTransition(CouponIssueStatus.USED);
+		this.status = CouponIssueStatus.USED;
+		this.usedAt = usedAt;
+	}
+
+	// 사용 취소
+	public void cancel(LocalDateTime canceledAt) {
+		validateTransition(CouponIssueStatus.ISSUED);
+		this.status = CouponIssueStatus.ISSUED;
+		this.canceledAt = canceledAt;
+	}
+
+	private void validateTransition(CouponIssueStatus target) {
+		if (!this.status.canTransitTo(target)) {
+			throw new IllegalStateException(
+					String.format("상태 전이 불가: %s -> %s", this.status, target));
+		}
+	}
 }

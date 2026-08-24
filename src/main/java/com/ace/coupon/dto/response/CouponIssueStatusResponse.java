@@ -7,10 +7,11 @@ import com.ace.coupon.enums.IssueRequestStatus;
 
 public record CouponIssueStatusResponse(
 		UUID requestId,
-		Long eventId,
+		Long campaignId,
 		Long userId,
 		Long issueSequence,
 		Long remainingStock,
 		IssueRequestStatus status,
-		OffsetDateTime decidedAt) {
-}
+		OffsetDateTime decidedAt
+)  
+{}

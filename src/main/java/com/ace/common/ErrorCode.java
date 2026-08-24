@@ -43,6 +43,12 @@ public enum ErrorCode {
 			"초기화할 수 없는 회차입니다."),
 	CAMPAIGN_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
 			"캠페인 초기화에 실패했습니다."),
+	
+	// 상태 변경/ 관리
+	INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서 요청한 처리를 할 수 없습니다."),
+	ALREADY_USED(HttpStatus.CONFLICT, "이미 사용된 쿠폰입니다."),
+	NOT_YET_USED(HttpStatus.CONFLICT, "사용되지 않은 쿠폰은 취소할 수 없습니다."),
+	ALREADY_EXPIRED(HttpStatus.CONFLICT, "만료된 쿠폰입니다."),
 
 	// 시스템
 	CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE(
