@@ -24,18 +24,17 @@ public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 
 	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
-	// ALL_GLOBAL은 테스트용(작은거 굳이 나누지말고 간단하게 테스트 돌릴때 쓰는용도)
 	private static final String SCOPE_CONDITION = """
 			(
 				(:scopeMode = 'EVENT' AND event_id = :eventId)
-				OR :scopeMode = 'ALL_GLOBAL'
-				OR (:scopeMode = 'ALL_PAGE' AND event_id IN (:eventIds) AND created_at < :to)
+				OR (:scopeMode = 'ALL' AND event_id IN (:eventIds) AND created_at < :to)
 			)
 			""";
-// total_violation_count 는 총 에러건수(global이면 모든 이벤트들의 에러 합)
+
+	// total_violation_count 는 조회된 전체 에러 건수
 	private static final String SQL = """
 			SELECT event_id, issue_sequence, COUNT(*) as sequence_count,
-			       COUNT(*) OVER() AS total_violation_count
+			       SUM(COUNT(*)) OVER() AS total_violation_count
 			FROM coupon_issue
 			WHERE %s
 			  AND issue_sequence IS NOT NULL
@@ -75,11 +74,11 @@ public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {
 		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
-		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
 		return new MapSqlParameterSource()
-				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("scopeMode", eventScope ? "EVENT" : "ALL")
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
-				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
-				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
+				// eventIds가 빈 리스트일 경우 IN 절 SQL 문법 에러 방지를 위해 의미 없는 값(-1) 세팅
+				.addValue("eventIds", eventScope ? null : (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()))
+				.addValue("to", eventScope ? null : scope.getTo());
 	}
 }

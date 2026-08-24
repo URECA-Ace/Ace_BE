@@ -55,10 +55,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                        ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
-            WHERE (
-                :scopeMode = 'ALL_GLOBAL'
-                OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
-            )
+            WHERE ci.event_id IN (:eventIds) AND ci.created_at < :to
             """;
 
 	private static final String EVENT_JOIN_CLAUSE = """
@@ -155,11 +152,10 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {
 		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
-		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
 		return new MapSqlParameterSource()
-				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
-				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
-				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
+				// eventIds가 빈 리스트일 경우 IN 절 SQL 문법 에러 방지를 위해 의미 없는 값(-1) 세팅
+				.addValue("eventIds", eventScope ? null : (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()))
+				.addValue("to", eventScope ? null : scope.getTo());
 	}
 }
