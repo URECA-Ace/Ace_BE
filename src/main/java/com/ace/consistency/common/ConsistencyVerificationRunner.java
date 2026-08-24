@@ -1,5 +1,7 @@
 package com.ace.consistency.common;
 
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.batch.ConsistencyBatchJobFactory;
 import com.ace.consistency.batch.ConsistencyJobExecutionListener;
 import com.ace.coupon.repository.CouponEventRepository;
@@ -210,8 +212,9 @@ public class ConsistencyVerificationRunner {
 
 		// 1) Scope 지원 여부 사전 검증 — Check가 지원 안 하는 스코프로 실행되는 것을 방지
 		if (!check.supportedScopeTypes().contains(scope.getType())) {
-			Throwable cause = new ConsistencyCheck.UnsupportedScopeException(
-					check.getName(), scope.getType(), check.supportedScopeTypes());
+			Throwable cause = new ConsistencyCheckException(ErrorCode.UNSUPPORTED_SCOPE,
+					String.format("%s does not support scope type %s (expected %s)",
+							check.getName(), scope.getType(), check.supportedScopeTypes()));
 			log.error("Check {} does not support scope type {}", check.getName(), scope.getType(), cause);
 			return VerificationResult.error(check.getName(), triggerType, scope, cause,
 					executedAt, System.currentTimeMillis() - start);
