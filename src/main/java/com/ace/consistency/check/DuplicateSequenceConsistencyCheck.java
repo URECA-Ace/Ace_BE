@@ -33,13 +33,16 @@ public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 
 	// total_violation_count 는 조회된 전체 에러 건수
 	private static final String SQL = """
-			SELECT event_id, issue_sequence, COUNT(*) as sequence_count,
-			       SUM(COUNT(*)) OVER() AS total_violation_count
-			FROM coupon_issue
-			WHERE %s
-			  AND issue_sequence IS NOT NULL
-			GROUP BY event_id, issue_sequence
-			HAVING COUNT(*) > 1
+			SELECT sub.event_id, sub.issue_sequence, sub.sequence_count,
+			       SUM(sub.sequence_count) OVER() AS total_violation_count
+			FROM (
+			    SELECT event_id, issue_sequence, COUNT(*) as sequence_count
+			    FROM coupon_issue
+			    WHERE %s
+			      AND issue_sequence IS NOT NULL
+			    GROUP BY event_id, issue_sequence
+			    HAVING COUNT(*) > 1
+			) sub
 			LIMIT %d
 			""".formatted(SCOPE_CONDITION, SAMPLE_LIMIT);
 	// Scope.ofEvent(eventId)     /     테스트용 ALL(global), Scope.all(to)
