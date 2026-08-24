@@ -99,6 +99,7 @@ class IssueStreamRelayIntegrationTest {
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
 				script("scripts/coupon-issue-compensate.lua", List.class),
+				script("scripts/coupon-issue-confirm.lua", List.class),
 				failureObserver);
 	}
 
