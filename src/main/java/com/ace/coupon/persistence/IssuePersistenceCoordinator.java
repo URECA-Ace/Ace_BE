@@ -6,6 +6,7 @@ import com.ace.coupon.persistence.failure.IssueFailure;
 import com.ace.coupon.persistence.failure.IssueFailureRecorder;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
+import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class IssuePersistenceCoordinator {
 
-	private static final String COMPENSATION_CALL_FAILED = "CALL_FAILED";
+	private static final String CALL_FAILED = "CALL_FAILED";
 	private static final String COMPENSATION_SKIPPED_PERSISTED = "SKIPPED_PERSISTED";
 	private static final String COMPENSATION_SKIPPED_UNVERIFIED = "SKIPPED_UNVERIFIED";
 
@@ -29,11 +30,47 @@ public class IssuePersistenceCoordinator {
 	// stage: 실패 시 기록할 단계
 	// coupon_issue.issue_id 반환
 	public long persist(IssueRecord record, IssueFailureStage stage, String incidentId) {
+		long issueId;
 		try {
-			return persistenceService.persist(record);
+			issueId = persistenceService.persist(record);
 		} catch (RuntimeException failure) {
 			compensate(record, stage, incidentId, failure);
 			throw failure;
+		}
+		confirmQuietly(record, incidentId);
+		return issueId;
+	}
+
+	// 커밋이 끝난 뒤에만 호출
+	// 확정에 실패해도 보상하지 않는다. MySQL 은 이미 커밋됐고 재고를 되돌리면 반대 방향 불일치가 된다
+	// 예외를 밖으로 던지지 않는다. RELAY 가 XACK 를 못 해서 저장된 건이 무한 재처리된다
+	private void confirmQuietly(IssueRecord record, String incidentId) {
+		try {
+			CouponIssueConfirmResult result = issueProcessor.confirm(
+					record.campaignId(), record.userId(), record.requestId());
+			if (result == CouponIssueConfirmResult.CONFIRMED_NOW
+					|| result == CouponIssueConfirmResult.ALREADY_CONFIRMED) {
+				return;
+			}
+			log.warn("확정되지 않았습니다: requestId={}, result={}, incidentId={}",
+					record.requestId(), result, incidentId);
+			recordConfirmFailure(record, incidentId, String.valueOf(result), "확정 거절: " + result);
+		} catch (RuntimeException confirmFailure) {
+			log.warn("확정 처리 실패 - 상태 조회만 어긋납니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, confirmFailure);
+			recordConfirmFailure(record, incidentId, CALL_FAILED, summary(confirmFailure));
+		}
+	}
+
+	// 여기서 예외가 나가면 RELAY 가 저장된 건을 무한 재처리
+	private void recordConfirmFailure(
+			IssueRecord record, String incidentId, String confirmResult, String detail) {
+		try {
+			failureRecorder.record(IssueFailure.of(
+					record, IssueFailureStage.CONFIRM, confirmResult, detail, incidentId));
+		} catch (RuntimeException recordFailure) {
+			log.error("확정 실패 기록에 실패했습니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, recordFailure);
 		}
 	}
 
@@ -74,11 +111,11 @@ public class IssuePersistenceCoordinator {
 			failureRecorder.record(IssueFailure.of(
 					record,
 					IssueFailureStage.COMPENSATE,
-					COMPENSATION_CALL_FAILED,
+					CALL_FAILED,
 					summary(compensationFailure),
 					incidentId));
 			result = null;
-			compensationResult = COMPENSATION_CALL_FAILED;
+			compensationResult = CALL_FAILED;
 		}
 
 		failureRecorder.record(IssueFailure.of(
