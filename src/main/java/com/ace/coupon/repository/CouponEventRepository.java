@@ -25,6 +25,14 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
 	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
 
+	@Query("""
+			select event
+			from CouponEvent event
+			join fetch event.coupon
+			order by event.createdAt desc, event.id desc
+			""")
+	List<CouponEvent> findRecentWithCoupon(Pageable pageable);
+
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
 
 	@Query("""
