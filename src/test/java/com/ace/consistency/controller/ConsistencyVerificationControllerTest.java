@@ -4,17 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.batch.core.job.JobExecution;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -27,7 +28,6 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
-import com.ace.consistency.common.VerificationResult;
 
 @WebMvcTest(ConsistencyVerificationController.class)
 @Import(ConsistencyVerificationControllerTest.CheckConfiguration.class)
@@ -37,45 +37,43 @@ class ConsistencyVerificationControllerTest {
 	private MockMvc mockMvc;
 
 	@Autowired
-	private ConsistencyCheck eventCheck;
+	private ConsistencyCheck allCheck;
 
 	@MockitoBean
 	private ConsistencyVerificationRunner runner;
 
 	@Test
-	void event를_지원하는_전체_Check를_ON_DEMAND로_실행한다() throws Exception {
-		VerificationResult result = VerificationResult.pass(
-				"EventCheck", TriggerType.ON_DEMAND, Scope.ofEvent(1L), LocalDateTime.now(), 10L);
-		given(runner.run(any(), any(), any())).willReturn(List.of(result));
+	void ALL을_지원하는_Check를_ON_DEMAND_배치로_실행한다() throws Exception {
+		JobExecution execution = mock(JobExecution.class);
+		given(execution.getId()).willReturn(123L);
+		given(runner.runAsync(any(), any(), any())).willReturn(execution);
 
-		mockMvc.perform(post("/internal/consistency/events/1/verify"))
-				.andExpect(status().isOk())
+		mockMvc.perform(post("/internal/consistency/verify"))
+				.andExpect(status().isAccepted())
 				.andExpect(jsonPath("$.result").value("success"))
-				.andExpect(jsonPath("$.data.length()").value(1))
-				.andExpect(jsonPath("$.data[0].checkName").value("EventCheck"))
-				.andExpect(jsonPath("$.data[0].status").value("PASS"));
+				.andExpect(jsonPath("$.data").value(123));
 
 		@SuppressWarnings("unchecked")
 		ArgumentCaptor<List<ConsistencyCheck>> checksCaptor = ArgumentCaptor.forClass(List.class);
 		ArgumentCaptor<Scope> scopeCaptor = ArgumentCaptor.forClass(Scope.class);
-		verify(runner).run(checksCaptor.capture(), scopeCaptor.capture(), eq(TriggerType.ON_DEMAND));
+		verify(runner).runAsync(checksCaptor.capture(), scopeCaptor.capture(), eq(TriggerType.ON_DEMAND));
 
-		assertThat(checksCaptor.getValue()).containsExactly(eventCheck);
-		assertThat(scopeCaptor.getValue().getType()).isEqualTo(Scope.ScopeType.EVENT);
-		assertThat(scopeCaptor.getValue().getEventId()).isEqualTo(1L);
+		assertThat(checksCaptor.getValue()).containsExactly(allCheck);
+		assertThat(scopeCaptor.getValue().getType()).isEqualTo(Scope.ScopeType.ALL);
+		assertThat(scopeCaptor.getValue().getTo()).isNotNull();
 	}
 
 	@TestConfiguration
 	static class CheckConfiguration {
 
 		@Bean
-		ConsistencyCheck eventCheck() {
-			return new StubCheck(Set.of(Scope.ScopeType.EVENT));
+		ConsistencyCheck allCheck() {
+			return new StubCheck(Set.of(Scope.ScopeType.ALL));
 		}
 
 		@Bean
-		ConsistencyCheck rangeCheck() {
-			return new StubCheck(Set.of(Scope.ScopeType.AS_OF_RANGE));
+		ConsistencyCheck eventCheck() {
+			return new StubCheck(Set.of(Scope.ScopeType.EVENT));
 		}
 	}
 
