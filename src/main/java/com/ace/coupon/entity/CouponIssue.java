@@ -111,6 +111,7 @@ public class CouponIssue {
 	public void cancel(LocalDateTime canceledAt) {
 		validateTransition(CouponIssueStatus.ISSUED);
 		this.status = CouponIssueStatus.ISSUED;
+		this.usedAt = null; 
 		this.canceledAt = canceledAt;
 	}
 

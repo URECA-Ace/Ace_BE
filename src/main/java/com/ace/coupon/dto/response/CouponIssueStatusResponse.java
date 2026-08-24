@@ -7,7 +7,7 @@ import com.ace.coupon.enums.IssueRequestStatus;
 
 public record CouponIssueStatusResponse(
 		UUID requestId,
-		Long campaignId,
+		Long eventId,
 		Long userId,
 		Long issueSequence,
 		Long remainingStock,
