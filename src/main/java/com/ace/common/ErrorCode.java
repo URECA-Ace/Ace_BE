@@ -51,7 +51,12 @@ public enum ErrorCode {
 	ISSUE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 요청을 일시적으로 처리할 수 없습니다."),
 	EVENT_STATS_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 현황을 일시적으로 조회할 수 없습니다."),
 	ISSUE_PERSIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 처리 중 오류가 발생했습니다."),
-	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
+	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+
+	// 정합성 검증
+	UNSUPPORTED_SCOPE(HttpStatus.INTERNAL_SERVER_ERROR, "지원하지 않는 정합성 검증 스코프입니다."),
+	CHECK_POSTPONED(HttpStatus.SERVICE_UNAVAILABLE, "처리 중인 데이터가 있어 정합성 검증을 보류합니다."),
+	CHECK_IMPOSSIBLE(HttpStatus.GONE, "원본 데이터가 유실되어 정합성 검증을 수행할 수 없습니다.");
 
 	private final HttpStatus status;
 	private final String defaultMessage;

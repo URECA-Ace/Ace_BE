@@ -1,5 +1,7 @@
 package com.ace.consistency.check;
 
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
 import com.ace.coupon.redis.CouponRedisKeys;
@@ -62,7 +64,8 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 		}
 		
 		if (pendingCount > 0) {
-			throw new ConsistencyCheck.CheckPostponedException("PENDING 큐에 남은 메시지가 있어 검증을 수행할 수 없습니다. (pendingCount: " + pendingCount + ")");
+			throw new ConsistencyCheckException(ErrorCode.CHECK_POSTPONED,
+					"PENDING 큐에 남은 메시지가 있어 검증을 수행할 수 없습니다. (pendingCount: " + pendingCount + ")");
 		}
 
 		// 2. MySQL에서 최초 총 재고(Total Stock)와 실제 적재 건수(Actual Count) 동시 조회
@@ -85,7 +88,8 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 		long remainingStock;
 		if (stockValue == null) {
 			if (actualCount > 0) {
-				throw new ConsistencyCheck.CheckImpossibleException("Redis 잔여 재고 데이터가 만료되어 정합성 검증을 수행할 수 없습니다.");
+				throw new ConsistencyCheckException(ErrorCode.CHECK_IMPOSSIBLE,
+						"Redis 잔여 재고 데이터가 만료되어 정합성 검증을 수행할 수 없습니다.");
 			}
 			remainingStock = totalStock;
 		} else {

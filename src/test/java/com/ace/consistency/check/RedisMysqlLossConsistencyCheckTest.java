@@ -1,5 +1,7 @@
 package com.ace.consistency.check;
 
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,7 +83,7 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 	}
 
 	@Test
-	@DisplayName("Redis 키가 만료된 경우(Redis=null, MySQL>0) 영구 검증 불가(CheckImpossibleException) 예외 발생")
+	@DisplayName("Redis 키가 만료된 경우(Redis=null, MySQL>0) 영구 검증 불가(CHECK_IMPOSSIBLE) 예외 발생")
 	void throwExceptionWhenRedisKeyExpired() {
 		long eventId = generateUniqueId();
 		insertDummyEvent(eventId, 10L);
@@ -93,12 +95,14 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 		insertDummyIssue(eventId, 1L);
 
 		assertThatThrownBy(() -> check.check(Scope.ofEvent(eventId)))
-				.isInstanceOf(com.ace.consistency.common.ConsistencyCheck.CheckImpossibleException.class)
-				.hasMessageContaining("만료");
+				.isInstanceOf(ConsistencyCheckException.class)
+				.hasMessageContaining("만료")
+				.satisfies(ex -> assertThat(((ConsistencyCheckException) ex).getErrorCode())
+						.isEqualTo(ErrorCode.CHECK_IMPOSSIBLE));
 	}
 
 	@Test
-	@DisplayName("작업 중(Pending > 0)일 때는 가짜 알람 방지를 위해 검증 보류(CheckPostponedException) 예외 발생")
+	@DisplayName("작업 중(Pending > 0)일 때는 가짜 알람 방지를 위해 검증 보류(CHECK_POSTPONED) 예외 발생")
 	void throwExceptionWhenPendingIsGreaterThanZero() {
 		long eventId = generateUniqueId();
 		insertDummyEvent(eventId, 10L);
@@ -114,8 +118,10 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 		when(valueOperations.get(anyString())).thenReturn("0");
 
 		assertThatThrownBy(() -> check.check(Scope.ofEvent(eventId)))
-				.isInstanceOf(com.ace.consistency.common.ConsistencyCheck.CheckPostponedException.class)
-				.hasMessageContaining("PENDING");
+				.isInstanceOf(ConsistencyCheckException.class)
+				.hasMessageContaining("PENDING")
+				.satisfies(ex -> assertThat(((ConsistencyCheckException) ex).getErrorCode())
+						.isEqualTo(ErrorCode.CHECK_POSTPONED));
 	}
 
 	@Test

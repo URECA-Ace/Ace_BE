@@ -16,7 +16,9 @@ import java.util.Set;
  * 구현체는 다음 원칙을 지켜야 한다:
  *  - 읽기 전용이어야 한다. 데이터 변경을 발생시키지 않는다.
  *  - 같은 scope로 여러 번 호출해도 항상 같은 결과를 반환해야 한다.
- *  - 지원하지 않는 Scope.ScopeType이 들어오면 UnsupportedScopeException을 던진다.
+ *  - 지원하지 않는 Scope.ScopeType이 들어오면 ConsistencyCheckException(ErrorCode.UNSUPPORTED_SCOPE)을 던진다.
+ *  - 아직 데이터가 처리 중이면 ConsistencyCheckException(ErrorCode.CHECK_POSTPONED)을,
+ *    원본 데이터가 영구 유실되어 검증 자체가 불가능하면 ConsistencyCheckException(ErrorCode.CHECK_IMPOSSIBLE)을 던진다.
  *  - 예외는 삼키지 않고 그대로 던진다 (Runner가 잡아서 ERROR 상태로 변환한다).
  */
 public interface ConsistencyCheck {
@@ -68,35 +70,6 @@ public interface ConsistencyCheck {
 
 		public static CheckOutcome fail(int violationCount, Map<String, Object> diffDetail) {
 			return new CheckOutcome(false, violationCount, Map.copyOf(diffDetail));
-		}
-	}
-
-	/**
-	 * Check가 지원하지 않는 Scope로 호출되었을 때 던지는 예외.
-	 */
-	class UnsupportedScopeException extends RuntimeException {
-		public UnsupportedScopeException(String checkName, Scope.ScopeType given, Set<Scope.ScopeType> supported) {
-			super(String.format("%s does not support scope type %s (expected %s)", checkName, given, supported));
-		}
-	}
-
-	/**
-	 * 아직 데이터가 처리 중이어서(Pending) 현재 검증을 수행할 수 없을 때 던지는 예외.
-	 * Runner가 이 예외를 잡으면 주기적 스케줄링 환경에서 특별한 처리(이벤트 발행 등)를 할 수 있다.
-	 */
-	class CheckPostponedException extends RuntimeException {
-		public CheckPostponedException(String message) {
-			super(message);
-		}
-	}
-
-	/**
-	 * 데이터 만료(TTL) 등으로 인해 검증에 필요한 원본 데이터가 영구적으로 유실되어
-	 * 더 이상 정합성 검증 자체가 불가능할 때 던지는 예외.
-	 */
-	class CheckImpossibleException extends RuntimeException {
-		public CheckImpossibleException(String message) {
-			super(message);
 		}
 	}
 }
