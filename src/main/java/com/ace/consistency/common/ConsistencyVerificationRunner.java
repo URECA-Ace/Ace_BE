@@ -137,6 +137,7 @@ public class ConsistencyVerificationRunner {
 
 		JobParameters params = new JobParametersBuilder()
 				.addLong("runId", System.currentTimeMillis()) // 매 실행마다 새로운 JobInstance로 인식되도록 유일성만 부여
+				.addString("triggerType", triggerType.name())
 				.toJobParameters();
 
 		try {

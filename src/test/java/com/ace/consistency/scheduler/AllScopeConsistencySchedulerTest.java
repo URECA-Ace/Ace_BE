@@ -10,6 +10,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.parameters.JobParameters;
+import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -52,15 +54,31 @@ class AllScopeConsistencySchedulerTest {
 	}
 
 	@Test
-	@DisplayName("이전 배치가 아직 실행 중이면 이번 틱은 건너뛴다")
-	void skipsWhenJobIsAlreadyRunning() {
+	@DisplayName("이전 SCHEDULED 배치가 아직 실행 중이면 이번 틱은 건너뛴다")
+	void skipsWhenScheduledJobIsAlreadyRunning() {
 		JobExecution runningExecution = mock(JobExecution.class);
+		JobParameters runningParams = new JobParametersBuilder().addString("triggerType", "SCHEDULED").toJobParameters();
+		when(runningExecution.getJobParameters()).thenReturn(runningParams);
 		when(jobRepository.findRunningJobExecutions(ConsistencyBatchJobFactory.JOB_NAME))
 				.thenReturn(Set.of(runningExecution));
 
 		scheduler.run();
 
 		verify(runner, never()).runAsync(any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("실행 중인 게 ON_DEMAND(수동) 배치뿐이면 스케줄러는 막히지 않고 실행한다")
+	void doesNotSkipWhenOnlyManualJobIsRunning() {
+		JobExecution runningExecution = mock(JobExecution.class);
+		JobParameters runningParams = new JobParametersBuilder().addString("triggerType", "ON_DEMAND").toJobParameters();
+		when(runningExecution.getJobParameters()).thenReturn(runningParams);
+		when(jobRepository.findRunningJobExecutions(ConsistencyBatchJobFactory.JOB_NAME))
+				.thenReturn(Set.of(runningExecution));
+
+		scheduler.run();
+
+		verify(runner, times(1)).runAsync(eq(List.of(check)), any(), eq(TriggerType.SCHEDULED));
 	}
 
 	@Test
