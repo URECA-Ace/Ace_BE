@@ -3,157 +3,255 @@ package com.ace.coupon.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
-import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.repository.CouponHistoryRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
+import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 import com.ace.user.entity.User;
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
 import jakarta.persistence.EntityManager;
 
-@Transactional
 class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestBase {
 
-    @Autowired
-    private CouponStateService couponStateService;
+    @Autowired private CouponStateService couponStateService;
+    @Autowired private CouponIssueRepository couponIssueRepository;
+    @Autowired private CouponHistoryRepository couponHistoryRepository;
+    @Autowired private CouponStateIdempotencyRepository idempotencyRepository;
+    @Autowired private TransactionTemplate transactionTemplate;
+    @Autowired private EntityManager em;
 
-    @Autowired
-    private CouponIssueRepository couponIssueRepository;
-
-    @Autowired
-    private CouponHistoryRepository couponHistoryRepository;
-
-    @Autowired
-    private EntityManager em;
-
-    private User testUser;
-    private CouponEvent testEvent;
-    private CouponIssue testIssue;
+    private Long testUserId;
+    private Long testIssueId;
+    private Long testEventId;
 
     @BeforeEach
     void setUp() {
-        testUser = User.builder().build();
-        em.persist(testUser);
+        transactionTemplate.executeWithoutResult(status -> {
+            User user = User.builder()
+                    .email("test@ace.com")
+                    .name("테스터")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(user);
 
-        Coupon coupon = Coupon.builder()
-                .couponName("통합 테스트 쿠폰")
-                .type("DISCOUNT")
-                .value(1000L)
-                .validHours(24)
-                .createdAt(LocalDateTime.now())
-                .build();
-        em.persist(coupon);
+            Coupon coupon = Coupon.builder()
+                    .couponName("통합 테스트 쿠폰")
+                    .type("DISCOUNT")
+                    .value(1000L)
+                    .validHours(24)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(coupon);
 
-        testEvent = CouponEvent.builder()
-                .coupon(coupon)
-                .totalStock(100)
-                .openAt(LocalDateTime.now().minusDays(1))
-                .closeAt(LocalDateTime.now().plusDays(7))
-                .createdAt(LocalDateTime.now())
-                .build();
-        em.persist(testEvent);
+            CouponEvent event = CouponEvent.builder()
+                    .coupon(coupon)
+                    .totalStock(100)
+                    .openAt(LocalDateTime.now().minusDays(1))
+                    .closeAt(LocalDateTime.now().plusDays(7))
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(event);
 
-        testIssue = CouponIssue.builder()
-                .couponEvent(testEvent)
-                .user(testUser)
-                .issueSequence(1)
-                .requestId(UUID.randomUUID().toString())
-                .status(CouponIssueStatus.ISSUED)
-                .issuedAt(LocalDateTime.now())
-                .validFrom(LocalDateTime.now().minusDays(1))
-                .validTo(LocalDateTime.now().plusDays(7))
-                .createdAt(LocalDateTime.now())
-                .build();
-        em.persist(testIssue);
-        em.flush();
-        em.clear();
+            CouponIssue issue = CouponIssue.builder()
+                    .couponEvent(event)
+                    .user(user)
+                    .issueSequence(1)
+                    .requestId(UUID.randomUUID().toString())
+                    .status(CouponIssueStatus.ISSUED)
+                    .issuedAt(LocalDateTime.now())
+                    .validFrom(LocalDateTime.now().minusDays(1))
+                    .validTo(LocalDateTime.now().plusDays(7))
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(issue);
+
+            testUserId = user.getId();
+            testIssueId = issue.getId();
+            testEventId = event.getId();
+        });
+    }
+
+    @Override
+    @AfterEach
+    protected void tearDown() {
+        transactionTemplate.executeWithoutResult(status -> {
+            idempotencyRepository.deleteAll();
+            couponHistoryRepository.deleteAll();
+            couponIssueRepository.deleteAll();
+            em.createNativeQuery("DELETE FROM coupon_event").executeUpdate();
+            em.createNativeQuery("DELETE FROM coupon").executeUpdate();
+            em.createNativeQuery("DELETE FROM user").executeUpdate();
+        });
     }
 
     @Test
-    @DisplayName("DB 통합 테스트: 실제 사용된 쿠폰을 취소하면 DB의 status는 ISSUED가 되고 used_at은 null로 UPDATE ")
+    @DisplayName("실제 사용된 쿠폰을 취소하면 status=ISSUED, usedAt=null, canceledAt≠null")
     void cancelCoupon_actualDbUpdate_usedAtIsNull() {
-    	
         UUID useKey = UUID.randomUUID();
-        
-        couponStateService.use(testIssue.getId(), testUser.getId(), useKey, "실제 결제");
-        em.flush();
-        em.clear();
-
-        CouponIssue usedFromDb = couponIssueRepository.findById(testIssue.getId()).orElseThrow();
-        assertThat(usedFromDb.getStatus()).isEqualTo(CouponIssueStatus.USED);
-        assertThat(usedFromDb.getUsedAt()).isNotNull();
+        couponStateService.use(testIssueId, testUserId, useKey, "실제 결제");
 
         UUID cancelKey = UUID.randomUUID();
-        couponStateService.cancel(testIssue.getId(), testUser.getId(), cancelKey, "주문  취소");
-        em.flush();
-        em.clear();
+        couponStateService.cancel(testIssueId, testUserId, cancelKey, "주문 취소");
 
-        CouponIssue canceledFromDb = couponIssueRepository.findById(testIssue.getId()).orElseThrow();
-        assertThat(canceledFromDb.getStatus()).isEqualTo(CouponIssueStatus.ISSUED);
-        assertThat(canceledFromDb.getUsedAt()).isNull(); 
-        assertThat(canceledFromDb.getCanceledAt()).isNotNull();
-
-        assertThat(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssue.getId())).hasSize(2);
+        transactionTemplate.executeWithoutResult(status -> {
+            CouponIssue canceled = couponIssueRepository.findById(testIssueId).orElseThrow();
+            assertThat(canceled.getStatus()).isEqualTo(CouponIssueStatus.ISSUED);
+            assertThat(canceled.getUsedAt()).isNull();
+            assertThat(canceled.getCanceledAt()).isNotNull();
+            assertThat(couponHistoryRepository
+                    .findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssueId)).hasSize(2);
+        });
     }
 
     @Test
-    @DisplayName("DB 통합 테스트: 동일한 Idempotency-Key로 재요청 시 DB 추가  INSERT 없이 최초 결과를 200 OK로 반환")
-    void idempotencyRetry_returnsOriginalResponseFromDb() {
+    @DisplayName("동일 키로 순차 재요청 시 최초 응답을 200 OK로 복원한다")
+    void idempotencyRetry_sequential_returnsOriginalResponse() {
         UUID key = UUID.randomUUID();
 
-        CouponStateChangeResponse firstResponse = couponStateService.use(testIssue.getId(), testUser.getId(), key, "1차 결제");
-        em.flush();
-        em.clear();
+        CouponStateChangeResponse first =
+                couponStateService.use(testIssueId, testUserId, key, "1차 결제");
+        CouponStateChangeResponse retry =
+                couponStateService.use(testIssueId, testUserId, key, "재시도");
 
-        CouponStateChangeResponse retryResponse = couponStateService.use(testIssue.getId(), testUser.getId(), key, "재시도 결제");
-
-        assertThat(retryResponse.currentStatus()).isEqualTo(CouponIssueStatus.USED);
-        assertThat(retryResponse.requestId()).isEqualTo(key);
-        assertThat(retryResponse.changedAt()).isEqualTo(firstResponse.changedAt());
-
-        assertThat(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssue.getId())).hasSize(1);
+        assertThat(retry.currentStatus()).isEqualTo(CouponIssueStatus.USED);
+        assertThat(retry.requestId()).isEqualTo(key);
+        assertThat(retry.changedAt()).isEqualTo(first.changedAt());
     }
 
     @Test
-    @DisplayName("DB 통합 테스트 : 만료된 쿠폰을 취소 시도  시 ALREADY_EXPIRED 예외가 발생/ DB 상태가 변하지 않는다")
-    void cancelExpiredCoupon_throwsException_noDbChange() {
-        CouponIssue expiredCoupon = CouponIssue.builder()
-                .couponEvent(testEvent)
-                .user(testUser)
-                .issueSequence(2)
-                .requestId(UUID.randomUUID().toString())
-                .status(CouponIssueStatus.USED)
-                .issuedAt(LocalDateTime.now().minusDays(10))
-                .validFrom(LocalDateTime.now().minusDays(10))
-                .validTo(LocalDateTime.now().minusDays(1)) // 만료됨
-                .usedAt(LocalDateTime.now().minusDays(5))
-                .createdAt(LocalDateTime.now().minusDays(10))
-                .build();
-        
-        em.persist(expiredCoupon);
-        em.flush();
-        em.clear();
+    @DisplayName("만료된 쿠폰 취소 시 ALREADY_EXPIRED 예외 발생")
+    void cancelExpiredCoupon_throwsAlreadyExpired() {
+        Long expiredIssueId = transactionTemplate.execute(status -> {
+            User user = em.find(User.class, testUserId);
+            CouponEvent event = em.find(CouponEvent.class, testEventId);
+            CouponIssue expired = CouponIssue.builder()
+                    .couponEvent(event)
+                    .user(user)
+                    .issueSequence(2)
+                    .requestId(UUID.randomUUID().toString())
+                    .status(CouponIssueStatus.USED)
+                    .issuedAt(LocalDateTime.now().minusDays(10))
+                    .validFrom(LocalDateTime.now().minusDays(10))
+                    .validTo(LocalDateTime.now().minusDays(1))
+                    .usedAt(LocalDateTime.now().minusDays(5))
+                    .createdAt(LocalDateTime.now().minusDays(10))
+                    .build();
+            em.persist(expired);
+            return expired.getId();
+        });
 
-        assertThatThrownBy(() -> couponStateService.cancel(expiredCoupon.getId(), testUser.getId(), UUID.randomUUID(), "만료 후 취소"))
+        assertThatThrownBy(() ->
+                couponStateService.cancel(expiredIssueId, testUserId, UUID.randomUUID(), "만료 후 취소"))
                 .isInstanceOf(CouponException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ALREADY_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("서로 다른 키로 동일 쿠폰 동시 사용 → 1건 성공, 나머지 ALREADY_USED")
+    void concurrent_differentKey_sameCoupon_pessimisticLock() throws Exception {
+        int threadCount = 3;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        List<Future<Object>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++) {
+            UUID uniqueKey = UUID.randomUUID();
+            futures.add(executor.submit(() -> {
+                ready.countDown();
+                ready.await();
+                try {
+                    return couponStateService.use(testIssueId, testUserId, uniqueKey, "동시 사용");
+                } catch (CouponException e) {
+                    return e;
+                }
+            }));
+        }
+
+        List<CouponStateChangeResponse> ok = new ArrayList<>();
+        List<CouponException> err = new ArrayList<>();
+        for (Future<Object> f : futures) {
+            Object r = f.get(10, TimeUnit.SECONDS);
+            if (r instanceof CouponStateChangeResponse res) ok.add(res);
+            else if (r instanceof CouponException ex) err.add(ex);
+        }
+
+        assertThat(ok).hasSize(1);
+        assertThat(err).hasSize(2);
+        for (CouponException ex : err) {
+            assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.ALREADY_USED);
+        }
+
+        transactionTemplate.executeWithoutResult(status -> {
+            assertThat(couponHistoryRepository
+                    .findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssueId)).hasSize(1);
+        });
+
+        executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("같은 키·같은 요청 동시 진입 → 둘 다 200 OK")
+    void concurrent_sameKey_sameRequest_bothReturn200() throws Exception {
+        UUID sharedKey = UUID.randomUUID();
+        int threadCount = 2;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        List<Future<Object>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++) {
+            futures.add(executor.submit(() -> {
+                ready.countDown();
+                ready.await();
+                try {
+                    return couponStateService.use(testIssueId, testUserId, sharedKey, "따닥");
+                } catch (CouponException e) {
+                    return e;
+                }
+            }));
+        }
+
+        List<CouponStateChangeResponse> ok = new ArrayList<>();
+        List<CouponException> err = new ArrayList<>();
+        for (Future<Object> f : futures) {
+            Object r = f.get(10, TimeUnit.SECONDS);
+            if (r instanceof CouponStateChangeResponse res) ok.add(res);
+            else if (r instanceof CouponException ex) err.add(ex);
+        }
+
+        for (CouponStateChangeResponse res : ok) {
+            assertThat(res.currentStatus()).isEqualTo(CouponIssueStatus.USED);
+            assertThat(res.requestId()).isEqualTo(sharedKey);
+        }
+
+        transactionTemplate.executeWithoutResult(status -> {
+            assertThat(couponHistoryRepository
+                    .findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssueId)).hasSize(1);
+            assertThat(idempotencyRepository.findByEventUid(sharedKey.toString())).isPresent();
+        });
+
+        executor.shutdown();
     }
 }

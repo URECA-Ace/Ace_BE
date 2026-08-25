@@ -3,13 +3,11 @@ package com.ace.coupon.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,24 +15,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
-import com.ace.coupon.entity.CouponEvent;
-import com.ace.coupon.entity.CouponHistory;
-import com.ace.coupon.entity.CouponIssue;
+import com.ace.coupon.entity.CouponStateIdempotency;
 import com.ace.coupon.enums.CouponIssueStatus;
-import com.ace.coupon.redis.CouponIssueRedisProperties;
-import com.ace.coupon.repository.CouponHistoryRepository;
-import com.ace.coupon.repository.CouponIssueRepository;
-import com.ace.user.entity.User;
+import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 
 class CouponStateServiceImplTest {
 
-    private CouponIssueRepository couponIssueRepository;
-    private CouponHistoryRepository couponHistoryRepository;
-    private CouponStateService couponStateService;
+    private CouponStateProcessor processor;
+    private CouponStateIdempotencyRepository idempotencyRepository;
+    private CouponStateServiceImpl couponStateService;
 
     private final Long ISSUE_ID = 1L;
     private final Long USER_ID = 100L;
@@ -42,145 +36,94 @@ class CouponStateServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        couponIssueRepository = Mockito.mock(CouponIssueRepository.class);
-        couponHistoryRepository = Mockito.mock(CouponHistoryRepository.class);
-        CouponIssueRedisProperties properties = new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul"));
-
-        couponStateService = new CouponStateServiceImpl(
-                couponIssueRepository,
-                couponHistoryRepository,
-                properties
-        );
-    }
-
-    private CouponIssue createTestCoupon(CouponIssueStatus initialStatus) {
-        return createTestCoupon(initialStatus, null, null, null);
-    }
-
-    private CouponIssue createTestCoupon(CouponIssueStatus initialStatus, LocalDateTime validFrom, LocalDateTime validTo, LocalDateTime usedAt) {
-        User user = Mockito.mock(User.class);
-        given(user.getId()).willReturn(USER_ID);
-
-        CouponEvent event = Mockito.mock(CouponEvent.class);
-        given(event.getId()).willReturn(EVENT_ID);
-
-        return CouponIssue.builder()
-                .id(ISSUE_ID)
-                .user(user)
-                .couponEvent(event)
-                .status(initialStatus)
-                .validFrom(validFrom != null ? validFrom : LocalDateTime.now().minusDays(1))
-                .validTo(validTo != null ? validTo : LocalDateTime.now().plusDays(7))
-                .usedAt(usedAt)
-                .build();
+        processor = Mockito.mock(CouponStateProcessor.class);
+        idempotencyRepository = Mockito.mock(CouponStateIdempotencyRepository.class);
+        couponStateService = new CouponStateServiceImpl(processor, idempotencyRepository);
     }
 
     @Test
-    @DisplayName("[사용] ISSUED 상태의 쿠폰을 사용하면 USED 상태로 변경")
+    @DisplayName("[정상] Processor에게 위임하여 성공 응답을 반환한다")
     void useCoupon_success() {
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.ISSUED);
-        given(couponIssueRepository.findByIdForUpdate(ISSUE_ID)).willReturn(Optional.of(coupon));
-        given(couponHistoryRepository.findByEventUid(any())).willReturn(Optional.empty());
+        UUID key = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        CouponStateChangeResponse expected = new CouponStateChangeResponse(
+                key, ISSUE_ID, EVENT_ID, USER_ID,
+                CouponIssueStatus.ISSUED, CouponIssueStatus.USED, now);
 
-        CouponStateChangeResponse response = couponStateService.use(ISSUE_ID, USER_ID, UUID.randomUUID(), "결제 사용");
+        given(processor.processStateChange(
+                eq(ISSUE_ID), eq(USER_ID), eq(key), eq(CouponIssueStatus.USED), eq("결제")))
+                .willReturn(expected);
 
-        assertThat(coupon.getStatus()).isEqualTo(CouponIssueStatus.USED);
-        assertThat(response.previousStatus()).isEqualTo(CouponIssueStatus.ISSUED);
-        assertThat(response.currentStatus()).isEqualTo(CouponIssueStatus.USED);
-        verify(couponHistoryRepository, times(1)).save(any(CouponHistory.class));
+        CouponStateChangeResponse actual = couponStateService.use(ISSUE_ID, USER_ID, key, "결제");
+
+        assertThat(actual).isEqualTo(expected);
+        verify(processor).processStateChange(any(), any(), any(), any(), any());
     }
 
     @Test
-    @DisplayName("[취소 및 원상복구] 실제 usedAt이 설정된 USED 쿠폰을 취소하면 status는 ISSUED가 되고 usedAt은 null로 초기화된다")
-    void cancelCoupon_success_restoreToIssued_resetsUsedAt() {
-        LocalDateTime actualUsedTime = LocalDateTime.now().minusHours(2);
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.USED, null, null, actualUsedTime);
-        given(couponIssueRepository.findByIdForUpdate(ISSUE_ID)).willReturn(Optional.of(coupon));
-        given(couponHistoryRepository.findByEventUid(any())).willReturn(Optional.empty());
-
-        CouponStateChangeResponse response = couponStateService.cancel(ISSUE_ID, USER_ID, UUID.randomUUID(), "주문 취소");
-
-        assertThat(coupon.getStatus()).isEqualTo(CouponIssueStatus.ISSUED);
-        assertThat(coupon.getUsedAt()).isNull(); // usedAt null 초기화 검증
-        assertThat(coupon.getCanceledAt()).isNotNull();
-        assertThat(response.previousStatus()).isEqualTo(CouponIssueStatus.USED);
-        assertThat(response.currentStatus()).isEqualTo(CouponIssueStatus.ISSUED);
-        verify(couponHistoryRepository, times(1)).save(any(CouponHistory.class));
-    }
-
-    @Test
-    @DisplayName("[사용 -> 취소 -> 재사용] 전체 생명주기 검증")
-    void fullLifecycle_use_cancel_reuse() {
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.ISSUED);
-        given(couponIssueRepository.findByIdForUpdate(ISSUE_ID)).willReturn(Optional.of(coupon));
-        given(couponHistoryRepository.findByEventUid(any())).willReturn(Optional.empty());
-
-        // 1) 사용
-        couponStateService.use(ISSUE_ID, USER_ID, UUID.randomUUID(), "1차 결제");
-        assertThat(coupon.getStatus()).isEqualTo(CouponIssueStatus.USED);
-
-        // 2) 취소 (원복)
-        couponStateService.cancel(ISSUE_ID, USER_ID, UUID.randomUUID(), "결제 취소");
-        assertThat(coupon.getStatus()).isEqualTo(CouponIssueStatus.ISSUED);
-        assertThat(coupon.getUsedAt()).isNull();
-
-        // 3) 재사용
-        couponStateService.use(ISSUE_ID, USER_ID, UUID.randomUUID(), "2차 재결제");
-        assertThat(coupon.getStatus()).isEqualTo(CouponIssueStatus.USED);
-
-        verify(couponHistoryRepository, times(3)).save(any(CouponHistory.class));
-    }
-
-    @Test
-    @DisplayName("[예외 방어] 미사용(ISSUED) 상태에서 취소를 시도하면 NOT_YET_USED 예외가 발생")
-    void cancelCoupon_notYetUsed_throwsException() {
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.ISSUED);
-        given(couponIssueRepository.findByIdForUpdate(ISSUE_ID)).willReturn(Optional.of(coupon));
-        given(couponHistoryRepository.findByEventUid(any())).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> couponStateService.cancel(ISSUE_ID, USER_ID, UUID.randomUUID(), "취소 시도"))
-                .isInstanceOf(CouponException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.NOT_YET_USED);
-    }
-
-    @Test
-    @DisplayName("[멱등성] 동일한 Idempotency-Key로 재요청 시 최초 성공 응답(200 OK)과 동일한 결과를 반환한다")
-    void retryWithSameKey_returnsOriginalResponse() {
-        UUID idempotencyKey = UUID.randomUUID();
+    @DisplayName("[멱등성 복원] UNIQUE 충돌 시 같은 Fingerprint면 최초 응답을 200 OK로 복원한다")
+    void duplicateKey_sameFingerprint_restoresResponse() {
+        UUID key = UUID.randomUUID();
         LocalDateTime firstOccurredAt = LocalDateTime.now().minusMinutes(5);
 
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.USED, null, null, firstOccurredAt);
-        CouponHistory existingHistory = CouponHistory.builder()
-                .couponIssue(coupon)
+        given(processor.processStateChange(any(), any(), any(), any(), any()))
+                .willThrow(new DataIntegrityViolationException("Duplicate entry"));
+
+        CouponStateIdempotency existing = CouponStateIdempotency.builder()
+                .eventUid(key.toString())
+                .issueId(ISSUE_ID).userId(USER_ID)
+                .targetStatus(CouponIssueStatus.USED)
                 .fromStatus(CouponIssueStatus.ISSUED)
-                .toStatus(CouponIssueStatus.USED)
-                .actor("USER_" + USER_ID)
+                .eventId(EVENT_ID)
                 .occurredAt(firstOccurredAt)
-                .eventUid(idempotencyKey.toString())
+                .createdAt(firstOccurredAt)
                 .build();
+        given(idempotencyRepository.findByEventUid(key.toString()))
+                .willReturn(Optional.of(existing));
 
-        given(couponHistoryRepository.findByEventUid(idempotencyKey.toString()))
-                .willReturn(Optional.of(existingHistory));
+        CouponStateChangeResponse response = couponStateService.use(ISSUE_ID, USER_ID, key, "재시도");
 
-        CouponStateChangeResponse retryResponse = couponStateService.use(ISSUE_ID, USER_ID, idempotencyKey, "재시도");
-
-        assertThat(retryResponse.requestId()).isEqualTo(idempotencyKey);
-        assertThat(retryResponse.currentStatus()).isEqualTo(CouponIssueStatus.USED);
-        assertThat(retryResponse.changedAt()).isEqualTo(firstOccurredAt);
-        verify(couponIssueRepository, Mockito.never()).findByIdForUpdate(any());
+        assertThat(response.currentStatus()).isEqualTo(CouponIssueStatus.USED);
+        assertThat(response.changedAt()).isEqualTo(firstOccurredAt);
     }
 
     @Test
-    @DisplayName("[유효기간] 만료된 쿠폰을 취소하려고 하면 ALREADY_EXPIRED 예외가 발생한다")
-    void cancelAfterValidTo_throwsException() {
-        LocalDateTime pastValidTo = LocalDateTime.now().minusDays(1);
-        CouponIssue coupon = createTestCoupon(CouponIssueStatus.USED, LocalDateTime.now().minusDays(7), pastValidTo, LocalDateTime.now().minusDays(2));
+    @DisplayName("[멱등성 충돌] 같은 키를 다른 issueId/userId/action에 사용하면 409 에러 발생")
+    void duplicateKey_differentFingerprint_throws409() {
+        UUID key = UUID.randomUUID();
 
-        given(couponIssueRepository.findByIdForUpdate(ISSUE_ID)).willReturn(Optional.of(coupon));
-        given(couponHistoryRepository.findByEventUid(any())).willReturn(Optional.empty());
+        given(processor.processStateChange(any(), any(), any(), any(), any()))
+                .willThrow(new DataIntegrityViolationException("Duplicate entry"));
 
-        assertThatThrownBy(() -> couponStateService.cancel(ISSUE_ID, USER_ID, UUID.randomUUID(), "만료 후 취소"))
+        CouponStateIdempotency existing = CouponStateIdempotency.builder()
+                .eventUid(key.toString())
+                .issueId(ISSUE_ID).userId(999L)
+                .targetStatus(CouponIssueStatus.USED)
+                .createdAt(LocalDateTime.now())
+                .build();
+        given(idempotencyRepository.findByEventUid(key.toString()))
+                .willReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> couponStateService.use(ISSUE_ID, USER_ID, key, "재시도"))
                 .isInstanceOf(CouponException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ALREADY_EXPIRED);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.IDEMPOTENCY_CONFLICT);
+    }
+
+    @Test
+    @DisplayName("[취소] cancel 호출 시 Processor에 ISSUED 타겟으로 위임한다")
+    void cancelCoupon_delegatesToProcessor() {
+        UUID key = UUID.randomUUID();
+        LocalDateTime now = LocalDateTime.now();
+        CouponStateChangeResponse expected = new CouponStateChangeResponse(
+                key, ISSUE_ID, EVENT_ID, USER_ID,
+                CouponIssueStatus.USED, CouponIssueStatus.ISSUED, now);
+
+        given(processor.processStateChange(
+                eq(ISSUE_ID), eq(USER_ID), eq(key), eq(CouponIssueStatus.ISSUED), eq("취소")))
+                .willReturn(expected);
+
+        CouponStateChangeResponse actual = couponStateService.cancel(ISSUE_ID, USER_ID, key, "취소");
+
+        assertThat(actual.currentStatus()).isEqualTo(CouponIssueStatus.ISSUED);
     }
 }
