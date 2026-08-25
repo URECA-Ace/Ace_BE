@@ -79,18 +79,11 @@ public class CouponStateController {
 		return ResponseEntity.ok(ApiResponse.success(response));
 	}
   
-	private UUID parseIdempotencyKey(String value) { 
-		
-		if (value == null || value.isBlank()) {
-			throw new CouponException(ErrorCode.MISSING_IDEMPOTENCY_KEY);  
-			
-		}
+	private UUID parseIdempotencyKey(String value) {
 		try {
 			return UUID.fromString(value);
-			 
 		} catch (IllegalArgumentException exception) {
-			  
-			throw new CouponException(ErrorCode.INVALID_IDEMPOTENCY_KEY);   
-		} 
+			throw new CouponException(ErrorCode.INVALID_IDEMPOTENCY_KEY);
+		}
 	}
 }

@@ -67,7 +67,7 @@ class CouponStateServiceImplTest {
         LocalDateTime firstOccurredAt = LocalDateTime.now().minusMinutes(5);
 
         given(processor.processStateChange(any(), any(), any(), any(), any()))
-                .willThrow(new DataIntegrityViolationException("Duplicate entry"));
+                .willThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_idempotency_event_uid'"));
 
         CouponStateIdempotency existing = CouponStateIdempotency.builder()
                 .eventUid(key.toString())
@@ -93,7 +93,7 @@ class CouponStateServiceImplTest {
         UUID key = UUID.randomUUID();
 
         given(processor.processStateChange(any(), any(), any(), any(), any()))
-                .willThrow(new DataIntegrityViolationException("Duplicate entry"));
+                .willThrow(new DataIntegrityViolationException("Duplicate entry for key 'uk_idempotency_event_uid'"));
 
         CouponStateIdempotency existing = CouponStateIdempotency.builder()
                 .eventUid(key.toString())

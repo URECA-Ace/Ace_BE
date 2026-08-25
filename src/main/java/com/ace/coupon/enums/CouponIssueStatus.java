@@ -4,27 +4,16 @@ import java.util.List;
 
 public enum CouponIssueStatus {
 	ISSUED { 
-		
 		@Override
 		public List<CouponIssueStatus> allowedTransitions() {
 			return List.of(USED, EXPIRED);
 		}
-		
 	},
 	
 	USED {
-		
 		@Override
 		public List<CouponIssueStatus> allowedTransitions() {  
 			return List.of(ISSUED); 
-		}
-		
-	},
-	
-	CANCELED {
-		@Override
-		public List<CouponIssueStatus> allowedTransitions() { 
-			return List.of();
 		}
 	},
 	

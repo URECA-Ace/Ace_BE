@@ -105,6 +105,7 @@ public class CouponIssue {
 		validateTransition(CouponIssueStatus.USED);
 		this.status = CouponIssueStatus.USED;
 		this.usedAt = usedAt;
+		this.canceledAt = null;
 	}
 
 	// 사용 취소

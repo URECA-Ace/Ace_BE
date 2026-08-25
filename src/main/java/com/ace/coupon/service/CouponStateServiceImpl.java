@@ -1,23 +1,28 @@
 package com.ace.coupon.service;
 
+import java.util.Locale;
+import java.util.UUID;
+
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.CouponStateIdempotency;
 import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.UUID;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CouponStateServiceImpl implements CouponStateService {
+
+	private static final String IDEMPOTENCY_CONSTRAINT = "uk_idempotency_event_uid";
 
 	private final CouponStateProcessor processor;
 	private final CouponStateIdempotencyRepository idempotencyRepository;
@@ -38,12 +43,14 @@ public class CouponStateServiceImpl implements CouponStateService {
 		try {
 			return processor.processStateChange(issueId, userId, idempotencyKey, targetStatus, reason);
 		} catch (DataIntegrityViolationException e) {
-			return handleIdempotencyCollision(issueId, userId, idempotencyKey, targetStatus);
+			if (isIdempotencyConstraint(e)) {
+				return handleIdempotencyCollision(issueId, userId, idempotencyKey, targetStatus);
+			}
+			throw e;
 		}
 	}
 
-	@Transactional(readOnly = true)
-	protected CouponStateChangeResponse handleIdempotencyCollision(
+	private CouponStateChangeResponse handleIdempotencyCollision(
 			Long issueId, Long userId, UUID idempotencyKey,
 			CouponIssueStatus targetStatus) {
 
@@ -76,5 +83,22 @@ public class CouponStateServiceImpl implements CouponStateService {
 				existing.getFromStatus(),
 				existing.getTargetStatus(),
 				existing.getOccurredAt());
+	}
+
+	private boolean isIdempotencyConstraint(DataIntegrityViolationException e) {
+		Throwable current = e;
+		while (current != null) {
+			if (current instanceof ConstraintViolationException cve
+					&& cve.getConstraintName() != null
+					&& cve.getConstraintName().toLowerCase(Locale.ROOT).contains(IDEMPOTENCY_CONSTRAINT)) {
+				return true;
+			}
+			String message = current.getMessage();
+			if (message != null && message.toLowerCase(Locale.ROOT).contains(IDEMPOTENCY_CONSTRAINT)) {
+				return true;
+			}
+			current = current.getCause();
+		}
+		return false;
 	}
 }

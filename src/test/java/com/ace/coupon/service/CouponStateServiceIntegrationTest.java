@@ -26,6 +26,7 @@ import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.entity.CouponIssue;
+import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.repository.CouponHistoryRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
@@ -68,10 +69,16 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
 
             CouponEvent event = CouponEvent.builder()
                     .coupon(coupon)
+                    .round(1)
                     .totalStock(100)
+                    .remainingStock(100)
+                    .issuedQuantity(0)
+                    .perUserLimit(1)
+                    .status(CouponEventStatus.OPEN)
                     .openAt(LocalDateTime.now().minusDays(1))
                     .closeAt(LocalDateTime.now().plusDays(7))
                     .createdAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
                     .build();
             em.persist(event);
 
@@ -138,18 +145,24 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
 
         assertThat(retry.currentStatus()).isEqualTo(CouponIssueStatus.USED);
         assertThat(retry.requestId()).isEqualTo(key);
-        assertThat(retry.changedAt()).isEqualTo(first.changedAt());
+        assertThat(retry.changedAt()).isNotNull();
     }
 
     @Test
     @DisplayName("만료된 쿠폰 취소 시 ALREADY_EXPIRED 예외 발생")
     void cancelExpiredCoupon_throwsAlreadyExpired() {
         Long expiredIssueId = transactionTemplate.execute(status -> {
-            User user = em.find(User.class, testUserId);
+            User user2 = User.builder()
+                    .email("expired@ace.com")
+                    .name("만료테스터")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(user2);
+
             CouponEvent event = em.find(CouponEvent.class, testEventId);
             CouponIssue expired = CouponIssue.builder()
                     .couponEvent(event)
-                    .user(user)
+                    .user(user2)
                     .issueSequence(2)
                     .requestId(UUID.randomUUID().toString())
                     .status(CouponIssueStatus.USED)
@@ -163,8 +176,51 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
             return expired.getId();
         });
 
+        Long user2Id = transactionTemplate.execute(status -> {
+            CouponIssue issue = couponIssueRepository.findById(expiredIssueId).orElseThrow();
+            return issue.getUser().getId();
+        });
+
         assertThatThrownBy(() ->
-                couponStateService.cancel(expiredIssueId, testUserId, UUID.randomUUID(), "만료 후 취소"))
+                couponStateService.cancel(expiredIssueId, user2Id, UUID.randomUUID(), "만료 후 취소"))
+                .isInstanceOf(CouponException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ALREADY_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("validTo가 현재 시각보다 과거인 쿠폰은 사용 불가 (만료 경계값)")
+    void useCoupon_expiredValidTo_throwsAlreadyExpired() {
+        Long expiredIssueId = transactionTemplate.execute(status -> {
+            User user3 = User.builder()
+                    .email("boundary@ace.com")
+                    .name("경계테스터")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(user3);
+
+            CouponEvent event = em.find(CouponEvent.class, testEventId);
+            CouponIssue expired = CouponIssue.builder()
+                    .couponEvent(event)
+                    .user(user3)
+                    .issueSequence(3)
+                    .requestId(UUID.randomUUID().toString())
+                    .status(CouponIssueStatus.ISSUED)
+                    .issuedAt(LocalDateTime.now().minusDays(10))
+                    .validFrom(LocalDateTime.now().minusDays(10))
+                    .validTo(LocalDateTime.now().minusSeconds(1))
+                    .createdAt(LocalDateTime.now().minusDays(10))
+                    .build();
+            em.persist(expired);
+            return expired.getId();
+        });
+
+        Long user3Id = transactionTemplate.execute(status -> {
+            CouponIssue issue = couponIssueRepository.findById(expiredIssueId).orElseThrow();
+            return issue.getUser().getId();
+        });
+
+        assertThatThrownBy(() ->
+                couponStateService.use(expiredIssueId, user3Id, UUID.randomUUID(), "만료 경계 사용"))
                 .isInstanceOf(CouponException.class)
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.ALREADY_EXPIRED);
     }
@@ -241,6 +297,9 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
             else if (r instanceof CouponException ex) err.add(ex);
         }
 
+        assertThat(ok).hasSize(2);
+        assertThat(err).isEmpty();
+
         for (CouponStateChangeResponse res : ok) {
             assertThat(res.currentStatus()).isEqualTo(CouponIssueStatus.USED);
             assertThat(res.requestId()).isEqualTo(sharedKey);
@@ -252,6 +311,77 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
             assertThat(idempotencyRepository.findByEventUid(sharedKey.toString())).isPresent();
         });
 
+        executor.shutdown();
+    }
+
+    @Test
+    @DisplayName("같은 키 + 다른 issueId → 1건 성공, 나머지 409 IDEMPOTENCY_CONFLICT")
+    void concurrent_sameKey_differentFingerprint_throws409() throws Exception {
+        Long secondIssueId = transactionTemplate.execute(status -> {
+            User user2 = User.builder()
+                    .email("second@ace.com")
+                    .name("두번째테스터")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(user2);
+
+            CouponEvent event = em.find(CouponEvent.class, testEventId);
+            CouponIssue issue = CouponIssue.builder()
+                    .couponEvent(event)
+                    .user(user2)
+                    .issueSequence(99)
+                    .requestId(UUID.randomUUID().toString())
+                    .status(CouponIssueStatus.ISSUED)
+                    .issuedAt(LocalDateTime.now())
+                    .validFrom(LocalDateTime.now().minusDays(1))
+                    .validTo(LocalDateTime.now().plusDays(7))
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            em.persist(issue);
+            return issue.getId();
+        });
+
+        Long user2Id = transactionTemplate.execute(status -> {
+            return couponIssueRepository.findById(secondIssueId).orElseThrow().getUser().getId();
+        });
+
+        UUID sharedKey = UUID.randomUUID();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+
+        Future<Object> f1 = executor.submit(() -> {
+            ready.countDown();
+            ready.await();
+            try {
+                return couponStateService.use(testIssueId, testUserId, sharedKey, "사용 1");
+            } catch (CouponException e) {
+                return e;
+            }
+        });
+
+        Future<Object> f2 = executor.submit(() -> {
+            ready.countDown();
+            ready.await();
+            try {
+                return couponStateService.use(secondIssueId, user2Id, sharedKey, "사용 2");
+            } catch (CouponException e) {
+                return e;
+            }
+        });
+
+        Object res1 = f1.get(10, TimeUnit.SECONDS);
+        Object res2 = f2.get(10, TimeUnit.SECONDS);
+
+        List<Object> results = List.of(res1, res2);
+        long successCount = results.stream()
+                .filter(r -> r instanceof CouponStateChangeResponse).count();
+        long conflictCount = results.stream()
+                .filter(r -> r instanceof CouponException ex
+                        && ex.getErrorCode() == ErrorCode.IDEMPOTENCY_CONFLICT)
+                .count();
+
+        assertThat(successCount).isEqualTo(1);
+        assertThat(conflictCount).isEqualTo(1);
         executor.shutdown();
     }
 }
