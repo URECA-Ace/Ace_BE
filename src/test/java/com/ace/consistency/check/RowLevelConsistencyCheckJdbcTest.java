@@ -326,6 +326,20 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
+	void 이력_구조_EVENT_검증은_다른_이벤트의_구조_위반을_제외한다() {
+		long targetIssueId = insertIssue("ISSUED", null, 1L);
+		insertHistory(targetIssueId, null, "ISSUED", LocalDateTime.of(2026, 8, 18, 10, 0));
+		long otherIssueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 2L);
+		insertHistory(otherIssueId, "EXPIRED", "USED", LocalDateTime.of(2026, 8, 18, 11, 0));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofEvent(1L));
+
+		assertThat(outcome.isPass()).isTrue();
+		assertThat(outcome.getViolationCount()).isZero();
+	}
+
+	@Test
 	void 사용_취소에_따른_USED에서_ISSUED로의_복원을_허용한다() {
 		long issueId = insertIssue("ISSUED", null, 1L);
 		insertHistory(issueId, "USED", "ISSUED", LocalDateTime.of(2026, 8, 18, 11, 0));
@@ -335,6 +349,81 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isTrue();
 		assertThat(outcome.getViolationCount()).isZero();
+	}
+
+	@Test
+	void 이력_구조_AS_OF_RANGE는_recorded_at이_from과_같은_행을_포함한다() {
+		long issueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+		LocalDateTime from = LocalDateTime.of(2026, 8, 18, 11, 0);
+		insertHistory(issueId, "EXPIRED", "USED",
+				LocalDateTime.of(2026, 8, 18, 10, 0), from);
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofAsOfRange(from, TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	void 이력_구조_AS_OF_RANGE는_recorded_at이_from보다_이전인_행을_제외한다() {
+		long issueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+		insertHistory(issueId, "EXPIRED", "USED",
+				LocalDateTime.of(2026, 8, 18, 10, 0),
+				LocalDateTime.of(2026, 8, 18, 10, 59, 59));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofAsOfRange(
+						LocalDateTime.of(2026, 8, 18, 11, 0), TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 이력_구조_AS_OF_RANGE는_recorded_at이_to와_같은_행을_제외한다() {
+		long issueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+		insertHistory(issueId, "EXPIRED", "USED",
+				LocalDateTime.of(2026, 8, 18, 10, 0), TEST_CHECKED_AT);
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofAsOfRange(
+						LocalDateTime.of(2026, 8, 18, 11, 0), TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 이력_구조_AS_OF_RANGE는_과거에_발생했지만_구간_내_기록된_행을_검출한다() {
+		long issueId = insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+		insertHistory(issueId, "EXPIRED", "USED",
+				LocalDateTime.of(2026, 8, 17, 10, 0),
+				LocalDateTime.of(2026, 8, 18, 11, 30));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofAsOfRange(
+						LocalDateTime.of(2026, 8, 18, 11, 0), TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+	}
+
+	@Test
+	void 이력_구조_AS_OF_RANGE는_recorded_at이_NULL인_위반을_누락하지_않는다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		jdbcTemplate.update("""
+				INSERT INTO coupon_history (
+				  issue_id, from_status, to_status, occurred_at, recorded_at
+				) VALUES (?, ?, ?, ?, NULL)
+				""", issueId, null, "ISSUED",
+				Timestamp.valueOf(LocalDateTime.of(2026, 8, 18, 10, 0)));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.ofAsOfRange(
+						LocalDateTime.of(2026, 8, 18, 11, 0), TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("MISSING_TIMESTAMP");
 	}
 
 	@Test
@@ -495,12 +584,17 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	private void insertHistory(long issueId, String fromStatus, String toStatus, LocalDateTime occurredAt) {
+		insertHistory(issueId, fromStatus, toStatus, occurredAt, occurredAt);
+	}
+
+	private void insertHistory(long issueId, String fromStatus, String toStatus,
+			LocalDateTime occurredAt, LocalDateTime recordedAt) {
 		jdbcTemplate.update("""
 				INSERT INTO coupon_history (
 				  issue_id, from_status, to_status, occurred_at, recorded_at
 				) VALUES (?, ?, ?, ?, ?)
 				""",
 				issueId, fromStatus, toStatus,
-				Timestamp.valueOf(occurredAt), Timestamp.valueOf(occurredAt));
+				Timestamp.valueOf(occurredAt), Timestamp.valueOf(recordedAt));
 	}
 }
