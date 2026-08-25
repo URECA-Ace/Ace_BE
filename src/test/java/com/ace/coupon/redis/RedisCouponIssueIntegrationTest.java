@@ -85,6 +85,7 @@ class RedisCouponIssueIntegrationTest {
 				redisTemplate,
 				script("scripts/coupon-issue.lua", List.class),
 				script("scripts/coupon-issue-compensate.lua", List.class),
+				script("scripts/coupon-issue-confirm.lua", List.class),
 				failureObserver);
 		statsReader = new RedisCouponEventStatsReader(
 				redisTemplate,
@@ -226,11 +227,22 @@ class RedisCouponIssueIntegrationTest {
 		assertThat(allocated.allocatedQuantity()).isOne();
 		assertThat(allocated.remainingStock()).isOne();
 		assertThat(allocated.status()).isEqualTo(com.ace.coupon.enums.CouponEventStatus.OPEN);
+		// 확정 전에는 필드가 없음 -> 0
+		assertThat(allocated.confirmedQuantity()).isZero();
+		assertThat(allocated.pendingQuantity()).isOne();
 
-		processor.compensate(openCampaign, 1L, requestId);
-		CouponEventStatsSnapshot compensated = statsReader.read(openCampaign);
-		assertThat(compensated.allocatedQuantity()).isZero();
-		assertThat(compensated.remainingStock()).isEqualTo(2L);
+		processor.confirm(openCampaign, 1L, requestId);
+		CouponEventStatsSnapshot confirmed = statsReader.read(openCampaign);
+		assertThat(confirmed.confirmedQuantity()).isOne();
+		assertThat(confirmed.pendingQuantity()).isZero();
+
+		// 확정된 요청은 보상 대상이 아니라서 재고와 확정 수가 그대로 유지
+		assertThat(processor.compensate(openCampaign, 1L, requestId))
+				.isEqualTo(CouponIssueCompensationResult.NOT_COMPENSABLE);
+		CouponEventStatsSnapshot afterCompensate = statsReader.read(openCampaign);
+		assertThat(afterCompensate.allocatedQuantity()).isOne();
+		assertThat(afterCompensate.remainingStock()).isOne();
+		assertThat(afterCompensate.confirmedQuantity()).isOne();
 
 		long soldOutCampaign = initializeOpenCampaign(1);
 		processor.issue(soldOutCampaign, 2L, UUID.randomUUID());
@@ -245,6 +257,67 @@ class RedisCouponIssueIntegrationTest {
 
 		long missingCampaign = nextCampaignId();
 		assertThat(statsReader.read(missingCampaign)).isNull();
+	}
+
+	@Test
+	@DisplayName("확정은 수명주기를 한 번만 올리고 재시도와 잘못된 대상은 카운터를 건드리지 않는다")
+	void confirmsIssuedRequestExactlyOnce() {
+		long campaignId = initializeOpenCampaign(3);
+		UUID requestId = UUID.randomUUID();
+		processor.issue(campaignId, 1L, requestId);
+
+		assertThat(processor.confirm(campaignId, 1L, requestId))
+				.isEqualTo(CouponIssueConfirmResult.CONFIRMED_NOW);
+		assertThat(processor.findRequest(campaignId, requestId).status())
+				.isEqualTo(IssueRequestStatus.ISSUED);
+		assertThat(statsReader.read(campaignId).confirmedQuantity()).isOne();
+
+		// RELAY 재전달로 다시 들어와도 카운터는 오르지 않는다
+		assertThat(processor.confirm(campaignId, 1L, requestId))
+				.isEqualTo(CouponIssueConfirmResult.ALREADY_CONFIRMED);
+		assertThat(statsReader.read(campaignId).confirmedQuantity()).isOne();
+
+		// 다른 사용자로는 남의 확정을 건드릴 수 없다
+		assertThat(processor.confirm(campaignId, 2L, requestId))
+				.isEqualTo(CouponIssueConfirmResult.INVALID_ARGUMENT);
+		assertThat(statsReader.read(campaignId).confirmedQuantity()).isOne();
+
+		assertThat(processor.confirm(campaignId, 1L, UUID.randomUUID()))
+				.isEqualTo(CouponIssueConfirmResult.REQUEST_NOT_FOUND);
+	}
+
+	@Test
+	@DisplayName("보상된 요청과 거절된 요청은 확정할 수 없다")
+	void rejectsConfirmOnNonPendingRequest() {
+		long campaignId = initializeOpenCampaign(1);
+		UUID compensated = UUID.randomUUID();
+		processor.issue(campaignId, 1L, compensated);
+		processor.compensate(campaignId, 1L, compensated);
+
+		assertThat(processor.confirm(campaignId, 1L, compensated))
+				.isEqualTo(CouponIssueConfirmResult.NOT_CONFIRMABLE);
+		assertThat(statsReader.read(campaignId).confirmedQuantity()).isZero();
+
+		// 재고 소진으로 거절된 요청도 확정 대상이 아니다
+		processor.issue(campaignId, 2L, UUID.randomUUID());
+		UUID soldOut = UUID.randomUUID();
+		assertThat(processor.issue(campaignId, 3L, soldOut).code())
+				.isEqualTo(CouponIssueLuaCode.SOLD_OUT);
+		assertThat(processor.confirm(campaignId, 3L, soldOut))
+				.isEqualTo(CouponIssueConfirmResult.NOT_CONFIRMABLE);
+	}
+
+	@Test
+	@DisplayName("발급 현황은 숫자가 아닌 확정 수를 0 으로 뭉개지 않고 손상 상태로 거절한다")
+	void rejectsNonNumericConfirmedQuantity() {
+		long campaignId = initializeOpenCampaign(1);
+		processor.issue(campaignId, 1L, UUID.randomUUID());
+		redisTemplate.opsForHash()
+				.put(CouponRedisKeys.campaign(campaignId).metadata(), "confirmedQuantity", "broken");
+
+		assertThatThrownBy(() -> statsReader.read(campaignId))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("Redis 상태");
 	}
 
 	@Test

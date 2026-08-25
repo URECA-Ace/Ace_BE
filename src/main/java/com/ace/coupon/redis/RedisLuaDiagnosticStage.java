@@ -32,6 +32,10 @@ public enum RedisLuaDiagnosticStage {
 	INITIALIZE_SEQUENCE_EXPIRE(323, "PEXPIREAT", "initialize"),
 	INITIALIZE_REQUESTS_EXPIRE(324, "PEXPIREAT", "initialize"),
 
+	CONFIRM_REQUEST_READ(401, "HMGET", "confirm"),
+	CONFIRM_REQUEST_WRITE(411, "HSET", "confirm"),
+	CONFIRM_COUNTER_INCREMENT(412, "HINCRBY", "confirm"),
+
 	UNKNOWN(-1, "UNKNOWN", "unknown");
 
 	private static final RedisLuaDiagnosticStage[] LOOKUP = values();

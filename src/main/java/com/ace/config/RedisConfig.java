@@ -31,6 +31,11 @@ public class RedisConfig {
 	}
 
 	@Bean
+	public RedisScript<List> couponIssueConfirmScript() {
+		return script("scripts/coupon-issue-confirm.lua", List.class);
+	}
+
+	@Bean
 	public RedisScript<List> couponEventStatsScript() {
 		return script("scripts/coupon-event-stats.lua", List.class);
 	}

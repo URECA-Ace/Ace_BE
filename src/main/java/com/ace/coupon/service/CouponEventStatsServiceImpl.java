@@ -51,7 +51,9 @@ public class CouponEventStatsServiceImpl implements CouponEventStatsService {
 				snapshot.allocatedQuantity(),
 				snapshot.remainingStock(),
 				snapshot.status(),
-				OffsetDateTime.ofInstant(snapshot.observedAt(), properties.zoneId()));
+				OffsetDateTime.ofInstant(snapshot.observedAt(), properties.zoneId()),
+				snapshot.confirmedQuantity(),
+				snapshot.pendingQuantity());
 	}
 
 	private CouponException unavailable(Throwable cause) {

@@ -13,7 +13,7 @@ import com.ace.coupon.enums.CouponEventStatus;
 @Component
 public class RedisCouponEventStatsReader {
 
-	private static final int RESULT_FIELD_COUNT = 6;
+	private static final int RESULT_FIELD_COUNT = 8;
 
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> statsScript;
@@ -53,11 +53,16 @@ public class RedisCouponEventStatsReader {
 		long remainingStock = number(result.get(3));
 		long statusCode = number(result.get(4));
 		long observedAt = number(result.get(5));
+		long confirmedQuantity = number(result.get(6));
+		long pendingQuantity = number(result.get(7));
 		if (totalStock <= 0
 				|| allocatedQuantity < 0
 				|| remainingStock < 0
 				|| allocatedQuantity + remainingStock != totalStock
-				|| observedAt <= 0) {
+				|| observedAt <= 0
+				|| confirmedQuantity < 0
+				|| confirmedQuantity > allocatedQuantity
+				|| confirmedQuantity + pendingQuantity != allocatedQuantity) {
 			throw new IllegalStateException("쿠폰 발급 현황 Lua 결과 값이 올바르지 않습니다.");
 		}
 
@@ -67,7 +72,9 @@ public class RedisCouponEventStatsReader {
 				allocatedQuantity,
 				remainingStock,
 				status(statusCode),
-				Instant.ofEpochMilli(observedAt));
+				Instant.ofEpochMilli(observedAt),
+				confirmedQuantity,
+				pendingQuantity);
 	}
 
 	private CouponEventStatus status(long value) {
