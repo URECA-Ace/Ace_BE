@@ -16,6 +16,7 @@ public class RedisCouponIssueProcessor {
 
 	private static final int DECISION_FIELD_COUNT = 6;
 	private static final int COMPENSATION_FIELD_COUNT = 3;
+	private static final int CONFIRMATION_FIELD_COUNT = 3;
 	private static final int VERSIONED_REQUEST_STATE_FIELD_COUNT = 10;
 	private static final int COMPACT_REQUEST_STATE_FIELD_COUNT = 6;
 	private static final int LEGACY_REQUEST_STATE_FIELD_COUNT = 7;
@@ -24,16 +25,19 @@ public class RedisCouponIssueProcessor {
 	private final StringRedisTemplate redisTemplate;
 	private final RedisScript<List> issueScript;
 	private final RedisScript<List> compensateScript;
+	private final RedisScript<List> confirmScript;
 	private final RedisLuaFailureObserver failureObserver;
 
 	public RedisCouponIssueProcessor(
 			StringRedisTemplate redisTemplate,
 			@Qualifier("couponIssueScript") RedisScript<List> issueScript,
 			@Qualifier("couponIssueCompensateScript") RedisScript<List> compensateScript,
+			@Qualifier("couponIssueConfirmScript") RedisScript<List> confirmScript,
 			RedisLuaFailureObserver failureObserver) {
 		this.redisTemplate = redisTemplate;
 		this.issueScript = issueScript;
 		this.compensateScript = compensateScript;
+		this.confirmScript = confirmScript;
 		this.failureObserver = failureObserver;
 	}
 
@@ -176,6 +180,31 @@ public class RedisCouponIssueProcessor {
 			// 구형 문자열 상태 호환
 			return IssueRequestStatus.valueOf(value);
 		}
+	}
+
+	// 저장이 끝난 요청의 수명주기를 PENDING 에서 CONFIRMED 로 올린다.
+	// 이 호출이 없으면 상태 조회가 계속 ACCEPTED 로 남고 확정 완료 수가 채워지지 않는다.
+	public CouponIssueConfirmResult confirm(Long campaignId, Long userId, UUID requestId) {
+		if (requestId == null) {
+			throw new IllegalArgumentException("requestId가 필요합니다.");
+		}
+		CouponRedisKeys.CampaignKeys keys = CouponRedisKeys.campaign(campaignId);
+		CouponRedisKeys.BitmapLocation bitmap = keys.bitmap(userId);
+		List<?> response = redisTemplate.execute(
+				confirmScript,
+				List.of(keys.metadata(), keys.requests()),
+				String.valueOf(userId),
+				String.valueOf(bitmap.offset()),
+				requestId.toString(),
+				String.valueOf(bitmap.segment()));
+
+		if (response == null || response.size() != CONFIRMATION_FIELD_COUNT) {
+			throw new IllegalStateException("쿠폰 발급 확정 결과가 없습니다.");
+		}
+		CouponIssueConfirmResult result = CouponIssueConfirmResult.from(number(response.get(0)));
+		RedisLuaDiagnosticStage stage = RedisLuaDiagnosticStage.from(number(response.get(1)));
+		failureObserver.observe(stage, result.name(), text(response.get(2)));
+		return result;
 	}
 
 	public CouponIssueCompensationResult compensate(Long campaignId, Long userId, UUID requestId) {

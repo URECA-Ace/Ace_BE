@@ -44,7 +44,9 @@ class CouponEventStatsControllerTest {
 						8_271L,
 						1_729L,
 						CouponEventStatus.OPEN,
-						observedAt));
+						observedAt,
+						8_200L,
+						71L));
 
 		mockMvc.perform(get("/api/v1/events/{eventId}/issuance-stats", EVENT_ID))
 				.andExpect(status().isOk())
@@ -55,7 +57,9 @@ class CouponEventStatsControllerTest {
 				.andExpect(jsonPath("$.data.allocatedQuantity").value(8_271))
 				.andExpect(jsonPath("$.data.remainingStock").value(1_729))
 				.andExpect(jsonPath("$.data.status").value("OPEN"))
-				.andExpect(jsonPath("$.data.observedAt").value("2026-08-18T17:30:00+09:00"));
+				.andExpect(jsonPath("$.data.observedAt").value("2026-08-18T17:30:00+09:00"))
+				.andExpect(jsonPath("$.data.confirmedQuantity").value(8_200))
+				.andExpect(jsonPath("$.data.pendingQuantity").value(71));
 
 		verify(couponEventStatsService).findStats(EVENT_ID);
 	}

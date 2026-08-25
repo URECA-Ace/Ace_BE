@@ -133,6 +133,11 @@ class SyncIssuanceAccuracyTest {
 		assertThat(count("SELECT COUNT(*) FROM issue_failure_log WHERE event_id = ?")).isZero();
 
 		// 남은 재고가 음수면 초과 발급이다
+		// 확정 수 = 저장 수
+		assertThat(redisTemplate.<String, String>opsForHash()
+						.get(CouponRedisKeys.campaign(eventId).metadata(), "confirmedQuantity"))
+				.isEqualTo(String.valueOf(stock));
+
 		assertThat(redisTemplate.opsForValue().get(CouponRedisKeys.campaign(eventId).stock()))
 				.isEqualTo("0");
 

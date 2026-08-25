@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.ace.coupon.redis.CouponIssueCompensationResult;
+import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.persistence.failure.IssueFailure;
 import com.ace.coupon.persistence.failure.IssueFailureRecorder;
@@ -56,14 +57,141 @@ class IssuePersistenceCoordinatorTest {
 	}
 
 	@Test
-	@DisplayName("저장에 성공하면 원복하지 않는다")
+	@DisplayName("저장에 성공하면 확정만 하고 원복하지 않는다")
 	void doesNotCompensateOnSuccess() {
 		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(1L, 7L, record.requestId()))
+				.willReturn(CouponIssueConfirmResult.CONFIRMED_NOW);
 
 		assertThat(coordinator.persist(record, IssueFailureStage.DB_INSERT, INCIDENT_ID)).isEqualTo(42L);
 
+		verify(issueProcessor).confirm(1L, 7L, record.requestId());
 		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
 		verify(failureRecorder, never()).record(any());
+	}
+
+	@Test
+	@DisplayName("재전달로 이미 확정된 요청도 정상으로 본다")
+	void treatsAlreadyConfirmedAsSuccess() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.ALREADY_CONFIRMED);
+
+		assertThat(coordinator.persist(record, IssueFailureStage.RELAY, INCIDENT_ID)).isEqualTo(42L);
+
+		verify(failureRecorder, never()).record(any());
+	}
+
+	@Test
+	@DisplayName("확정에 실패해도 되돌리지 않고 예외도 올리지 않는다 - MySQL 은 이미 커밋됐다")
+	void neverCompensatesOrThrowsWhenConfirmFails() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willThrow(new IllegalStateException("Redis 연결 실패"));
+
+		assertThat(coordinator.persist(record, IssueFailureStage.RELAY, INCIDENT_ID)).isEqualTo(42L);
+
+		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
+		verify(persistenceProbe, never()).probe(any());
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		IssueFailure failure = captor.getValue();
+		assertThat(failure.stage()).isEqualTo(IssueFailureStage.CONFIRM);
+		assertThat(failure.compensationResult()).isEqualTo("CALL_FAILED");
+		assertThat(failure.errorMessage()).contains("Redis 연결 실패");
+	}
+
+	@Test
+	@DisplayName("확정이 거절되면 단계만 남기고 원복하지 않는다")
+	void recordsRejectedConfirm() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.NOT_CONFIRMABLE);
+
+		assertThat(coordinator.persist(record, IssueFailureStage.RELAY, INCIDENT_ID)).isEqualTo(42L);
+
+		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		assertThat(captor.getValue().stage()).isEqualTo(IssueFailureStage.CONFIRM);
+		assertThat(captor.getValue().compensationResult()).isEqualTo("NOT_CONFIRMABLE");
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 호출이 실패하면 예외를 올린다 - XACK 를 막아 재처리시킨다")
+	void confirmPersistedRethrowsCallFailure() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willThrow(new IllegalStateException("Redis 연결 실패"));
+
+		assertThatThrownBy(() -> coordinator.confirmPersisted(record, INCIDENT_ID))
+				.isInstanceOf(IllegalStateException.class);
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		assertThat(captor.getValue().stage()).isEqualTo(IssueFailureStage.CONFIRM);
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 Redis 쓰기 실패도 예외로 올린다 - 재시도하면 성공할 수 있다")
+	void confirmPersistedRethrowsInternalWriteError() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.INTERNAL_WRITE_ERROR);
+
+		assertThatThrownBy(() -> coordinator.confirmPersisted(record, INCIDENT_ID))
+				.isInstanceOf(IllegalStateException.class);
+
+		verify(failureRecorder).record(any());
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 결정론적 거절을 삼킨다 - 재시도해도 결과가 같아 XACK 해야 한다")
+	void confirmPersistedSwallowsDeterministicRejection() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.NOT_CONFIRMABLE);
+
+		coordinator.confirmPersisted(record, INCIDENT_ID);
+
+		ArgumentCaptor<IssueFailure> captor = ArgumentCaptor.forClass(IssueFailure.class);
+		verify(failureRecorder).record(captor.capture());
+		assertThat(captor.getValue().compensationResult()).isEqualTo("NOT_CONFIRMABLE");
+	}
+
+	@Test
+	@DisplayName("RELAY 확정은 이미 확정된 건에 예외를 올리지 않는다")
+	void confirmPersistedAcceptsAlreadyConfirmed() {
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.ALREADY_CONFIRMED);
+
+		coordinator.confirmPersisted(record, INCIDENT_ID);
+
+		verify(failureRecorder, never()).record(any());
+	}
+
+	@Test
+	@DisplayName("SYNC 저장은 Redis 쓰기 실패에도 예외를 올리지 않는다 - 저장은 이미 커밋됐다")
+	void syncPersistSwallowsInternalWriteError() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.INTERNAL_WRITE_ERROR);
+
+		assertThat(coordinator.persist(record, IssueFailureStage.DB_INSERT, INCIDENT_ID))
+				.isEqualTo(42L);
+
+		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
+	}
+
+	@Test
+	@DisplayName("확정 실패 기록까지 실패해도 예외를 올리지 않는다")
+	void swallowsFailureRecorderError() {
+		given(persistenceService.persist(record)).willReturn(42L);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willThrow(new IllegalStateException("Redis 연결 실패"));
+		org.mockito.BDDMockito.willThrow(new IllegalStateException("기록 실패"))
+				.given(failureRecorder).record(any());
+
+		assertThat(coordinator.persist(record, IssueFailureStage.RELAY, INCIDENT_ID)).isEqualTo(42L);
 	}
 
 	@Test
