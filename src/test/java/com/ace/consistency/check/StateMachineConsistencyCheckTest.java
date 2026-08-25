@@ -67,21 +67,9 @@ class StateMachineConsistencyCheckTest extends ConsistencyCheckIntegrationTestBa
 		}
 	}
 
-	@Test
-	@DisplayName("비정상 상태 전이 발생 시 FAIL 반환 (USED -> EXPIRED 비즈니스 룰 위반)")
-	void failWhenInvalidStateTransitionHappens() {
-		long eventId = generateUniqueId();
-		long issueId = insertDummyIssue(eventId);
-		insertDummyHistory(issueId, null, "ISSUED"); // 최초 발급
-		insertDummyHistory(issueId, "ISSUED", "USED");
-		insertDummyHistory(issueId, "USED", "EXPIRED"); // 연속성은 맞지만 허용되지 않은 전이!
-
-		for (Scope scope : createTestScopes(eventId)) {
-			CheckOutcome outcome = check.check(scope);
-			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
-			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
-		}
-	}
+	// "USED -> EXPIRED"처럼 연속성은 맞지만 허용되지 않은 전이 자체를 잡는 책임은
+	// CouponHistoryStructuralConsistencyCheck로 옮겨졌다(issue #36 — 중복 검증 로직 제거).
+	// 이 클래스는 이제 이력 체인의 연속성(from_status <=> 직전 이력의 to_status)만 검증한다.
 
 	@Test
 	@DisplayName("낡은 데이터를 읽은 배치 로직의 덮어쓰기 발생 시 FAIL 반환")

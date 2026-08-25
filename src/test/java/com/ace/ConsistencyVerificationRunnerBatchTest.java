@@ -1,5 +1,6 @@
 package com.ace;
 
+import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
 import com.ace.consistency.check.DuplicateConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
@@ -8,14 +9,14 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.coupon.service.CouponIssueService;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.LocalDateTime;
@@ -29,16 +30,15 @@ import static org.junit.jupiter.api.Assertions.*;
  * ConsistencyVerificationRunner.runAsync()가 실제로 Spring Batch Job을 통해
  * ALL 스코프 정합성 검증을 수행하는지 확인하는 통합 테스트.
  *
- * ConsistencyVerificationRunnerEventNotFoundTest와 마찬가지로 실제 로컬 MySQL(더미데이터 적재된 DB)에
- * 대고 실행하며, 배치는 별도 스레드(TaskExecutorJobOperator)에서 비동기로 실행되므로
- * verification_result 테이블에 결과가 쌓일 때까지 폴링(awaitCompletion)해서 기다린다.
+ * ConsistencyCheckIntegrationTestBase가 띄우는 Testcontainers MySQL에 대고 실행하며,
+ * 배치는 별도 스레드(TaskExecutorJobOperator)에서 비동기로 실행되므로 verification_result
+ * 테이블에 결과가 쌓일 때까지 폴링(awaitCompletion)해서 기다린다.
  *
  * 각 테스트는 실제 DB에 verification_result 행을 커밋하므로(배치가 별도 스레드/트랜잭션에서
  * 돌기 때문에 테스트 트랜잭션 롤백으로는 정리되지 않는다), afterEach에서 테스트가 만든 행만
  * id 기준으로 직접 지운다.
  */
-@SpringBootTest
-class ConsistencyVerificationRunnerBatchTest {
+class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegrationTestBase {
 
 	// Redis + Lua 기반 실제 구현체가 추가되기 전까지 전체 Context에서만 대체한다.
 	@MockitoBean
@@ -59,10 +59,8 @@ class ConsistencyVerificationRunnerBatchTest {
 	@Autowired
 	private JobRepository jobRepository;
 
-	@Autowired
-	private NamedParameterJdbcTemplate jdbcTemplate;
-
 	private Long maxIdBefore;
+	private Long dummyEventId;
 
 	// 저장 결과를 직접 확인하기 위해 임시로 정리(cleanup)를 꺼둔 상태입니다. 확인이 끝나면 주석을 해제해주세요.
 	// @AfterEach
@@ -74,10 +72,39 @@ class ConsistencyVerificationRunnerBatchTest {
 	// }
 
 	/**
+	 * ALL 스코프 배치는 EventIdPageReader가 coupon_event를 페이징하면서 읽은 event_id가 있을
+	 * 때만 각 Step의 Check(processor)를 호출한다. coupon_event가 비어 있으면 Check 자체가
+	 * 한 번도 실행되지 않아 예외/실패를 검증하는 테스트가 무의미해지므로, 이벤트 한 건을 미리 심어둔다.
+	 */
+	@BeforeEach
+	void setUpEvent() {
+		dummyEventId = insertDummyEvent();
+	}
+
+	@AfterEach
+	void cleanUpEvent() {
+		if (dummyEventId != null) {
+			jdbcTemplate.update("DELETE FROM coupon_event WHERE event_id = :eventId",
+					new MapSqlParameterSource("eventId", dummyEventId));
+			dummyEventId = null;
+		}
+	}
+
+	private Long insertDummyEvent() {
+		long eventId = generateUniqueId();
+		String sql = """
+				INSERT INTO coupon_event (event_id, coupon_id, round, open_at, close_at, total_stock, remaining_stock, issued_quantity, per_user_limit, status, created_at, updated_at)
+				VALUES (:eventId, :eventId, 1, NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY), 100, 100, 0, 1, 'OPEN', NOW(), NOW())
+				""";
+		jdbcTemplate.update(sql, new MapSqlParameterSource("eventId", eventId));
+		return eventId;
+	}
+
+	/**
 	 * [검증 목적] 실제 StockConsistencyCheck/DuplicateConsistencyCheck 두 개를 ALL 스코프로 넣고
 	 * runAsync()를 호출했을 때, Job이 정상적으로 두 Step을 모두 순차 실행하고
 	 * 각 Step 결과가 verification_result 테이블에 저장되는지 확인한다.
-	 * (현재 더미데이터는 두 Check 모두 위반이 없는 상태 — 사전에 직접 SQL로 확인함)
+	 * (심어둔 이벤트에는 coupon_issue가 없으므로 두 Check 모두 위반이 없는 상태다)
 	 */
 	@Test
 	void 두_Check_모두_정상적으로_실행되고_결과가_저장된다() {
