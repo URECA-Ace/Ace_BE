@@ -2,6 +2,7 @@ package com.ace.consistency.common;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
 
@@ -16,7 +17,7 @@ import java.util.Map;
 @Converter
 public class DiffDetailConverter implements AttributeConverter<Map<String, Object>, String> {
 
-	private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+	private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
 	private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
 	@Override
