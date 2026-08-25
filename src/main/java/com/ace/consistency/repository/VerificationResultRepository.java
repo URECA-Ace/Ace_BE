@@ -1,11 +1,15 @@
 package com.ace.consistency.repository;
 
+import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.entity.VerificationResultEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.Optional;
 
 /**
  * VerificationResult 영속화 담당.
@@ -15,4 +19,13 @@ import java.util.List;
  */
 @Repository
 public interface VerificationResultRepository extends JpaRepository<VerificationResultEntity, Long> {
+
+	@Query("""
+			SELECT MAX(v.scopeTo)
+			FROM VerificationResultEntity v
+			WHERE v.checkName =:checkName
+			AND v.scopeType =:scopeType
+			AND v.status <> :excludedStatus
+			""")
+	Optional<LocalDateTime> findLastScopeTo(@Param("checkName") String checkName, @Param("scopeType") Scope.ScopeType scopeType, @Param("excludedStatus") VerificationResult.Status excludedStatus);
 }

@@ -34,7 +34,7 @@ import java.util.List;
 @Slf4j
 public class ConsistencyBatchJobFactory {
 
-    private static final String JOB_NAME = "consistencyVerificationJob";
+    public static final String JOB_NAME = "consistencyVerificationJob";
     private static final int PAGE_SIZE = 500;
 
     private final JobRepository jobRepository;
