@@ -79,13 +79,28 @@ public class VerificationResultEntity {
 	@Column(nullable = false)
 	private long durationMillis;
 
+	/** 이 결과(특히 FAIL)에 대해 복구가 시도됐는지, 그 결과가 어땠는지를 나타내는 캐시 값.
+	 *  대시보드 목록 조회/필터링을 매번 recovery_result와 조인하지 않고 바로 할 수 있도록 별도 컬럼으로 둔다.
+	 *  실제 복구 시도 이력(성공/실패 상세, 메시지)은 RecoveryResult 테이블에 별도로 쌓이고,
+	 *  이 필드는 ConsistencyRecoveryDispatcher가 재검증을 마친 뒤에만 갱신한다. */
+	public enum RecoveryStatus {
+		NONE,
+		RECOVERED,
+		RECOVERY_FAILED
+	}
+
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 20)
+	private RecoveryStatus recoveryStatus;
+
 	@Builder
 	private VerificationResultEntity(String checkName, TriggerType triggerType,
 									 Scope.ScopeType scopeType,
 									 Long eventId, LocalDateTime scopeFrom, LocalDateTime scopeTo,
 									 VerificationResult.Status status, int violationCount,
 									 Map<String, Object> diffDetail,
-									 String errorMessage, LocalDateTime executedAt, long durationMillis) {
+									 String errorMessage, LocalDateTime executedAt, long durationMillis,
+									 RecoveryStatus recoveryStatus) {
 		this.checkName = checkName;
 		this.triggerType = triggerType;
 		this.scopeType = scopeType;
@@ -98,6 +113,17 @@ public class VerificationResultEntity {
 		this.errorMessage = errorMessage;
 		this.executedAt = executedAt;
 		this.durationMillis = durationMillis;
+		this.recoveryStatus = recoveryStatus;
+	}
+
+	/** 복구 정책 실행 후 재검증이 통과했을 때 호출한다. */
+	public void markRecovered() {
+		this.recoveryStatus = RecoveryStatus.RECOVERED;
+	}
+
+	/** 복구 정책 실행 후 재검증이 여전히 실패일 때 호출한다. */
+	public void markRecoveryFailed() {
+		this.recoveryStatus = RecoveryStatus.RECOVERY_FAILED;
 	}
 
 	/**
@@ -133,6 +159,7 @@ public class VerificationResultEntity {
 				.errorMessage(result.getErrorMessage())
 				.executedAt(result.getExecutedAt())
 				.durationMillis(result.getDurationMillis())
+				.recoveryStatus(RecoveryStatus.NONE)
 				.build();
 	}
 }
