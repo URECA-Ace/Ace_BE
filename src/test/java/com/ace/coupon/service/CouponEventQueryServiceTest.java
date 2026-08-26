@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
-import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
@@ -18,7 +19,6 @@ import org.springframework.data.domain.PageRequest;
 import com.ace.coupon.entity.Coupon;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
-import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponEventRepository;
 
 class CouponEventQueryServiceTest {
@@ -31,12 +31,12 @@ class CouponEventQueryServiceTest {
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		couponEventQueryService = new CouponEventQueryService(
 				couponEventRepository,
-				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")));
+				Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneId.of("Asia/Seoul")));
 	}
 
 	@Test
-	@DisplayName("최근 생성된 발급 회차를 최대 5개 조회한다")
-	void findsFiveRecentEvents() {
+	@DisplayName("최근 생성된 발급 회차를 기본 6개까지 조회한다")
+	void findsRecentEventsUsingDefaultSize() {
 		Coupon coupon = Coupon.builder()
 				.id(7L)
 				.couponName("U+ 데이터 하루 무제한 쿠폰")
@@ -59,7 +59,7 @@ class CouponEventQueryServiceTest {
 				.createdAt(LocalDateTime.of(2026, 8, 25, 9, 30))
 				.updatedAt(LocalDateTime.of(2026, 8, 25, 9, 30))
 				.build();
-		given(couponEventRepository.findRecentWithCoupon(PageRequest.of(0, 5)))
+		given(couponEventRepository.findRecentWithCoupon(PageRequest.of(0, 6)))
 				.willReturn(List.of(event));
 
 		var result = couponEventQueryService.findRecentEvents(null);
@@ -69,20 +69,20 @@ class CouponEventQueryServiceTest {
 			assertThat(response.couponName()).isEqualTo("U+ 데이터 하루 무제한 쿠폰");
 			assertThat(response.round()).isEqualTo(3);
 		});
-		verify(couponEventRepository).findRecentWithCoupon(PageRequest.of(0, 5));
+		verify(couponEventRepository).findRecentWithCoupon(PageRequest.of(0, 6));
 	}
 
 	@Test
-	@DisplayName("OPEN 상태의 최근 발급 회차만 최대 5개 조회한다")
-	void findsFiveRecentOpenEvents() {
+	@DisplayName("OPEN 상태의 최근 발급 회차를 요청한 개수만큼 조회한다")
+	void findsRecentOpenEventsUsingRequestedSize() {
 		given(couponEventRepository.findRecentWithCouponByStatus(
-				CouponEventStatus.OPEN, PageRequest.of(0, 5)))
+				CouponEventStatus.OPEN, PageRequest.of(0, 10)))
 				.willReturn(List.of());
 
-		var result = couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN);
+		var result = couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN, 10);
 
 		assertThat(result).isEmpty();
 		verify(couponEventRepository).findRecentWithCouponByStatus(
-				CouponEventStatus.OPEN, PageRequest.of(0, 5));
+				CouponEventStatus.OPEN, PageRequest.of(0, 10));
 	}
 }

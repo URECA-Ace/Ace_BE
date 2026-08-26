@@ -32,7 +32,7 @@ class CouponEventQueryControllerTest {
 	@Test
 	@DisplayName("최근 발급 회차를 쿠폰 이름과 함께 반환한다")
 	void findsRecentCouponEvents() throws Exception {
-		given(couponEventQueryService.findRecentEvents(null)).willReturn(List.of(
+		given(couponEventQueryService.findRecentEvents(null, 6)).willReturn(List.of(
 				new CouponEventSummaryResponse(
 						51L, 7L, "U+ 데이터 하루 무제한 쿠폰", 3,
 						10_000, 10_000, CouponEventStatus.OPEN,
@@ -46,18 +46,31 @@ class CouponEventQueryControllerTest {
 				.andExpect(jsonPath("$.data[0].couponName").value("U+ 데이터 하루 무제한 쿠폰"))
 				.andExpect(jsonPath("$.data[0].round").value(3));
 
-		verify(couponEventQueryService).findRecentEvents(null);
+		verify(couponEventQueryService).findRecentEvents(null, 6);
 	}
 
 	@Test
 	@DisplayName("상태를 전달하면 해당 상태의 최근 발급 회차만 조회한다")
 	void findsRecentCouponEventsByStatus() throws Exception {
-		given(couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN)).willReturn(List.of());
+		given(couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN, 10)).willReturn(List.of());
 
-		mockMvc.perform(get("/api/v1/events/recent").param("status", "OPEN"))
+		mockMvc.perform(get("/api/v1/coupons/events/recent")
+				.param("status", "OPEN")
+				.param("size", "10"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.data.length()").value(0));
 
-		verify(couponEventQueryService).findRecentEvents(CouponEventStatus.OPEN);
+		verify(couponEventQueryService).findRecentEvents(CouponEventStatus.OPEN, 10);
+	}
+
+	@Test
+	@DisplayName("기존 최근 회차 경로도 하위 호환을 위해 유지한다")
+	void supportsLegacyRecentEventsPath() throws Exception {
+		given(couponEventQueryService.findRecentEvents(null, 6)).willReturn(List.of());
+
+		mockMvc.perform(get("/api/v1/events/recent"))
+				.andExpect(status().isOk());
+
+		verify(couponEventQueryService).findRecentEvents(null, 6);
 	}
 }

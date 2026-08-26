@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
-import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.DisplayName;
@@ -14,9 +15,9 @@ import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.ace.coupon.dto.request.CouponCreateRequest;
-import com.ace.coupon.dto.response.CouponCreateResponse;
+import com.ace.coupon.dto.response.CouponSummaryResponse;
 import com.ace.coupon.entity.Coupon;
-import com.ace.coupon.redis.CouponIssueRedisProperties;
+import com.ace.coupon.enums.CouponType;
 import com.ace.coupon.repository.CouponRepository;
 
 class CouponCreationServiceTest {
@@ -32,10 +33,12 @@ class CouponCreationServiceTest {
 		});
 		CouponCreationService service = new CouponCreationService(
 				repository,
-				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")));
+				Clock.fixed(
+						Instant.parse("2026-08-21T06:00:00Z"),
+						ZoneId.of("Asia/Seoul")));
 
-		CouponCreateResponse response = service.create(new CouponCreateRequest(
-				" U+ 데이터 하루 무제한 쿠폰 ", " DATA_UNLIMITED ", 0L, 24));
+		CouponSummaryResponse response = service.create(new CouponCreateRequest(
+				" U+ 데이터 하루 무제한 쿠폰 ", CouponType.DATA_UNLIMITED, 0L, 24));
 
 		assertThat(response.couponId()).isEqualTo(51L);
 		ArgumentCaptor<Coupon> captor = ArgumentCaptor.forClass(Coupon.class);
@@ -43,5 +46,6 @@ class CouponCreationServiceTest {
 		assertThat(captor.getValue().getCouponName()).isEqualTo("U+ 데이터 하루 무제한 쿠폰");
 		assertThat(captor.getValue().getType()).isEqualTo("DATA_UNLIMITED");
 		assertThat(captor.getValue().getValidHours()).isEqualTo(24);
+		assertThat(response.createdAt().getOffset().getTotalSeconds()).isEqualTo(9 * 60 * 60);
 	}
 }
