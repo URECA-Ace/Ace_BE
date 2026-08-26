@@ -59,7 +59,7 @@ class CouponEventAggregateSnapshotSchedulerTest {
 	}
 
 	private CouponEventAggregateSnapshotService.SweepResult sweep() {
-		return new CouponEventAggregateSnapshotService.SweepResult(0, 0, 0, 0, 0);
+		return new CouponEventAggregateSnapshotService.SweepResult(0, 0, 0, 0, 0, 0);
 	}
 
 	private CouponEventLifecycleService.SweepResult lifecycleSweep() {

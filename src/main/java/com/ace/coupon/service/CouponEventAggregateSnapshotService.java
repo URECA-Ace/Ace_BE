@@ -6,6 +6,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CouponEventStatsSnapshot;
 import com.ace.coupon.redis.RedisCouponEventStatsReader;
@@ -23,31 +24,53 @@ public class CouponEventAggregateSnapshotService {
 
 	private static final int SNAPSHOT_BATCH_SIZE = 100;
 
+	// 한 번의 실행이 훑을 최대 페이지 수
+	// 회차가 비정상적으로 많을 때 무한 순회를 막는다
+	private static final int MAX_PAGES = 50;
+
 	private final CouponEventRepository couponEventRepository;
 	private final RedisCouponEventStatsReader statsReader;
 
 	// 아직 발급 중인 회차의 집계 컬럼을 한 번씩 갱신
 	// 마감 시각이 지난 회차는 대상이 아님
+	// 페이지를 커서로 끝까지 넘긴다. 첫 페이지만 보면 앞의 회차가 계속 대상으로 남을 때 뒤쪽 회차가 영원히 갱신되지 않는다
 	public SweepResult snapshotActiveEvents() {
-		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN,
-				PageRequest.of(0, SNAPSHOT_BATCH_SIZE));
-
 		int applied = 0;
-		int notModified = 0;
+		int alreadyApplied = 0;
+		int rejected = 0;
 		int noRedisState = 0;
 		int unreadable = 0;
-		for (Long eventId : eventIds) {
-			switch (snapshot(eventId)) {
-				case APPLIED -> applied++;
-				case NOT_MODIFIED -> notModified++;
-				case NO_REDIS_STATE -> noRedisState++;
-				case UNREADABLE -> unreadable++;
+		int scanned = 0;
+
+		long lastSeenId = 0L;
+		for (int page = 0; page < MAX_PAGES; page++) {
+			List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
+					CouponEventStatus.OPEN,
+					lastSeenId,
+					PageRequest.of(0, SNAPSHOT_BATCH_SIZE));
+			if (eventIds.isEmpty()) {
+				break;
+			}
+
+			for (Long eventId : eventIds) {
+				scanned++;
+				switch (snapshot(eventId)) {
+					case APPLIED -> applied++;
+					case ALREADY_APPLIED -> alreadyApplied++;
+					case REJECTED -> rejected++;
+					case NO_REDIS_STATE -> noRedisState++;
+					case UNREADABLE -> unreadable++;
+				}
+			}
+
+			lastSeenId = eventIds.get(eventIds.size() - 1);
+			if (eventIds.size() < SNAPSHOT_BATCH_SIZE) {
+				break;
 			}
 		}
 
 		SweepResult result = new SweepResult(
-				eventIds.size(), applied, notModified, noRedisState, unreadable);
+				scanned, applied, alreadyApplied, rejected, noRedisState, unreadable);
 		warnWhenAnomalyFound(result);
 		return result;
 	}
@@ -84,12 +107,33 @@ public class CouponEventAggregateSnapshotService {
 				confirmedQuantity.intValue());
 
 		if (updatedCount == 0) {
-			// 재고 설정이 다르거나(다른 회차의 Redis 값) 이미 더 큰 확정 수가 반영된 경우다
-			log.debug("쿠폰 회차 집계 스냅샷이 반영되지 않았습니다. eventId={}, confirmedQuantity={}",
-					eventId, confirmedQuantity);
-			return CouponEventAggregateSnapshotResult.NOT_MODIFIED;
+			return classifyRejection(eventId, totalStock.intValue(), confirmedQuantity.intValue());
 		}
 		return CouponEventAggregateSnapshotResult.APPLIED;
+	}
+
+	// UPDATE 0행은 이미 같은 값과 반영 거부를 모두 포함
+	private CouponEventAggregateSnapshotResult classifyRejection(
+			Long eventId, int totalStock, int confirmedQuantity) {
+		CouponEvent event = couponEventRepository.findById(eventId).orElse(null);
+		if (event == null) {
+			log.warn("집계를 반영할 쿠폰 회차가 없습니다. eventId={}", eventId);
+			return CouponEventAggregateSnapshotResult.REJECTED;
+		}
+
+		boolean sameStock = event.getTotalStock() == totalStock;
+		boolean sameAggregate = event.getIssuedQuantity() == confirmedQuantity
+				&& event.getRemainingStock() == totalStock - confirmedQuantity;
+		if (sameStock && sameAggregate) {
+			return CouponEventAggregateSnapshotResult.ALREADY_APPLIED;
+		}
+
+		log.warn("쿠폰 회차 집계 반영이 거부됐습니다. "
+						+ "eventId={}, redis(totalStock={}, confirmedQuantity={}), "
+						+ "db(totalStock={}, issuedQuantity={}, remainingStock={})",
+				eventId, totalStock, confirmedQuantity,
+				event.getTotalStock(), event.getIssuedQuantity(), event.getRemainingStock());
+		return CouponEventAggregateSnapshotResult.REJECTED;
 	}
 
 	private boolean isApplicable(Long eventId, Long totalStock, Long confirmedQuantity) {
@@ -114,20 +158,22 @@ public class CouponEventAggregateSnapshotService {
 			return;
 		}
 		log.warn("발급 중인 회차의 집계 스냅샷을 건너뛰었습니다. "
-						+ "scanned={}, applied={}, noRedisState={}, unreadable={}",
-				result.scanned(), result.applied(), result.noRedisState(), result.unreadable());
+						+ "scanned={}, applied={}, rejected={}, noRedisState={}, unreadable={}",
+				result.scanned(), result.applied(), result.rejected(),
+				result.noRedisState(), result.unreadable());
 	}
 
 	// 한 번의 주기 실행 결과. 스킵 사유를 나눠 둬야 장애를 관측할 수 있다
 	public record SweepResult(
 			int scanned,
 			int applied,
-			int notModified,
+			int alreadyApplied,
+			int rejected,
 			int noRedisState,
 			int unreadable) {
 
 		public boolean hasAnomaly() {
-			return noRedisState > 0 || unreadable > 0;
+			return rejected > 0 || noRedisState > 0 || unreadable > 0;
 		}
 	}
 }

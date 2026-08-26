@@ -22,90 +22,148 @@ public class CouponEventLifecycleService {
 
 	private static final int SWEEP_BATCH_SIZE = 100;
 
-	// 마감 대상
-	// SCHEDULED: 오픈 스케줄러가 멈춰 한 번도 열리지 못한 회차
-	private static final List<CouponEventStatus> CLOSE_TARGET_STATUSES = List.of(
-			CouponEventStatus.SCHEDULED,
+	// 한 번의 실행이 훑을 최대 페이지 수
+	// 처리 불가 회차가 앞을 막아도 뒤쪽까지 도달해야 한다
+	private static final int MAX_PAGES = 50;
+
+	// Redis 현황을 확인해야 마감할 수 있는 상태
+	private static final List<CouponEventStatus> DRAIN_REQUIRED_STATUSES = List.of(
 			CouponEventStatus.OPEN,
 			CouponEventStatus.SOLD_OUT);
+
+	// 한 번도 열리지 못한 회차
+	private static final List<CouponEventStatus> NEVER_OPENED_STATUSES = List.of(
+			CouponEventStatus.SCHEDULED);
 
 	private final CouponEventRepository couponEventRepository;
 	private final RedisCouponEventStatsReader statsReader;
 	private final CouponEventAggregateSnapshotService snapshotService;
 
 	public SweepResult sweep() {
-		SweepResult soldOut = markDrainedEventsSoldOut();
-		SweepResult closed = closeDrainedDueEvents();
-		return soldOut.merge(closed);
+		return markDrainedEventsSoldOut()
+				.merge(closeDrainedDueEvents())
+				.merge(closeNeverOpenedEvents());
 	}
 
 	// 재고가 소진되고 저장까지 끝난 회차를 SOLD_OUT 으로 전환
 	private SweepResult markDrainedEventsSoldOut() {
-		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN,
-				PageRequest.of(0, SWEEP_BATCH_SIZE));
-
 		int soldOut = 0;
 		int waitingForDrain = 0;
-		int unreadable = 0;
-		for (Long eventId : eventIds) {
-			StatsRead read = readStats(eventId);
-			if (read.unreadable()) {
-				unreadable++;
-				continue;
+		int unresolved = 0;
+
+		long lastSeenId = 0L;
+		for (int page = 0; page < MAX_PAGES; page++) {
+			List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
+					CouponEventStatus.OPEN, lastSeenId, PageRequest.of(0, SWEEP_BATCH_SIZE));
+			if (eventIds.isEmpty()) {
+				break;
 			}
-			if (read.snapshot() == null) {
-				// Redis 상태가 없으면 재고 소진 여부를 알 수 없다. 마감 시각이 오면 마감 경로가 처리한다
-				continue;
+
+			for (Long eventId : eventIds) {
+				StatsRead read = readStats(eventId);
+				if (read.unreadable()) {
+					unresolved++;
+					continue;
+				}
+				if (read.snapshot() == null) {
+					// Redis 상태가 없으면 재고 소진 여부를 알 수 없다
+					unresolved++;
+					continue;
+				}
+				if (!isStockExhausted(read.snapshot())) {
+					continue;
+				}
+				if (!isDrained(read.snapshot())) {
+					// 재고는 다 나갔지만 아직 저장 중인 건이 있다. 지금 찍으면 확정 전 값으로 마감된다
+					waitingForDrain++;
+					continue;
+				}
+				if (applyFinalSnapshot(eventId, read.snapshot()) && markSoldOut(eventId)) {
+					soldOut++;
+				}
 			}
-			if (!isStockExhausted(read.snapshot())) {
-				continue;
-			}
-			if (!isDrained(read.snapshot())) {
-				// 재고는 다 나갔지만 아직 저장 중인 건이 있다. 지금 찍으면 확정 전 값으로 마감된다
-				waitingForDrain++;
-				continue;
-			}
-			if (applyFinalSnapshot(eventId, read.snapshot()) && markSoldOut(eventId)) {
-				soldOut++;
+
+			lastSeenId = eventIds.get(eventIds.size() - 1);
+			if (eventIds.size() < SWEEP_BATCH_SIZE) {
+				break;
 			}
 		}
-		return new SweepResult(soldOut, 0, waitingForDrain, unreadable);
+		return new SweepResult(soldOut, 0, waitingForDrain, unresolved);
 	}
 
 	// 마감 시각이 지나고 저장까지 끝난 회차를 CLOSED 로 전환
+	// Redis 현황이 없는 경우 여기서는 마감하지 않는다.
+	// 발급이 있었을 수 있는 회차라 초기화 실패나 키 유실과 구분되지 않고,
+	// 그대로 마감하면 검증이 확정되지 않은 집계를 Drain 조건으로 신뢰하게 된다
 	private SweepResult closeDrainedDueEvents() {
-		List<Long> eventIds = couponEventRepository.findCloseTargetEventIds(
-				CLOSE_TARGET_STATUSES,
-				PageRequest.of(0, SWEEP_BATCH_SIZE));
-
 		int closed = 0;
 		int waitingForDrain = 0;
-		int unreadable = 0;
-		for (Long eventId : eventIds) {
-			StatsRead read = readStats(eventId);
-			if (read.unreadable()) {
-				// Redis 장애 중
-				unreadable++;
-				continue;
+		int unresolved = 0;
+
+		long lastSeenId = 0L;
+		for (int page = 0; page < MAX_PAGES; page++) {
+			List<Long> eventIds = couponEventRepository.findCloseTargetEventIds(
+					DRAIN_REQUIRED_STATUSES, lastSeenId, PageRequest.of(0, SWEEP_BATCH_SIZE));
+			if (eventIds.isEmpty()) {
+				break;
 			}
-			if (read.snapshot() == null) {
-				// 지난 회차라 Redis 상태가 이미 사라짐
-				// 상태만 진행
-				if (markClosed(eventId)) {
+
+			for (Long eventId : eventIds) {
+				StatsRead read = readStats(eventId);
+				if (read.unreadable()) {
+					unresolved++;
+					continue;
+				}
+				if (read.snapshot() == null) {
+					log.warn("마감 대상 회차의 Redis 현황이 없어 마감을 보류합니다. eventId={}", eventId);
+					unresolved++;
+					continue;
+				}
+				if (!isDrained(read.snapshot())) {
+					waitingForDrain++;
+					continue;
+				}
+				if (applyFinalSnapshot(eventId, read.snapshot())
+						&& markClosed(eventId, read.snapshot())) {
 					closed++;
 				}
-				continue;
 			}
-			if (!isDrained(read.snapshot())) {
-				waitingForDrain++;
-				continue;
-			}
-			if (applyFinalSnapshot(eventId, read.snapshot()) && markClosed(eventId)) {
-				closed++;
+
+			lastSeenId = eventIds.get(eventIds.size() - 1);
+			if (eventIds.size() < SWEEP_BATCH_SIZE) {
+				break;
 			}
 		}
-		return new SweepResult(0, closed, waitingForDrain, unreadable);
+		return new SweepResult(0, closed, waitingForDrain, unresolved);
+	}
+
+	// 오픈 스케쥴러가 멈춰 한 번도 열리지 못한 회차를 마감
+	private SweepResult closeNeverOpenedEvents() {
+		int closed = 0;
+
+		long lastSeenId = 0L;
+		for (int page = 0; page < MAX_PAGES; page++) {
+			List<Long> eventIds = couponEventRepository.findCloseTargetEventIds(
+					NEVER_OPENED_STATUSES, lastSeenId, PageRequest.of(0, SWEEP_BATCH_SIZE));
+			if (eventIds.isEmpty()) {
+				break;
+			}
+
+			for (Long eventId : eventIds) {
+				int updatedCount = couponEventRepository.markScheduledClosed(
+						eventId, CouponEventStatus.SCHEDULED, CouponEventStatus.CLOSED);
+				if (updatedCount > 0) {
+					log.info("한 번도 열리지 못한 쿠폰 회차를 마감했습니다. eventId={}", eventId);
+					closed++;
+				}
+			}
+
+			lastSeenId = eventIds.get(eventIds.size() - 1);
+			if (eventIds.size() < SWEEP_BATCH_SIZE) {
+				break;
+			}
+		}
+		return new SweepResult(0, closed, 0, 0);
 	}
 
 	private boolean isStockExhausted(CouponEventStatsSnapshot snapshot) {
@@ -119,10 +177,12 @@ public class CouponEventLifecycleService {
 	}
 
 	// 상태를 바꾸기 전에 집계를 확정
+	// 반영이 거부된 경우(재고 설정 불일치, 확정 수 역행, 회차 없음)에도 상태를 진행시키면 안 된다
 	private boolean applyFinalSnapshot(Long eventId, CouponEventStatsSnapshot snapshot) {
 		CouponEventAggregateSnapshotResult result = snapshotService.apply(eventId, snapshot);
-		if (result == CouponEventAggregateSnapshotResult.UNREADABLE) {
-			log.warn("최종 집계 스냅샷을 반영하지 못해 회차 상태를 진행시키지 않습니다. eventId={}", eventId);
+		if (!result.isAggregateFinalized()) {
+			log.warn("최종 집계 스냅샷이 확정되지 않아 회차 상태를 진행시키지 않습니다. eventId={}, result={}",
+					eventId, result);
 			return false;
 		}
 		return true;
@@ -138,13 +198,19 @@ public class CouponEventLifecycleService {
 		return false;
 	}
 
-	private boolean markClosed(Long eventId) {
+	// 집계 세 컬럼이 이번 스냅샷과 일치할 때만 전환
+	private boolean markClosed(Long eventId, CouponEventStatsSnapshot snapshot) {
 		int updatedCount = couponEventRepository.markClosed(
-				eventId, CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+				eventId,
+				DRAIN_REQUIRED_STATUSES,
+				CouponEventStatus.CLOSED,
+				snapshot.totalStock().intValue(),
+				snapshot.confirmedQuantity().intValue());
 		if (updatedCount > 0) {
 			log.info("쿠폰 회차를 마감했습니다. eventId={}", eventId);
 			return true;
 		}
+		log.warn("집계가 최종 스냅샷과 달라 회차를 마감하지 않았습니다. eventId={}", eventId);
 		return false;
 	}
 
@@ -165,14 +231,14 @@ public class CouponEventLifecycleService {
 			int soldOut,
 			int closed,
 			int waitingForDrain,
-			int unreadable) {
+			int unresolved) {
 
 		SweepResult merge(SweepResult other) {
 			return new SweepResult(
 					soldOut + other.soldOut,
 					closed + other.closed,
 					waitingForDrain + other.waitingForDrain,
-					unreadable + other.unreadable);
+					unresolved + other.unresolved);
 		}
 	}
 }

@@ -25,7 +25,6 @@ import jakarta.persistence.EntityManager;
 class CouponEventRepositoryTest {
 
 	private static final List<CouponEventStatus> CLOSE_TARGET_STATUSES = List.of(
-			CouponEventStatus.SCHEDULED,
 			CouponEventStatus.OPEN,
 			CouponEventStatus.SOLD_OUT);
 
@@ -205,7 +204,7 @@ class CouponEventRepositoryTest {
 		entityManager.flush();
 
 		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100));
+				CouponEventStatus.OPEN, 0L, PageRequest.of(0, 100));
 
 		assertThat(eventIds).contains(open.getId());
 		assertThat(eventIds).doesNotContain(closed.getId(), scheduled.getId());
@@ -225,7 +224,7 @@ class CouponEventRepositoryTest {
 		entityManager.flush();
 
 		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100));
+				CouponEventStatus.OPEN, 0L, PageRequest.of(0, 100));
 
 		assertThat(eventIds).contains(issuing.getId());
 		assertThat(eventIds).doesNotContain(pastClose.getId());
@@ -273,11 +272,11 @@ class CouponEventRepositoryTest {
 		entityManager.clear();
 
 		int firstUpdatedCount = couponEventRepository.markClosed(
-				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED, 10_000, 0);
 		int secondUpdatedCount = couponEventRepository.markClosed(
-				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED, 10_000, 0);
 		int issuingUpdatedCount = couponEventRepository.markClosed(
-				issuing.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+				issuing.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED, 10_000, 0);
 
 		assertThat(firstUpdatedCount).isOne();
 		assertThat(secondUpdatedCount).isZero();
@@ -310,11 +309,65 @@ class CouponEventRepositoryTest {
 		entityManager.flush();
 
 		List<Long> eventIds = couponEventRepository.findCloseTargetEventIds(
-				CLOSE_TARGET_STATUSES, PageRequest.of(0, 100));
+				CLOSE_TARGET_STATUSES, 0L, PageRequest.of(0, 100));
 
-		assertThat(eventIds).contains(
-				neverOpened.getId(), dueOpen.getId(), dueSoldOut.getId());
-		assertThat(eventIds).doesNotContain(alreadyClosed.getId(), issuing.getId());
+		// SCHEDULED 는 Redis 현황 없이 마감할 수 있어 별도 목록으로 조회
+		assertThat(eventIds).contains(dueOpen.getId(), dueSoldOut.getId());
+		assertThat(eventIds).doesNotContain(
+				neverOpened.getId(), alreadyClosed.getId(), issuing.getId());
+
+		List<Long> neverOpenedIds = couponEventRepository.findCloseTargetEventIds(
+				List.of(CouponEventStatus.SCHEDULED), 0L, PageRequest.of(0, 100));
+		assertThat(neverOpenedIds).contains(neverOpened.getId());
+	}
+
+	@Test
+	@DisplayName("집계가 최종 스냅샷과 다르면 마감하지 않는다")
+	void doesNotCloseWhenAggregateDiffersFromSnapshot() {
+		// 집계 반영이 거부된 상태에서 CLOSED 가 찍히면 검증이 확정 전 값을 신뢰하게 된다
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 39, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		// DB 집계는 0 인데 스냅샷은 400 이라고 주장하는 상황
+		int mismatched = couponEventRepository.markClosed(
+				event.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED, 10_000, 400);
+		// 재고 설정 자체가 다른 경우
+		int wrongStock = couponEventRepository.markClosed(
+				event.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED, 9_999, 0);
+
+		assertThat(mismatched).isZero();
+		assertThat(wrongStock).isZero();
+		assertThat(findStatus(event.getId())).isEqualTo(CouponEventStatus.OPEN);
+	}
+
+	@Test
+	@DisplayName("한 번도 열리지 못한 회차는 SCHEDULED 상태에서만 마감된다")
+	void closesOnlyScheduledEventsAsNeverOpened() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent neverOpened = persistEvent(
+				coupon, 40, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		CouponEvent opened = persistEvent(
+				coupon, 41, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int scheduledUpdated = couponEventRepository.markScheduledClosed(
+				neverOpened.getId(), CouponEventStatus.SCHEDULED, CouponEventStatus.CLOSED);
+		int openedUpdated = couponEventRepository.markScheduledClosed(
+				opened.getId(), CouponEventStatus.SCHEDULED, CouponEventStatus.CLOSED);
+
+		assertThat(scheduledUpdated).isOne();
+		assertThat(openedUpdated).isZero();
+		assertThat(findStatus(neverOpened.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(opened.getId())).isEqualTo(CouponEventStatus.OPEN);
 	}
 
 	private LocalDateTime databaseNow() {

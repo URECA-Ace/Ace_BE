@@ -104,10 +104,12 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			FROM CouponEvent event
 			WHERE event.status = :status
 				AND event.closeAt > CURRENT_TIMESTAMP
+				AND event.id > :lastSeenId
 			ORDER BY event.id
 			""")
 	List<Long> findSnapshotTargetEventIds(
 			@Param("status") CouponEventStatus status,
+			@Param("lastSeenId") Long lastSeenId,
 			Pageable pageable);
 
 	// Redis가 갖고 있는 확정 수를 coupon_event 집계 컬럼에 반영
@@ -134,10 +136,12 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			FROM CouponEvent event
 			WHERE event.status IN :statuses
 				AND event.closeAt <= CURRENT_TIMESTAMP
+				AND event.id > :lastSeenId
 			ORDER BY event.id
 			""")
 	List<Long> findCloseTargetEventIds(
 			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("lastSeenId") Long lastSeenId,
 			Pageable pageable);
 
 	// 재고가 소진되고 파이프라인이 빈 회차를 SOLD_OUT 으로 전환
@@ -159,6 +163,8 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	// 마감 시각이 지난 회차를 CLOSED 로 전환
 	// 이 상태값이 검증팀의 Drain 조건이라, 최종 스냅샷을 반영한 뒤에만 호출해야 한다
+	// 집계 세 컬럼이 이번 스냅샷과 정확히 일치할 때만 전환
+	// 반영이 거부됐는데 상태만 CLOSED 가 되면 검증이 확정되지 않은 값을 신뢰하게 된다
 	@Transactional
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("""
@@ -168,9 +174,31 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			WHERE event.id = :eventId
 				AND event.status IN :statuses
 				AND event.closeAt <= CURRENT_TIMESTAMP
+				AND event.totalStock = :totalStock
+				AND event.issuedQuantity = :issuedQuantity
+				AND event.remainingStock = :totalStock - :issuedQuantity
 			""")
 	int markClosed(
 			@Param("eventId") Long eventId,
 			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("closedStatus") CouponEventStatus closedStatus,
+			@Param("totalStock") Integer totalStock,
+			@Param("issuedQuantity") Integer issuedQuantity);
+
+	// 한 번도 열리지 못한 회차를 마감한다
+	// 발급이 없었으므로 Redis 현황 없이도 집계를 확정된 값으로 볼 수 있다
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.status = :closedStatus,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.status = :scheduledStatus
+				AND event.closeAt <= CURRENT_TIMESTAMP
+			""")
+	int markScheduledClosed(
+			@Param("eventId") Long eventId,
+			@Param("scheduledStatus") CouponEventStatus scheduledStatus,
 			@Param("closedStatus") CouponEventStatus closedStatus);
 }

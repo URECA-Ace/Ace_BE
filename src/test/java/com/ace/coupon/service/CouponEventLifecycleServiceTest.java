@@ -2,6 +2,7 @@ package com.ace.coupon.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import com.ace.coupon.enums.CouponEventStatus;
@@ -25,6 +25,9 @@ import com.ace.coupon.repository.CouponEventRepository;
 import com.ace.coupon.service.CouponEventLifecycleService.SweepResult;
 
 class CouponEventLifecycleServiceTest {
+
+	private static final List<CouponEventStatus> DRAIN_REQUIRED =
+			List.of(CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
 
 	private CouponEventRepository couponEventRepository;
 	private RedisCouponEventStatsReader statsReader;
@@ -39,8 +42,10 @@ class CouponEventLifecycleServiceTest {
 		service = new CouponEventLifecycleService(
 				couponEventRepository, statsReader, snapshotService);
 
-		given(couponEventRepository.findSnapshotTargetEventIds(any(), any())).willReturn(List.of());
-		given(couponEventRepository.findCloseTargetEventIds(any(), any())).willReturn(List.of());
+		given(couponEventRepository.findSnapshotTargetEventIds(any(), anyLong(), any()))
+				.willReturn(List.of());
+		given(couponEventRepository.findCloseTargetEventIds(any(), anyLong(), any()))
+				.willReturn(List.of());
 	}
 
 	@Test
@@ -100,14 +105,14 @@ class CouponEventLifecycleServiceTest {
 		given(snapshotService.apply(7L, drained))
 				.willReturn(CouponEventAggregateSnapshotResult.APPLIED);
 		given(couponEventRepository.markClosed(
-				Mockito.eq(7L), any(), Mockito.eq(CouponEventStatus.CLOSED))).willReturn(1);
+				7L, DRAIN_REQUIRED, CouponEventStatus.CLOSED, 1_000, 800)).willReturn(1);
 
 		assertThat(service.sweep().closed()).isOne();
 
 		InOrder inOrder = Mockito.inOrder(snapshotService, couponEventRepository);
 		inOrder.verify(snapshotService).apply(7L, drained);
 		inOrder.verify(couponEventRepository).markClosed(
-				Mockito.eq(7L), any(), Mockito.eq(CouponEventStatus.CLOSED));
+				7L, DRAIN_REQUIRED, CouponEventStatus.CLOSED, 1_000, 800);
 	}
 
 	@Test
@@ -120,40 +125,55 @@ class CouponEventLifecycleServiceTest {
 
 		assertThat(result.closed()).isZero();
 		assertThat(result.waitingForDrain()).isOne();
-		verify(couponEventRepository, never()).markClosed(anyLong(), any(), any());
+		verify(couponEventRepository, never()).markClosed(anyLong(), any(), any(), anyInt(), anyInt());
 	}
 
 	@Test
-	@DisplayName("Redis 상태가 이미 사라진 지난 회차는 스냅샷 없이 상태만 마감한다")
-	void closesEventWithoutRedisStateWithoutTouchingAggregate() {
-		// 지난 회차의 집계는 이미 맞는 값
+	@DisplayName("마감 대상인데 Redis 현황이 없으면 마감을 보류하고 이상으로 센다")
+	void holdsCloseWhenRedisStateIsMissing() {
+		// 초기화 실패나 키 유실과 구분되지 않는다.
+		// 그대로 마감하면 확정되지 않은 집계를 신뢰하게 된다
 		givenCloseTargets(7L);
 		given(statsReader.read(7L)).willReturn(null);
-		given(couponEventRepository.markClosed(
-				Mockito.eq(7L), any(), Mockito.eq(CouponEventStatus.CLOSED))).willReturn(1);
 
-		assertThat(service.sweep().closed()).isOne();
+		SweepResult result = service.sweep();
 
-		verify(snapshotService, never()).apply(anyLong(), any());
+		assertThat(result.closed()).isZero();
+		assertThat(result.unresolved()).isOne();
+		verify(couponEventRepository, never()).markClosed(anyLong(), any(), any(), anyInt(), anyInt());
 	}
 
 	@Test
 	@DisplayName("Redis 장애로 현황을 못 읽으면 마감하지 않고 다음 실행으로 미룬다")
 	void doesNotCloseWhileRedisIsUnreadable() {
-		// 상태 없음과 읽기 실패를 뭉개면 장애 중에 확정 전 값으로 마감
 		givenCloseTargets(7L);
 		given(statsReader.read(7L)).willThrow(new RedisConnectionFailureException("down"));
 
 		SweepResult result = service.sweep();
 
 		assertThat(result.closed()).isZero();
-		assertThat(result.unreadable()).isOne();
-		verify(couponEventRepository, never()).markClosed(anyLong(), any(), any());
+		assertThat(result.unresolved()).isOne();
+		verify(couponEventRepository, never()).markClosed(anyLong(), any(), any(), anyInt(), anyInt());
 	}
 
 	@Test
-	@DisplayName("최종 스냅샷 반영에 실패하면 상태를 진행시키지 않는다")
-	void keepsStatusWhenFinalSnapshotFails() {
+	@DisplayName("집계 반영이 거부되면 상태를 진행시키지 않는다")
+	void keepsStatusWhenAggregateIsRejected() {
+		// 재고 설정 불일치나 확정 수 역헹
+		CouponEventStatsSnapshot drained = snapshot(1_000L, 1_000L, 0L, 1_000L, 0L);
+		givenIssuingEvents(1L);
+		given(statsReader.read(1L)).willReturn(drained);
+		given(snapshotService.apply(1L, drained))
+				.willReturn(CouponEventAggregateSnapshotResult.REJECTED);
+
+		assertThat(service.sweep().soldOut()).isZero();
+
+		verify(couponEventRepository, never()).markSoldOut(anyLong(), any(), any());
+	}
+
+	@Test
+	@DisplayName("최종 스냅샷을 읽을 수 없으면 상태를 진행시키지 않는다")
+	void keepsStatusWhenFinalSnapshotIsUnreadable() {
 		CouponEventStatsSnapshot corrupted = snapshot(1_000L, 1_000L, 0L, 1_000L, 0L);
 		givenIssuingEvents(1L);
 		given(statsReader.read(1L)).willReturn(corrupted);
@@ -167,12 +187,12 @@ class CouponEventLifecycleServiceTest {
 
 	@Test
 	@DisplayName("이미 반영돼 바뀔 값이 없어도 상태 전환은 진행한다")
-	void proceedsWhenAggregateIsAlreadyUpToDate() {
+	void proceedsWhenAggregateIsAlreadyApplied() {
 		CouponEventStatsSnapshot drained = snapshot(1_000L, 1_000L, 0L, 1_000L, 0L);
 		givenIssuingEvents(1L);
 		given(statsReader.read(1L)).willReturn(drained);
 		given(snapshotService.apply(1L, drained))
-				.willReturn(CouponEventAggregateSnapshotResult.NOT_MODIFIED);
+				.willReturn(CouponEventAggregateSnapshotResult.ALREADY_APPLIED);
 		given(couponEventRepository.markSoldOut(
 				1L, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT)).willReturn(1);
 
@@ -180,32 +200,64 @@ class CouponEventLifecycleServiceTest {
 	}
 
 	@Test
-	@DisplayName("마감 대상에는 한 번도 열리지 못한 SCHEDULED 회차도 포함한다")
-	void includesScheduledEventsThatNeverOpened() {
-		// openDueEvents 는 closeAt 이 지난 회차를 열지 않으므로 그대로 두면 영원히 마감되지 않는다
+	@DisplayName("집계가 최종 스냅샷과 다르면 마감 UPDATE 가 0행이라 마감되지 않는다")
+	void doesNotCountCloseWhenAggregateGuardRejects() {
+		CouponEventStatsSnapshot drained = snapshot(1_000L, 800L, 200L, 800L, 0L);
 		givenCloseTargets(7L);
-		given(statsReader.read(7L)).willReturn(null);
+		given(statsReader.read(7L)).willReturn(drained);
+		given(snapshotService.apply(7L, drained))
+				.willReturn(CouponEventAggregateSnapshotResult.APPLIED);
 		given(couponEventRepository.markClosed(
-				Mockito.eq(7L), any(), Mockito.eq(CouponEventStatus.CLOSED))).willReturn(1);
+				7L, DRAIN_REQUIRED, CouponEventStatus.CLOSED, 1_000, 800)).willReturn(0);
+
+		assertThat(service.sweep().closed()).isZero();
+	}
+
+	@Test
+	@DisplayName("한 번도 열리지 못한 SCHEDULED 회차는 Redis 현황 없이 마감한다")
+	void closesNeverOpenedEventWithoutRedisState() {
+		// openDueEvents 는 closeAt 이 지난 회차를 열지 않으므로 그대로 두면 영원히 마감되지 않는다
+		given(couponEventRepository.findCloseTargetEventIds(
+				Mockito.eq(List.of(CouponEventStatus.SCHEDULED)), anyLong(), any()))
+				.willReturn(List.of(9L), List.of());
+		given(couponEventRepository.markScheduledClosed(
+				9L, CouponEventStatus.SCHEDULED, CouponEventStatus.CLOSED)).willReturn(1);
+
+		assertThat(service.sweep().closed()).isOne();
+
+		verify(statsReader, never()).read(9L);
+	}
+
+	@Test
+	@DisplayName("대상이 한 페이지를 넘으면 커서로 다음 페이지까지 훑는다")
+	void sweepsBeyondTheFirstPage() {
+		// 첫 페이지만 보면 앞의 회차가 계속 대상으로 남을 때 뒤쪽 회차가 영원히 처리되지 않는다
+		List<Long> firstPage = new java.util.ArrayList<>();
+		for (long id = 1; id <= 100; id++) {
+			firstPage.add(id);
+		}
+		given(couponEventRepository.findSnapshotTargetEventIds(
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(0L), any()))
+				.willReturn(firstPage);
+		given(couponEventRepository.findSnapshotTargetEventIds(
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(100L), any()))
+				.willReturn(List.of(101L));
+		given(statsReader.read(anyLong())).willReturn(null);
 
 		service.sweep();
 
-		verify(couponEventRepository).findCloseTargetEventIds(
-				Mockito.eq(List.of(
-						CouponEventStatus.SCHEDULED,
-						CouponEventStatus.OPEN,
-						CouponEventStatus.SOLD_OUT)),
-				any());
+		verify(statsReader).read(101L);
 	}
 
 	private void givenIssuingEvents(Long... eventIds) {
 		given(couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100)))
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(0L), any()))
 				.willReturn(List.of(eventIds));
 	}
 
 	private void givenCloseTargets(Long... eventIds) {
-		given(couponEventRepository.findCloseTargetEventIds(any(), any()))
+		given(couponEventRepository.findCloseTargetEventIds(
+				Mockito.eq(DRAIN_REQUIRED), anyLong(), any()))
 				.willReturn(List.of(eventIds));
 	}
 

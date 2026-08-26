@@ -104,6 +104,23 @@ class StockConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 		assertThat(check.check(allScope(eventId)).isPass()).isFalse();
 	}
 
+	@Test
+	@DisplayName("마감 직후 safety margin 안에 발급이 있어도 오탐하지 않는다")
+	void doesNotFalselyReportWhenLastIssueIsInsideSafetyMargin() {
+		// 집계는 마감 시점의 최신 확정 수인데 COUNT 에만 컷오프를 걸면 직전 구간의 발급이 빠져 불일치로 보인다
+		long eventId = generateUniqueId();
+		insertEvent(eventId, "CLOSED", 1_000, 400, 600);
+		insertIssues(eventId, 400);
+
+		// ALL 스코프 스케쥴러가 쓰는 to = now - safetyMargin 을 그대로 재현
+		Scope withSafetyMargin = Scope.all(
+				List.of(eventId), LocalDateTime.now().minusSeconds(10));
+
+		assertThat(check.check(withSafetyMargin).isPass())
+				.as("마감 이후에는 새로 저장되는 건이 없으므로 전체 건수와 비교해야 한다")
+				.isTrue();
+	}
+
 	private Scope allScope(long eventId) {
 		return Scope.all(List.of(eventId), LocalDateTime.now().plusDays(1));
 	}

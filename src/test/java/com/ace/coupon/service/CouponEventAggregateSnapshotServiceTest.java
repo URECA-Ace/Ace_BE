@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,6 +19,7 @@ import org.mockito.Mockito;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
+import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CouponEventStatsSnapshot;
 import com.ace.coupon.redis.RedisCouponEventStatsReader;
@@ -83,19 +85,43 @@ class CouponEventAggregateSnapshotServiceTest {
 	}
 
 	@Test
-	@DisplayName("조건부 UPDATE가 0행을 바꾸면 반영 없음으로 구분한다")
-	void reportsNotModifiedWhenConditionalUpdateMatchesNoRow() {
+	@DisplayName("이미 같은 값이 반영돼 있으면 확정된 것으로 본다")
+	void reportsAlreadyAppliedWhenValueIsIdentical() {
 		given(statsReader.read(1L)).willReturn(snapshot(1_000L, 1_000L, 970L, 30L));
 		given(couponEventRepository.applyAggregateSnapshot(1L, 1_000, 970)).willReturn(0);
+		given(couponEventRepository.findById(1L))
+				.willReturn(Optional.of(event(1_000, 970, 30)));
 
-		assertThat(service.snapshot(1L)).isEqualTo(CouponEventAggregateSnapshotResult.NOT_MODIFIED);
+		assertThat(service.snapshot(1L)).isEqualTo(CouponEventAggregateSnapshotResult.ALREADY_APPLIED);
+	}
+
+	@Test
+	@DisplayName("재고 설정이 달라 반영이 거부되면 이미 반영된 것으로 보지 않는다")
+	void reportsRejectedWhenStockConfigurationDiffers() {
+		// 0행을 전부 "이미 반영됨"으로 보면 이 회차에도 상태 전환이 계속 진행된다
+		given(statsReader.read(1L)).willReturn(snapshot(1_000L, 1_000L, 970L, 30L));
+		given(couponEventRepository.applyAggregateSnapshot(1L, 1_000, 970)).willReturn(0);
+		given(couponEventRepository.findById(1L))
+				.willReturn(Optional.of(event(900, 0, 900)));
+
+		assertThat(service.snapshot(1L)).isEqualTo(CouponEventAggregateSnapshotResult.REJECTED);
+	}
+
+	@Test
+	@DisplayName("회차가 사라졌으면 반영 거부로 처리한다")
+	void reportsRejectedWhenEventIsMissing() {
+		given(statsReader.read(1L)).willReturn(snapshot(1_000L, 1_000L, 970L, 30L));
+		given(couponEventRepository.applyAggregateSnapshot(1L, 1_000, 970)).willReturn(0);
+		given(couponEventRepository.findById(1L)).willReturn(Optional.empty());
+
+		assertThat(service.snapshot(1L)).isEqualTo(CouponEventAggregateSnapshotResult.REJECTED);
 	}
 
 	@Test
 	@DisplayName("발급 중인 회차만 훑고 한 회차의 실패가 다음 회차를 막지 않는다")
 	void snapshotsActiveEventsAndIsolatesFailures() {
 		given(couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100)))
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(0L), any()))
 				.willReturn(List.of(1L, 2L, 3L));
 		given(statsReader.read(1L)).willThrow(new RedisConnectionFailureException("down"));
 		given(statsReader.read(2L)).willReturn(null);
@@ -118,7 +144,7 @@ class CouponEventAggregateSnapshotServiceTest {
 	void countsSkippedEventsByReason() {
 		// 사유를 나누지 않으면 Redis 전면 장애가 "갱신할 게 없음"과 똑같이 보인다
 		given(couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100)))
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(0L), any()))
 				.willReturn(List.of(1L, 2L, 3L, 4L));
 		given(statsReader.read(1L)).willThrow(new RedisConnectionFailureException("down"));
 		given(statsReader.read(2L)).willReturn(null);
@@ -126,12 +152,13 @@ class CouponEventAggregateSnapshotServiceTest {
 		given(statsReader.read(4L)).willReturn(snapshot(1_000L, 400L, 400L, 0L));
 		given(couponEventRepository.applyAggregateSnapshot(3L, 1_000, 400)).willReturn(1);
 		given(couponEventRepository.applyAggregateSnapshot(4L, 1_000, 400)).willReturn(0);
+		given(couponEventRepository.findById(4L)).willReturn(Optional.of(event(900, 0, 900)));
 
 		SweepResult result = service.snapshotActiveEvents();
 
 		assertThat(result.scanned()).isEqualTo(4);
 		assertThat(result.applied()).isOne();
-		assertThat(result.notModified()).isOne();
+		assertThat(result.rejected()).isOne();
 		assertThat(result.noRedisState()).isOne();
 		assertThat(result.unreadable()).isOne();
 		assertThat(result.hasAnomaly()).isTrue();
@@ -141,7 +168,7 @@ class CouponEventAggregateSnapshotServiceTest {
 	@DisplayName("전부 정상 반영되면 이상 징후로 보지 않는다")
 	void doesNotReportAnomalyWhenEveryEventIsApplied() {
 		given(couponEventRepository.findSnapshotTargetEventIds(
-				CouponEventStatus.OPEN, PageRequest.of(0, 100)))
+				Mockito.eq(CouponEventStatus.OPEN), Mockito.eq(0L), any()))
 				.willReturn(List.of(1L));
 		given(statsReader.read(1L)).willReturn(snapshot(1_000L, 400L, 400L, 0L));
 		given(couponEventRepository.applyAggregateSnapshot(1L, 1_000, 400)).willReturn(1);
@@ -158,6 +185,14 @@ class CouponEventAggregateSnapshotServiceTest {
 		assertThat(service.apply(1L, preloaded)).isEqualTo(CouponEventAggregateSnapshotResult.APPLIED);
 
 		verify(statsReader, never()).read(any());
+	}
+
+	private CouponEvent event(int totalStock, int issuedQuantity, int remainingStock) {
+		return CouponEvent.builder()
+				.totalStock(totalStock)
+				.issuedQuantity(issuedQuantity)
+				.remainingStock(remainingStock)
+				.build();
 	}
 
 	private CouponEventStatsSnapshot snapshot(
