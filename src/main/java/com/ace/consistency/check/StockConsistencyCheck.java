@@ -21,7 +21,8 @@ import java.util.Set;
  *   - issued_quantity = 활성 발급 건수(ISSUED+USED+EXPIRED)
  *
  * EVENT 스코프: 특정 event_id 하나만 검사 (WHERE 절에 event_id 필터 추가)
- * ALL 스코프: 전체 이벤트 대상으로 검사 (필터 없음)
+ * ALL 스코프: 마감된 회차(SOLD_OUT / CLOSED)만 검사
+ *
  */
 @Component
 @RequiredArgsConstructor
@@ -42,6 +43,7 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 				   ON ci.event_id = ce.event_id
 				  AND ci.created_at < :to
 			WHERE ce.event_id IN (:eventIds)
+			  AND ce.status IN ('SOLD_OUT','CLOSED')
 			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
 			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
 				OR ce.issued_quantity != actual_active_count
