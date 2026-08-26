@@ -24,6 +24,11 @@ import jakarta.persistence.EntityManager;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 class CouponEventRepositoryTest {
 
+	private static final List<CouponEventStatus> CLOSE_TARGET_STATUSES = List.of(
+			CouponEventStatus.SCHEDULED,
+			CouponEventStatus.OPEN,
+			CouponEventStatus.SOLD_OUT);
+
 	@Autowired
 	private CouponEventRepository couponEventRepository;
 
@@ -224,6 +229,92 @@ class CouponEventRepositoryTest {
 
 		assertThat(eventIds).contains(issuing.getId());
 		assertThat(eventIds).doesNotContain(pastClose.getId());
+	}
+
+	@Test
+	@DisplayName("재고가 남아 있으면 소진 처리하지 않고, 0이 된 뒤에는 한 번만 전환한다")
+	void marksSoldOutOnlyWhenStockIsExhausted() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 31, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int beforeExhausted = couponEventRepository.markSoldOut(
+				event.getId(), CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
+
+		// 최종 스냅샷이 반영돼야 remaining_stock 이 0이 된다
+		couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 10_000);
+		int firstUpdatedCount = couponEventRepository.markSoldOut(
+				event.getId(), CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
+		int secondUpdatedCount = couponEventRepository.markSoldOut(
+				event.getId(), CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
+
+		assertThat(beforeExhausted).isZero();
+		assertThat(firstUpdatedCount).isOne();
+		assertThat(secondUpdatedCount).isZero();
+		assertThat(findStatus(event.getId())).isEqualTo(CouponEventStatus.SOLD_OUT);
+	}
+
+	@Test
+	@DisplayName("마감 시각이 지난 회차만 마감하고 두 번 호출해도 한 번만 전환한다")
+	void closesOnlyEventsPastCloseAt() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent due = persistEvent(
+				coupon, 32, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent issuing = persistEvent(
+				coupon, 33, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int firstUpdatedCount = couponEventRepository.markClosed(
+				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+		int secondUpdatedCount = couponEventRepository.markClosed(
+				due.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+		int issuingUpdatedCount = couponEventRepository.markClosed(
+				issuing.getId(), CLOSE_TARGET_STATUSES, CouponEventStatus.CLOSED);
+
+		assertThat(firstUpdatedCount).isOne();
+		assertThat(secondUpdatedCount).isZero();
+		assertThat(issuingUpdatedCount).isZero();
+		assertThat(findStatus(due.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(issuing.getId())).isEqualTo(CouponEventStatus.OPEN);
+	}
+
+	@Test
+	@DisplayName("마감 대상 조회는 마감 시각이 지난 미마감 회차만 반환한다")
+	void findsOnlyDueAndNotClosedEventsAsCloseTargets() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		// 오픈 스케줄러가 멈춰 한 번도 열리지 못한 회차도 마감돼야 한다
+		CouponEvent neverOpened = persistEvent(
+				coupon, 34, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		CouponEvent dueOpen = persistEvent(
+				coupon, 35, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent dueSoldOut = persistEvent(
+				coupon, 36, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.SOLD_OUT, databaseNow);
+		CouponEvent alreadyClosed = persistEvent(
+				coupon, 37, databaseNow.minusMinutes(30), databaseNow.minusMinutes(10),
+				CouponEventStatus.CLOSED, databaseNow);
+		CouponEvent issuing = persistEvent(
+				coupon, 38, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+
+		List<Long> eventIds = couponEventRepository.findCloseTargetEventIds(
+				CLOSE_TARGET_STATUSES, PageRequest.of(0, 100));
+
+		assertThat(eventIds).contains(
+				neverOpened.getId(), dueOpen.getId(), dueSoldOut.getId());
+		assertThat(eventIds).doesNotContain(alreadyClosed.getId(), issuing.getId());
 	}
 
 	private LocalDateTime databaseNow() {

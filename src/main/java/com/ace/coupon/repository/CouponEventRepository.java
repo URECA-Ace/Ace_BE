@@ -94,4 +94,50 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			@Param("eventId") Long eventId,
 			@Param("totalStock") Integer totalStock,
 			@Param("confirmedQuantity") Integer confirmedQuantity);
+
+	// 마감 대상 회차(마감 시각이 지났고 아직 CLOSED 가 아닌 회차)
+	@Query("""
+			SELECT event.id
+			FROM CouponEvent event
+			WHERE event.status IN :statuses
+				AND event.closeAt <= CURRENT_TIMESTAMP
+			ORDER BY event.id
+			""")
+	List<Long> findCloseTargetEventIds(
+			@Param("statuses") List<CouponEventStatus> statuses,
+			Pageable pageable);
+
+	// 재고가 소진되고 파이프라인이 빈 회차를 SOLD_OUT 으로 전환
+	// remainingStock = 0 조건은 최종 스냅샷이 실제로 반영됐는지를 DB 쪽에서 다시 확인
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.status = :soldOutStatus,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.status = :openStatus
+				AND event.remainingStock = 0
+			""")
+	int markSoldOut(
+			@Param("eventId") Long eventId,
+			@Param("openStatus") CouponEventStatus openStatus,
+			@Param("soldOutStatus") CouponEventStatus soldOutStatus);
+
+	// 마감 시각이 지난 회차를 CLOSED 로 전환
+	// 이 상태값이 검증팀의 Drain 조건이라, 최종 스냅샷을 반영한 뒤에만 호출해야 한다
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.status = :closedStatus,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.status IN :statuses
+				AND event.closeAt <= CURRENT_TIMESTAMP
+			""")
+	int markClosed(
+			@Param("eventId") Long eventId,
+			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("closedStatus") CouponEventStatus closedStatus);
 }

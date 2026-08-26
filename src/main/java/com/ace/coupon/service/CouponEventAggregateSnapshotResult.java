@@ -21,7 +21,7 @@ public enum CouponEventAggregateSnapshotResult {
 		return this == APPLIED;
 	}
 
-	// 값을 신뢰할 수 없어 스킵된 경우ddd
+	// 값을 신뢰할 수 없어 스킵된 경우
 	public boolean isAnomaly() {
 		return this == NO_REDIS_STATE || this == UNREADABLE;
 	}
