@@ -2,6 +2,7 @@ package com.ace.consistency.recovery.controller;
 
 import java.util.List;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 /** 운영자가 FAIL 상태인 정합성 검증 결과를 보고 복구를 실행시키는 내부 API. */
 @RestController
 @RequestMapping("/internal/consistency/results")
+@ConditionalOnProperty(prefix = "consistency.recovery.admin", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class ConsistencyRecoveryController {
 

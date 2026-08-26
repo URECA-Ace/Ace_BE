@@ -18,6 +18,7 @@ import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.policy.ConsistencyRecoveryPolicy;
 import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 import com.ace.consistency.repository.VerificationResultRepository;
@@ -82,6 +83,11 @@ public class ConsistencyRecoveryDispatcher {
 
 		RecoveryResult saved = recoveryResultRepository.save(
 				RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
+
+		if (outcome.getStatus() == RecoveryResultStatus.FAIL) {
+			target.markRecoveryFailed();
+			return saved;
+		}
 
 		reverify(target, outcome.getRevalidationScope());
 

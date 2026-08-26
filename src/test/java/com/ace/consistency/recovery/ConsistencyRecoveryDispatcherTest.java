@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -97,7 +100,7 @@ class ConsistencyRecoveryDispatcherTest {
 	}
 
 	@Test
-	void 복구_후_재검증에서도_여전히_위반이면_RECOVERY_FAILED로_갱신한다() {
+	void 복구_자체가_실패하면_재검증_없이_바로_RECOVERY_FAILED로_갱신한다() {
 		stubSaveReturnsInput();
 		VerificationResultEntity target = failResult();
 		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
@@ -105,14 +108,32 @@ class ConsistencyRecoveryDispatcherTest {
 		Scope revalidationScope = Scope.ofEvent(1L);
 		given(policy.recover(target, RecoveryAction.DEFAULT, 1L))
 				.willReturn(RecoveryOutcome.failure(revalidationScope, Map.of(), "복구 실패"));
-		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
-				.willReturn(List.of(VerificationResult.fail(
-						CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope,
-						1, Map.of(), LocalDateTime.now(), 10L)));
 
 		dispatcher.recover(1L, RecoveryAction.DEFAULT, null);
 
 		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
+		verify(verificationRunner, never()).run(any(), any(), any());
+	}
+
+	@Test
+	void 복구_자체가_실패했다면_재검증이_PASS를_반환하더라도_RECOVERED로_처리되지_않는다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity target = failResult();
+		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
+
+		Scope revalidationScope = Scope.ofEvent(1L);
+		given(policy.recover(target, RecoveryAction.DEFAULT, 1L))
+				.willReturn(RecoveryOutcome.failure(revalidationScope, Map.of(), "복구 실패"));
+		// 재검증이 호출된다면 PASS를 반환하도록 스텁해두지만, FAIL outcome에서는 애초에 호출되지 않아야 한다.
+		lenient().when(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
+				.thenReturn(List.of(VerificationResult.pass(
+						CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope, LocalDateTime.now(), 10L)));
+
+		RecoveryResult result = dispatcher.recover(1L, RecoveryAction.DEFAULT, null);
+
+		assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
+		verify(verificationRunner, never()).run(any(), any(), any());
 	}
 
 	@Test

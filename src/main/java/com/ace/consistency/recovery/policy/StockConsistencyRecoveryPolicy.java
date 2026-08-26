@@ -8,6 +8,8 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.entity.VerificationResultEntity;
@@ -74,6 +76,9 @@ public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy
 			};
 		} catch (Exception ex) {
 			log.error("재고 정합성 복구 중 오류가 발생했습니다. eventId={}, action={}", eventId, action, ex);
+			if (TransactionSynchronizationManager.isActualTransactionActive()) {
+				TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+			}
 			return RecoveryOutcome.failure(Scope.ofEvent(eventId), Map.of(),
 					"재고 복구 중 오류가 발생했습니다: " + ex.getMessage());
 		}
