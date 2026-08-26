@@ -122,6 +122,14 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	@DisplayName("캠페인 회차 UNIQUE 충돌은 409 설정 충돌로 구분한다")
+	void duplicateCouponEventRound() throws Exception {
+		mockMvc.perform(get("/test/duplicate-coupon-event-round"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("EVENT_CONFIGURATION_CONFLICT"));
+	}
+
+	@Test
 	@DisplayName("@Valid 검증 실패는 400 INVALID_REQUEST 로 응답한다")
 	void validationFailure() throws Exception {
 		mockMvc.perform(post("/test/validate")
@@ -287,6 +295,12 @@ class GlobalExceptionHandlerTest {
 		void duplicateIssueSequence() {
 			throw new DataIntegrityViolationException(
 					"Duplicate entry for key 'uk_coupon_issue_event_sequence'");
+		}
+
+		@GetMapping("/test/duplicate-coupon-event-round")
+		void duplicateCouponEventRound() {
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_event_coupon_round'");
 		}
 
 		@GetMapping("/test/response-status")

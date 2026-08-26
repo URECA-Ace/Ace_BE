@@ -153,7 +153,7 @@ class RedisCouponIssueIntegrationTest {
 		CouponEventRepository repository = mock(CouponEventRepository.class);
 		CouponIssueRedisProperties redisProperties =
 				new CouponIssueRedisProperties(Duration.ofMinutes(10), ZoneId.of("Asia/Seoul"));
-		given(persistenceService.create(any(), any(), any(), any(), any(), any(), any()))
+		given(persistenceService.createOrReuse(any(), any(), any(), any(), any(), any(), any()))
 				.willReturn(event);
 		CampaignAdminService campaignAdminService =
 				new CampaignAdminService(
@@ -164,9 +164,8 @@ class RedisCouponIssueIntegrationTest {
 						redisProperties);
 		CouponEventCreationService creationService = new CouponEventCreationService(
 				persistenceService,
-				repository,
 				campaignAdminService,
-				redisProperties);
+				java.time.Clock.fixed(now, ZoneId.of("Asia/Seoul")));
 
 		CouponEventCreateResponse created = creationService.create(
 				1L,
