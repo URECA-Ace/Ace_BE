@@ -28,8 +28,8 @@ public class CouponEventQueryController {
 
 	@GetMapping("/recent")
 	public ResponseEntity<ApiResponse<List<CouponEventSummaryResponse>>> findRecentEvents(
-			@RequestParam(required = false) CouponEventStatus status,
-			@RequestParam(defaultValue = "6")
+			@RequestParam(name = "status", required = false) CouponEventStatus status,
+			@RequestParam(name = "size", defaultValue = "6")
 			@Min(value = 1, message = "size는 1 이상이어야 합니다.")
 			@Max(value = 50, message = "size는 50 이하여야 합니다.")
 			int size) {
