@@ -1,7 +1,7 @@
 package com.ace;
 
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
-import com.ace.consistency.check.DuplicateConsistencyCheck;
+import com.ace.consistency.check.StateMachineConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
@@ -51,7 +51,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	private StockConsistencyCheck stockConsistencyCheck;
 
 	@Autowired
-	private DuplicateConsistencyCheck duplicateConsistencyCheck;
+	private StateMachineConsistencyCheck  stateMachineConsistencyCheck;
 
 	@Autowired
 	private RestartableFlakyConsistencyCheck flakyConsistencyCheck;
@@ -101,15 +101,15 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	}
 
 	/**
-	 * [검증 목적] 실제 StockConsistencyCheck/DuplicateConsistencyCheck 두 개를 ALL 스코프로 넣고
+	 * [검증 목적] 실제 StockConsistencyCheck/stateMachineConsistencyCheck 두 개를 ALL 스코프로 넣고
 	 * runAsync()를 호출했을 때, Job이 정상적으로 두 Step을 모두 순차 실행하고
 	 * 각 Step 결과가 verification_result 테이블에 저장되는지 확인한다.
 	 * (심어둔 이벤트에는 coupon_issue가 없으므로 두 Check 모두 위반이 없는 상태다)
 	 */
 	@Test
-	void 두_Check_모두_정상적으로_실행되고_결과가_저장된다() {
+	void Check_정상적으로_실행되고_결과가_저장된다() {
 		maxIdBefore = maxVerificationResultId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
@@ -117,7 +117,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		assertEquals(BatchStatus.COMPLETED, finished.getStatus());
 		assertEquals(2, finished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StockConsistencyCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(2, rows.size());
@@ -133,14 +133,14 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 앞_Step이_예외로_실패하면_뒤_Step은_실행되지_않는다() {
 		maxIdBefore = maxVerificationResultId();
 		ConsistencyCheck throwingCheck = new ThrowingConsistencyCheck("FakeThrowingCheck");
-		List<ConsistencyCheck> checks = List.of(throwingCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(throwingCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
 
 		assertEquals(BatchStatus.FAILED, finished.getStatus());
 		assertEquals(1, finished.getStepExecutions().size(),
-				"뒤 Step(DuplicateConsistencyCheckStep)은 아예 시작되지 않아야 합니다.");
+				"뒤 Step(StateMachineConsistencyCheckStep)은 아예 시작되지 않아야 합니다.");
 		assertEquals(BatchStatus.FAILED, stepOf(finished, "FakeThrowingCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
@@ -157,7 +157,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 앞_Step의_정합성_실패는_뒤_Step_실행을_막지_않는다() {
 		maxIdBefore = maxVerificationResultId();
 		ConsistencyCheck failingCheck = new FailingConsistencyCheck("FakeFailingCheck");
-		List<ConsistencyCheck> checks = List.of(failingCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(failingCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
@@ -166,19 +166,19 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 				"정합성 FAIL은 예외가 아니므로 Job 전체는 COMPLETED여야 합니다.");
 		assertEquals(2, finished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "FakeFailingCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(2, rows.size());
 		Map<String, Object> failingResult = rows.stream()
 				.filter(r -> "FakeFailingCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
-		Map<String, Object> duplicateResult = rows.stream()
-				.filter(r -> "DuplicateConsistencyCheck".equals(r.get("check_name")))
+		Map<String, Object> stateMachineResult = rows.stream()
+				.filter(r -> "StateMachineConsistencyCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
 
 		assertEquals("FAIL", failingResult.get("status"));
-		assertEquals("PASS", duplicateResult.get("status"));
+		assertEquals("PASS", stateMachineResult.get("status"));
 	}
 
 	/**
@@ -190,14 +190,14 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 실패한_Job을_재시작하면_이어서_실행되어_완료된다() {
 		maxIdBefore = maxVerificationResultId();
 		flakyConsistencyCheck.throwOnNextCall();
-		List<ConsistencyCheck> checks = List.of(flakyConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(flakyConsistencyCheck, stateMachineConsistencyCheck);
 
 		JobExecution firstExecution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution firstFinished = awaitCompletion(firstExecution);
 
 		assertEquals(BatchStatus.FAILED, firstFinished.getStatus());
 		assertEquals(1, firstFinished.getStepExecutions().size(),
-				"뒤 Step(DuplicateConsistencyCheckStep)은 아직 실행되지 않아야 합니다.");
+				"뒤 Step(StateMachineConsistencyCheckStep)은 아직 실행되지 않아야 합니다.");
 
 		JobExecution restarted = runner.restartRunAsync(firstFinished.getId());
 		JobExecution restartedFinished = awaitCompletion(restarted);
@@ -208,7 +208,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		assertEquals(BatchStatus.COMPLETED, restartedFinished.getStatus());
 		assertEquals(2, restartedFinished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "RestartableFlakyConsistencyCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(3, rows.size(), "1차 실행의 ERROR 1건 + 재시작 후 PASS 2건이 저장돼야 합니다: " + rows);
