@@ -28,7 +28,7 @@ public class CouponEventCreationPersistenceService {
 	private final CampaignRedisInitializationRepository initializationRepository;
 
 	@Transactional
-	public CouponEvent create(
+	public CouponEvent createOrReuse(
 			Long couponId,
 			Integer round,
 			Integer totalStock,
@@ -36,13 +36,17 @@ public class CouponEventCreationPersistenceService {
 			LocalDateTime closeAt,
 			CouponEventStatus status,
 			LocalDateTime now) {
-		Coupon coupon = couponRepository.findById(couponId)
+		Coupon coupon = couponRepository.findByIdForUpdate(couponId)
 				.orElseThrow(() -> new CouponException(ErrorCode.COUPON_NOT_FOUND));
-		return save(coupon, round, totalStock, openAt, closeAt, status, now);
+		return couponEventRepository.findByCoupon_IdAndRound(couponId, round)
+				.map(event -> reuseWhenSameConfiguration(
+						event, totalStock, openAt, closeAt))
+				.orElseGet(() -> save(
+						coupon, round, totalStock, openAt, closeAt, status, now));
 	}
 
 	@Transactional
-	public CouponEvent createNextRound(
+	public CouponEvent createNextRoundOrReuse(
 			Long couponId,
 			Integer totalStock,
 			LocalDateTime openAt,
@@ -51,8 +55,28 @@ public class CouponEventCreationPersistenceService {
 			LocalDateTime now) {
 		Coupon coupon = couponRepository.findByIdForUpdate(couponId)
 				.orElseThrow(() -> new CouponException(ErrorCode.COUPON_NOT_FOUND));
+		var existing = couponEventRepository
+				.findFirstByCoupon_IdAndTotalStockAndOpenAtAndCloseAtAndPerUserLimitOrderByIdAsc(
+						couponId, totalStock, openAt, closeAt, PER_USER_LIMIT);
+		if (existing.isPresent()) {
+			return existing.get();
+		}
 		Integer nextRound = couponEventRepository.findMaxRoundByCouponId(couponId) + 1;
 		return save(coupon, nextRound, totalStock, openAt, closeAt, status, now);
+	}
+
+	private CouponEvent reuseWhenSameConfiguration(
+			CouponEvent existing,
+			Integer totalStock,
+			LocalDateTime openAt,
+			LocalDateTime closeAt) {
+		if (!existing.getTotalStock().equals(totalStock)
+				|| existing.getPerUserLimit() != PER_USER_LIMIT
+				|| !existing.getOpenAt().equals(openAt)
+				|| !existing.getCloseAt().equals(closeAt)) {
+			throw new CouponException(ErrorCode.EVENT_CONFIGURATION_CONFLICT);
+		}
+		return existing;
 	}
 
 	private CouponEvent save(

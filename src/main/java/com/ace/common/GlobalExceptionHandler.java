@@ -38,6 +38,7 @@ public class GlobalExceptionHandler {
 	private static final String EVENT_SEQUENCE_CONSTRAINT = "uk_coupon_issue_event_sequence";
 	private static final String REQUEST_ID_CONSTRAINT = "uk_coupon_issue_request_id";
 	private static final String MESSAGE_ID_CONSTRAINT = "uk_coupon_issue_message_id";
+	private static final String COUPON_EVENT_ROUND_CONSTRAINT = "uk_coupon_event_coupon_round";
 
 	@ExceptionHandler(CouponException.class)
 	public ResponseEntity<ApiResponse<Void>> handleCoupon(
@@ -135,6 +136,12 @@ public class GlobalExceptionHandler {
 			String incidentId = logServerError(ErrorCode.ISSUE_PERSIST_FAILED.name(), ex, request);
 			return build(ErrorCode.ISSUE_PERSIST_FAILED, null, incidentId);
 		}
+		if (COUPON_EVENT_ROUND_CONSTRAINT.equals(constraintName)) {
+			log.warn("[{}] duplicate coupon event round blocked: method={}, path={}",
+					ErrorCode.EVENT_CONFIGURATION_CONFLICT,
+					request.getMethod(), request.getRequestURI());
+			return build(ErrorCode.EVENT_CONFIGURATION_CONFLICT, null);
+		}
 
 		String incidentId = logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
 		return build(ErrorCode.INTERNAL_ERROR, null, incidentId);
@@ -209,7 +216,8 @@ public class GlobalExceptionHandler {
 				String normalized = message.toLowerCase(Locale.ROOT);
 				for (String knownConstraint : new String[]{
 						ISSUE_USER_CONSTRAINT, EVENT_SEQUENCE_CONSTRAINT,
-						REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT}) {
+						REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT,
+						COUPON_EVENT_ROUND_CONSTRAINT}) {
 					if (normalized.contains(knownConstraint)) {
 						return knownConstraint;
 					}

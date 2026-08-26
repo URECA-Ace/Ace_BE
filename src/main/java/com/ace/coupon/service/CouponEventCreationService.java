@@ -1,13 +1,12 @@
 package com.ace.coupon.service;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.Optional;
 
 import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import com.ace.common.ErrorCode;
@@ -16,8 +15,6 @@ import com.ace.coupon.dto.request.CouponEventCreateRequest;
 import com.ace.coupon.dto.response.CouponEventCreateResponse;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
-import com.ace.coupon.redis.CouponIssueRedisProperties;
-import com.ace.coupon.repository.CouponEventRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -26,19 +23,18 @@ import lombok.RequiredArgsConstructor;
 public class CouponEventCreationService {
 
 	private final CouponEventCreationPersistenceService persistenceService;
-	private final CouponEventRepository couponEventRepository;
 	private final CampaignAdminService campaignAdminService;
-	private final CouponIssueRedisProperties properties;
+	private final Clock clock;
 
 	public CouponEventCreateResponse create(Long couponId, CouponEventCreateRequest request) {
-		Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-		NormalizedConfiguration configuration = normalize(request, properties.zoneId(), now);
+		Instant now = clock.instant().truncatedTo(ChronoUnit.MILLIS);
+		NormalizedConfiguration configuration = normalize(request, clock.getZone(), now);
 		CouponEvent event = request.round() == null
 				? persistNextRound(couponId, request, configuration, now)
 				: persistOrReuse(couponId, request, configuration, now);
 
 		initializeRedis(event);
-		return CouponEventCreateResponse.from(event, couponId, properties.zoneId());
+		return CouponEventCreateResponse.from(event, couponId, clock.getZone());
 	}
 
 	private CouponEvent persistNextRound(
@@ -46,13 +42,13 @@ public class CouponEventCreationService {
 			CouponEventCreateRequest request,
 			NormalizedConfiguration configuration,
 			Instant now) {
-		return persistenceService.createNextRound(
+		return persistenceService.createNextRoundOrReuse(
 				couponId,
 				request.totalStock(),
 				configuration.openAt(),
 				configuration.closeAt(),
 				configuration.status(),
-				LocalDateTime.ofInstant(now, properties.zoneId()));
+				LocalDateTime.ofInstant(now, clock.getZone()));
 	}
 
 	private CouponEvent persistOrReuse(
@@ -60,38 +56,14 @@ public class CouponEventCreationService {
 			CouponEventCreateRequest request,
 			NormalizedConfiguration configuration,
 			Instant now) {
-		Optional<CouponEvent> existing = couponEventRepository
-				.findByCoupon_IdAndRound(couponId, request.round());
-		if (existing.isPresent()) {
-			return reuseWhenSameConfiguration(existing.get(), request.totalStock(), configuration);
-		}
-
-		try {
-			return persistenceService.create(
+		return persistenceService.createOrReuse(
 					couponId,
 					request.round(),
 					request.totalStock(),
 					configuration.openAt(),
 					configuration.closeAt(),
 					configuration.status(),
-					LocalDateTime.ofInstant(now, properties.zoneId()));
-		} catch (DataIntegrityViolationException exception) {
-			CouponEvent concurrentlyCreated = couponEventRepository
-					.findByCoupon_IdAndRound(couponId, request.round())
-					.orElseThrow(() -> exception);
-			return reuseWhenSameConfiguration(
-					concurrentlyCreated, request.totalStock(), configuration);
-		}
-	}
-
-	private CouponEvent reuseWhenSameConfiguration(
-			CouponEvent existing,
-			Integer totalStock,
-			NormalizedConfiguration configuration) {
-		if (!sameConfiguration(existing, totalStock, configuration)) {
-			throw new CouponException(ErrorCode.EVENT_CONFIGURATION_CONFLICT);
-		}
-		return existing;
+					LocalDateTime.ofInstant(now, clock.getZone()));
 	}
 
 	private NormalizedConfiguration normalize(
@@ -114,16 +86,6 @@ public class CouponEventCreationService {
 				LocalDateTime.ofInstant(openAt, zoneId),
 				LocalDateTime.ofInstant(closeAt, zoneId),
 				status);
-	}
-
-	private boolean sameConfiguration(
-			CouponEvent existing,
-			Integer totalStock,
-			NormalizedConfiguration configuration) {
-		return existing.getTotalStock().equals(totalStock)
-				&& existing.getPerUserLimit() == 1
-				&& existing.getOpenAt().equals(configuration.openAt())
-				&& existing.getCloseAt().equals(configuration.closeAt());
 	}
 
 	private void initializeRedis(CouponEvent event) {
