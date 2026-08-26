@@ -19,8 +19,41 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	Optional<CouponEvent> findByCoupon_IdAndRound(Long couponId, Integer round);
 
+	List<CouponEvent> findAllByCoupon_Id(Long couponId);
+
+	long countByCoupon_Id(Long couponId);
+
+	Optional<CouponEvent> findFirstByCoupon_IdAndTotalStockAndOpenAtAndCloseAtAndPerUserLimitOrderByIdAsc(
+			Long couponId,
+			Integer totalStock,
+			LocalDateTime openAt,
+			LocalDateTime closeAt,
+			Integer perUserLimit);
+
+	@Query("select coalesce(max(event.round), 0) from CouponEvent event where event.coupon.id = :couponId")
+	Integer findMaxRoundByCouponId(@Param("couponId") Long couponId);
+
 	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
 	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
+
+	@Query("""
+			select event
+			from CouponEvent event
+			join fetch event.coupon
+			order by event.createdAt desc, event.id desc
+			""")
+	List<CouponEvent> findRecentWithCoupon(Pageable pageable);
+
+	@Query("""
+			select event
+			from CouponEvent event
+			join fetch event.coupon
+			where event.status = :status
+			order by event.createdAt desc, event.id desc
+			""")
+	List<CouponEvent> findRecentWithCouponByStatus(
+			@Param("status") CouponEventStatus status,
+			Pageable pageable);
 
 	List<CouponEvent> findAllByStatus(CouponEventStatus status);
 

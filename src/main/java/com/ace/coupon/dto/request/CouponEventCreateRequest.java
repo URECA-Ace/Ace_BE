@@ -6,7 +6,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
 public record CouponEventCreateRequest(
-		@NotNull(message = "round는 필수입니다.")
 		@Positive(message = "round는 0보다 커야 합니다.")
 		Integer round,
 

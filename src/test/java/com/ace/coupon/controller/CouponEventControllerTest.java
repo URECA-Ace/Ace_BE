@@ -64,6 +64,29 @@ class CouponEventControllerTest {
 	}
 
 	@Test
+	@DisplayName("회차를 생략하면 서버 자동 회차 배정으로 캠페인을 생성한다")
+	void createsCouponEventWithAutoRound() throws Exception {
+		OffsetDateTime openAt = OffsetDateTime.parse("2099-08-19T10:00:00+09:00");
+		OffsetDateTime closeAt = OffsetDateTime.parse("2099-08-19T23:59:59+09:00");
+		given(couponEventCreationService.create(any(), any())).willReturn(
+				new CouponEventCreateResponse(
+						25L, 1L, 25, 10_000, 10_000, 1,
+						CouponEventStatus.SCHEDULED, openAt, closeAt));
+
+		mockMvc.perform(post("/api/v1/coupons/{couponId}/events", 1L)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{
+						  "totalStock": 10000,
+						  "openAt": "2099-08-19T10:00:00+09:00",
+						  "closeAt": "2099-08-19T23:59:59+09:00"
+						}
+						"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.data.round").value(25));
+	}
+
+	@Test
 	@DisplayName("캠페인 재고가 0이면 400을 반환한다")
 	void rejectsZeroStock() throws Exception {
 		mockMvc.perform(post("/api/v1/coupons/{couponId}/events", 1L)
