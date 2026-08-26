@@ -58,6 +58,11 @@ public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy
 	}
 
 	@Override
+	public List<RecoveryAction> availableActions() {
+		return List.of(RecoveryAction.STOCK_RECONCILE_COUNTER, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
+	}
+
+	@Override
 	@Transactional
 	public RecoveryOutcome recover(VerificationResultEntity target, RecoveryAction action, Long eventId) {
 		try {

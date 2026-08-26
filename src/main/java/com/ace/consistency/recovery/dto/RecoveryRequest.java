@@ -1,4 +1,4 @@
-package com.ace.consistency.dto;
+package com.ace.consistency.recovery.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

@@ -1,6 +1,9 @@
-package com.ace.consistency.controller;
+package com.ace.consistency.recovery.controller;
+
+import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -10,8 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.ace.common.ApiResponse;
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
-import com.ace.consistency.dto.RecoveryRequest;
-import com.ace.consistency.dto.RecoveryResultResponse;
+import com.ace.consistency.recovery.dto.RecoveryActionResponse;
+import com.ace.consistency.recovery.dto.RecoveryRequest;
+import com.ace.consistency.recovery.dto.RecoveryResultResponse;
 import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
 import com.ace.consistency.recovery.RecoveryResult;
 import com.ace.consistency.recovery.enums.RecoveryAction;
@@ -25,6 +29,14 @@ import lombok.RequiredArgsConstructor;
 public class ConsistencyRecoveryController {
 
 	private final ConsistencyRecoveryDispatcher dispatcher;
+
+	@GetMapping("/{resultId}/actions")
+	public ResponseEntity<ApiResponse<List<RecoveryActionResponse>>> availableActions(@PathVariable Long resultId) {
+		List<RecoveryActionResponse> actions = dispatcher.availableActions(resultId).stream()
+				.map(RecoveryActionResponse::from)
+				.toList();
+		return ResponseEntity.ok(ApiResponse.success(actions));
+	}
 
 	@PostMapping("/{resultId}/recover")
 	public ResponseEntity<ApiResponse<RecoveryResultResponse>> recover(

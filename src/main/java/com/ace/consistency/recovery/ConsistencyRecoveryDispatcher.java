@@ -53,6 +53,14 @@ public class ConsistencyRecoveryDispatcher {
 				.collect(Collectors.toMap(ConsistencyCheck::getName, Function.identity()));
 	}
 
+	/** 관리자 화면에서 이 검증 결과에 대해 선택 가능한 복구 액션 목록을 조회한다. */
+	public List<RecoveryAction> availableActions(Long verificationResultId) {
+		VerificationResultEntity target = verificationResultRepository.findById(verificationResultId)
+				.orElseThrow(() -> new ConsistencyCheckException(ErrorCode.VERIFICATION_RESULT_NOT_FOUND));
+
+		return findPolicy(target.getCheckName()).availableActions();
+	}
+
 	/**
 	 * @param eventId ALL 스코프 검증 결과를 복구할 때, 그 안의 여러 위반 이벤트 중 어느 것을 복구할지
 	 *                호출부(관리자 UI/배치)가 명시적으로 지정한다. EVENT 스코프 결과는 target 자체가
@@ -67,10 +75,7 @@ public class ConsistencyRecoveryDispatcher {
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_NOT_APPLICABLE);
 		}
 
-		ConsistencyRecoveryPolicy policy = policiesByCheckName.get(target.getCheckName());
-		if (policy == null) {
-			throw new ConsistencyCheckException(ErrorCode.RECOVERY_POLICY_NOT_FOUND);
-		}
+		ConsistencyRecoveryPolicy policy = findPolicy(target.getCheckName());
 
 		Long resolvedEventId = resolveEventId(target, eventId);
 		RecoveryOutcome outcome = policy.recover(target, action, resolvedEventId);
@@ -89,6 +94,14 @@ public class ConsistencyRecoveryDispatcher {
 	 * EVENT 스코프는 target이 이미 이벤트를 특정하므로 호출부가 넘긴 eventId는 쓰지 않고,
 	 * ALL 스코프는 target만으로 대상을 알 수 없으므로 호출부가 반드시 eventId를 지정해야 한다.
 	 */
+	private ConsistencyRecoveryPolicy findPolicy(String checkName) {
+		ConsistencyRecoveryPolicy policy = policiesByCheckName.get(checkName);
+		if (policy == null) {
+			throw new ConsistencyCheckException(ErrorCode.RECOVERY_POLICY_NOT_FOUND);
+		}
+		return policy;
+	}
+
 	private Long resolveEventId(VerificationResultEntity target, Long eventId) {
 		if (target.getScopeType() == Scope.ScopeType.EVENT) {
 			return target.getEventId();

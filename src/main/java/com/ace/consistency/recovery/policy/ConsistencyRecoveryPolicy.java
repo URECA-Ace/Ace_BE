@@ -1,5 +1,7 @@
 package com.ace.consistency.recovery.policy;
 
+import java.util.List;
+
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
@@ -21,6 +23,9 @@ public interface ConsistencyRecoveryPolicy {
 
 	/** 이 정책이 담당하는 ConsistencyCheck의 이름 (ConsistencyCheck.getName()과 동일한 값). */
 	String checkName();
+
+	/** 이 정책이 처리할 수 있는 RecoveryAction 목록. 관리자 화면에서 선택지로 노출된다. */
+	List<RecoveryAction> availableActions();
 
 	RecoveryOutcome recover(VerificationResultEntity target, RecoveryAction action, Long eventId);
 }
