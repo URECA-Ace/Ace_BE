@@ -1,5 +1,6 @@
 package com.ace.coupon.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import com.ace.coupon.dto.response.CouponEventSummaryResponse;
 import com.ace.coupon.enums.CouponEventStatus;
@@ -72,5 +74,17 @@ class CouponEventQueryControllerTest {
 				.andExpect(status().isOk());
 
 		verify(couponEventQueryService).findRecentEvents(null, 6);
+	}
+
+	@Test
+	@DisplayName("컴파일러 파라미터 메타데이터 없이도 최근 회차 요청 파라미터 이름을 해석한다")
+	void declaresRecentEventRequestParameterNames() throws Exception {
+		var method = CouponEventQueryController.class.getDeclaredMethod(
+				"findRecentEvents", CouponEventStatus.class, int.class);
+
+		assertThat(method.getParameters()[0].getAnnotation(RequestParam.class).name())
+				.isEqualTo("status");
+		assertThat(method.getParameters()[1].getAnnotation(RequestParam.class).name())
+				.isEqualTo("size");
 	}
 }
