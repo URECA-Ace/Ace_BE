@@ -1,6 +1,7 @@
 package com.ace.coupon.dto.response;
 
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 
 import com.ace.coupon.entity.Coupon;
 
@@ -10,15 +11,15 @@ public record CouponSummaryResponse(
 		String type,
 		Long value,
 		Integer validHours,
-		LocalDateTime createdAt) {
+		OffsetDateTime createdAt) {
 
-	public static CouponSummaryResponse from(Coupon coupon) {
+	public static CouponSummaryResponse from(Coupon coupon, ZoneId zoneId) {
 		return new CouponSummaryResponse(
 				coupon.getId(),
 				coupon.getCouponName(),
 				coupon.getType(),
 				coupon.getValue(),
 				coupon.getValidHours(),
-				coupon.getCreatedAt());
+				coupon.getCreatedAt().atZone(zoneId).toOffsetDateTime());
 	}
 }

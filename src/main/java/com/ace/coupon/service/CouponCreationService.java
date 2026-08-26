@@ -1,14 +1,14 @@
 package com.ace.coupon.service;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.coupon.dto.request.CouponCreateRequest;
-import com.ace.coupon.dto.response.CouponCreateResponse;
+import com.ace.coupon.dto.response.CouponSummaryResponse;
 import com.ace.coupon.entity.Coupon;
-import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -18,17 +18,17 @@ import lombok.RequiredArgsConstructor;
 public class CouponCreationService {
 
 	private final CouponRepository couponRepository;
-	private final CouponIssueRedisProperties properties;
+	private final Clock clock;
 
 	@Transactional
-	public CouponCreateResponse create(CouponCreateRequest request) {
+	public CouponSummaryResponse create(CouponCreateRequest request) {
 		Coupon coupon = Coupon.builder()
 				.couponName(request.couponName().trim())
-				.type(request.type().trim())
+				.type(request.type().name())
 				.value(request.value())
 				.validHours(request.validHours())
-				.createdAt(LocalDateTime.now(properties.zoneId()))
+				.createdAt(LocalDateTime.now(clock))
 				.build();
-		return CouponCreateResponse.from(couponRepository.save(coupon));
+		return CouponSummaryResponse.from(couponRepository.save(coupon), clock.getZone());
 	}
 }

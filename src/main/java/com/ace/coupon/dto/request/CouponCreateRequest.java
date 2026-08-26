@@ -1,5 +1,7 @@
 package com.ace.coupon.dto.request;
 
+import com.ace.coupon.enums.CouponType;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -11,9 +13,8 @@ public record CouponCreateRequest(
 		@Size(max = 100, message = "couponName은 100자 이하여야 합니다.")
 		String couponName,
 
-		@NotBlank(message = "type은 필수입니다.")
-		@Size(max = 20, message = "type은 20자 이하여야 합니다.")
-		String type,
+		@NotNull(message = "type은 필수입니다.")
+		CouponType type,
 
 		@NotNull(message = "value는 필수입니다.")
 		@PositiveOrZero(message = "value는 0 이상이어야 합니다.")

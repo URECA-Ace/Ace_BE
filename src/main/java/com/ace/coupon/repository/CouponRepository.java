@@ -16,7 +16,15 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
 
 	List<Coupon> findAllByOrderByCreatedAtDescIdDesc(Pageable pageable);
 
-	List<Coupon> findAllByCouponNameContainingIgnoreCaseOrderByCreatedAtDescIdDesc(String couponName);
+	@Query("""
+			select coupon
+			from Coupon coupon
+			where lower(coupon.couponName) like concat('%', lower(:keyword), '%') escape '\\'
+			order by coupon.createdAt desc, coupon.id desc
+			""")
+	List<Coupon> searchByCouponName(
+			@Param("keyword") String keyword,
+			Pageable pageable);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select coupon from Coupon coupon where coupon.id = :couponId")

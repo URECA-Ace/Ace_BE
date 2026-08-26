@@ -1,5 +1,6 @@
 package com.ace.coupon.service;
 
+import java.time.Clock;
 import java.util.List;
 
 import org.springframework.data.domain.PageRequest;
@@ -16,21 +17,38 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CouponQueryService {
 
-	private static final int RECENT_COUPON_LIMIT = 6;
+	private static final int DEFAULT_SIZE = 6;
+	private static final int MAX_SIZE = 50;
 
 	private final CouponRepository couponRepository;
+	private final Clock clock;
 
 	@Transactional(readOnly = true)
 	public List<CouponSummaryResponse> findCoupons(String keyword) {
+		return findCoupons(keyword, DEFAULT_SIZE);
+	}
+
+	@Transactional(readOnly = true)
+	public List<CouponSummaryResponse> findCoupons(String keyword, int size) {
 		String normalizedKeyword = keyword == null ? "" : keyword.trim();
+		PageRequest pageRequest = PageRequest.of(0, normalizeSize(size));
 		List<Coupon> coupons = normalizedKeyword.isEmpty()
-				? couponRepository.findAllByOrderByCreatedAtDescIdDesc(
-						PageRequest.of(0, RECENT_COUPON_LIMIT))
-				: couponRepository.findAllByCouponNameContainingIgnoreCaseOrderByCreatedAtDescIdDesc(
-						normalizedKeyword);
+				? couponRepository.findAllByOrderByCreatedAtDescIdDesc(pageRequest)
+				: couponRepository.searchByCouponName(escapeLike(normalizedKeyword), pageRequest);
 
 		return coupons.stream()
-				.map(CouponSummaryResponse::from)
+				.map(coupon -> CouponSummaryResponse.from(coupon, clock.getZone()))
 				.toList();
+	}
+
+	private int normalizeSize(int size) {
+		return Math.max(1, Math.min(size, MAX_SIZE));
+	}
+
+	private String escapeLike(String keyword) {
+		return keyword
+				.replace("\\", "\\\\")
+				.replace("%", "\\%")
+				.replace("_", "\\_");
 	}
 }
