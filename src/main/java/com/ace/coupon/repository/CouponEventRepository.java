@@ -4,11 +4,14 @@ import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
+
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,6 +38,10 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
 	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select event from CouponEvent event where event.id = :eventId")
+	Optional<CouponEvent> findByIdForUpdate(@Param("eventId") Long eventId);
 
 	@Query("""
 			select event

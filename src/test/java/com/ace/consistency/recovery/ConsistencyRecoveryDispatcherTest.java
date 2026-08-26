@@ -18,7 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.ace.common.ErrorCode;
-import com.ace.common.exception.CouponException;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
@@ -77,13 +77,13 @@ class ConsistencyRecoveryDispatcherTest {
 		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
 
 		Scope revalidationScope = Scope.ofEvent(1L);
-		given(policy.recover(target, RecoveryAction.DEFAULT))
+		given(policy.recover(target, RecoveryAction.DEFAULT, 1L))
 				.willReturn(RecoveryOutcome.success(revalidationScope, Map.of("issue_id", 4), "복구완료"));
 		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
 				.willReturn(List.of(VerificationResult.pass(
 						CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope, LocalDateTime.now(), 10L)));
 
-		RecoveryResult result = dispatcher.recover(1L, RecoveryAction.DEFAULT);
+		RecoveryResult result = dispatcher.recover(1L, RecoveryAction.DEFAULT, null);
 
 		assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(result.getVerificationResultId()).isEqualTo(1L);
@@ -99,14 +99,14 @@ class ConsistencyRecoveryDispatcherTest {
 		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
 
 		Scope revalidationScope = Scope.ofEvent(1L);
-		given(policy.recover(target, RecoveryAction.DEFAULT))
+		given(policy.recover(target, RecoveryAction.DEFAULT, 1L))
 				.willReturn(RecoveryOutcome.failure(revalidationScope, Map.of(), "복구 실패"));
 		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
 				.willReturn(List.of(VerificationResult.fail(
 						CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope,
 						1, Map.of(), LocalDateTime.now(), 10L)));
 
-		dispatcher.recover(1L, RecoveryAction.DEFAULT);
+		dispatcher.recover(1L, RecoveryAction.DEFAULT, null);
 
 		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
 	}
@@ -117,19 +117,68 @@ class ConsistencyRecoveryDispatcherTest {
 				CHECK_NAME, TriggerType.ON_DEMAND, Scope.ofEvent(1L), LocalDateTime.now(), 10L));
 		given(verificationResultRepository.findById(2L)).willReturn(Optional.of(passResult));
 
-		assertThatThrownBy(() -> dispatcher.recover(2L, RecoveryAction.DEFAULT))
-				.isInstanceOf(CouponException.class)
-				.extracting(ex -> ((CouponException) ex).getErrorCode())
+		assertThatThrownBy(() -> dispatcher.recover(2L, RecoveryAction.DEFAULT, null))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
 				.isEqualTo(ErrorCode.RECOVERY_NOT_APPLICABLE);
+	}
+
+	@Test
+	void ALL_스코프_target이어도_정책이_이벤트_단위로_좁히면_복구할_수_있다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity allScopeTarget = VerificationResultEntity.from(VerificationResult.fail(
+				CHECK_NAME, TriggerType.SCHEDULED, Scope.all(List.of(1L, 2L), LocalDateTime.now()),
+				2, Map.of(), LocalDateTime.now(), 10L));
+		given(verificationResultRepository.findById(4L)).willReturn(Optional.of(allScopeTarget));
+
+		Scope narrowedScope = Scope.ofEvent(1L);
+		given(policy.recover(allScopeTarget, RecoveryAction.DEFAULT, 1L))
+				.willReturn(RecoveryOutcome.success(narrowedScope, Map.of(), "이벤트 1건 복구완료"));
+		given(verificationRunner.run(List.of(check), narrowedScope, TriggerType.RECOVERY_REVALIDATION))
+				.willReturn(List.of(VerificationResult.pass(
+						CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, narrowedScope, LocalDateTime.now(), 10L)));
+
+		dispatcher.recover(4L, RecoveryAction.DEFAULT, 1L);
+
+		assertThat(allScopeTarget.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERED);
+	}
+
+	@Test
+	void ALL_스코프_target인데_eventId를_지정하지_않으면_예외를_던진다() {
+		VerificationResultEntity allScopeTarget = VerificationResultEntity.from(VerificationResult.fail(
+				CHECK_NAME, TriggerType.SCHEDULED, Scope.all(List.of(1L, 2L), LocalDateTime.now()),
+				2, Map.of(), LocalDateTime.now(), 10L));
+		given(verificationResultRepository.findById(4L)).willReturn(Optional.of(allScopeTarget));
+
+		assertThatThrownBy(() -> dispatcher.recover(4L, RecoveryAction.DEFAULT, null))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
+				.isEqualTo(ErrorCode.RECOVERY_EVENT_ID_REQUIRED);
+	}
+
+	@Test
+	void 정책이_revalidationScope를_ALL로_반환하면_재검증할_수_없다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity target = failResult();
+		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
+
+		Scope allScope = Scope.all(LocalDateTime.now());
+		given(policy.recover(target, RecoveryAction.DEFAULT, 1L))
+				.willReturn(RecoveryOutcome.success(allScope, Map.of(), "복구완료"));
+
+		assertThatThrownBy(() -> dispatcher.recover(1L, RecoveryAction.DEFAULT, null))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
+				.isEqualTo(ErrorCode.RECOVERY_NOT_SUPPORTED_FOR_ALL_SCOPE);
 	}
 
 	@Test
 	void 존재하지_않는_결과ID면_예외를_던진다() {
 		given(verificationResultRepository.findById(99L)).willReturn(Optional.empty());
 
-		assertThatThrownBy(() -> dispatcher.recover(99L, RecoveryAction.DEFAULT))
-				.isInstanceOf(CouponException.class)
-				.extracting(ex -> ((CouponException) ex).getErrorCode())
+		assertThatThrownBy(() -> dispatcher.recover(99L, RecoveryAction.DEFAULT, null))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
 				.isEqualTo(ErrorCode.VERIFICATION_RESULT_NOT_FOUND);
 	}
 
@@ -142,9 +191,9 @@ class ConsistencyRecoveryDispatcherTest {
 		VerificationResultEntity target = failResult();
 		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
 
-		assertThatThrownBy(() -> noPolicyDispatcher.recover(1L, RecoveryAction.DEFAULT))
-				.isInstanceOf(CouponException.class)
-				.extracting(ex -> ((CouponException) ex).getErrorCode())
+		assertThatThrownBy(() -> noPolicyDispatcher.recover(1L, RecoveryAction.DEFAULT, null))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
 				.isEqualTo(ErrorCode.RECOVERY_POLICY_NOT_FOUND);
 	}
 }

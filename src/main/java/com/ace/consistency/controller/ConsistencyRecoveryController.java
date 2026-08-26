@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.ace.common.ApiResponse;
 import com.ace.common.ErrorCode;
-import com.ace.common.exception.CouponException;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.dto.RecoveryRequest;
 import com.ace.consistency.dto.RecoveryResultResponse;
 import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
@@ -32,7 +32,7 @@ public class ConsistencyRecoveryController {
 			@RequestBody RecoveryRequest request) {
 
 		RecoveryAction action = parseAction(request.getAction());
-		RecoveryResult result = dispatcher.recover(resultId, action);
+		RecoveryResult result = dispatcher.recover(resultId, action, request.getEventId());
 
 		return ResponseEntity.ok(ApiResponse.success(RecoveryResultResponse.from(result)));
 	}
@@ -41,7 +41,7 @@ public class ConsistencyRecoveryController {
 		try {
 			return RecoveryAction.valueOf(action);
 		} catch (IllegalArgumentException | NullPointerException e) {
-			throw new CouponException(ErrorCode.INVALID_PARAMETER, "지원하지 않는 복구 액션입니다: " + action);
+			throw new ConsistencyCheckException(ErrorCode.INVALID_PARAMETER, "지원하지 않는 복구 액션입니다: " + action);
 		}
 	}
 }

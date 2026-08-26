@@ -1,6 +1,7 @@
 package com.ace.consistency.controller;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -37,7 +38,7 @@ class ConsistencyRecoveryControllerTest {
 						com.ace.consistency.common.Scope.ofEvent(1L),
 						Map.of("issue_id", 4), "복구완료"),
 				LocalDateTime.now());
-		given(dispatcher.recover(eq(1L), eq(RecoveryAction.DEFAULT))).willReturn(result);
+		given(dispatcher.recover(eq(1L), eq(RecoveryAction.DEFAULT), isNull())).willReturn(result);
 
 		mockMvc.perform(post("/internal/consistency/results/1/recover")
 						.contentType(MediaType.APPLICATION_JSON)

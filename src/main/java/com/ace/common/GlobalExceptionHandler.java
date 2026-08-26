@@ -22,6 +22,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.common.exception.CouponException;
 
 import jakarta.persistence.EntityNotFoundException;
@@ -51,6 +52,23 @@ public class GlobalExceptionHandler {
 			// 저장 실패처럼 이미 실패 기록을 남긴 경로는 같은 식별자를 그대로 쓴다.
 			// 여기서 새로 발급하면 응답의 incidentId 와 issue_failure_log 가 서로 다른 값이 된다
 			incidentId = logServerError(errorCode.name(), ex, request, ex.getIncidentId());
+		} else {
+			log.warn("[{}] request rejected: method={}, path={}",
+					errorCode, request.getMethod(), request.getRequestURI());
+		}
+
+		return build(errorCode, ex.getMessage(), incidentId);
+	}
+
+	@ExceptionHandler(ConsistencyCheckException.class)
+	public ResponseEntity<ApiResponse<Void>> handleConsistencyCheck(
+			ConsistencyCheckException ex,
+			HttpServletRequest request) {
+		ErrorCode errorCode = ex.getErrorCode();
+		String incidentId = null;
+
+		if (errorCode.getStatus().is5xxServerError()) {
+			incidentId = logServerError(errorCode.name(), ex, request);
 		} else {
 			log.warn("[{}] request rejected: method={}, path={}",
 					errorCode, request.getMethod(), request.getRequestURI());

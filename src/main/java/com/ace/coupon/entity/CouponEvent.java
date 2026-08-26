@@ -79,4 +79,24 @@ public class CouponEvent {
 
 	@Column(name = "updated_at", nullable = false)
 	private LocalDateTime updatedAt;
+
+	/**
+	 * coupon_issue(원본)를 기준으로 집계한 실제 활성 발급 건수에 맞춰 캐시된 재고 카운터를 재계산한다.
+	 * 정합성 복구(StockConsistencyRecoveryPolicy)에서만 사용하며, coupon_issue 자체는 건드리지 않는다.
+	 */
+	public void reconcileStock(int actualActiveCount, LocalDateTime reconciledAt) {
+		this.issuedQuantity = actualActiveCount;
+		this.remainingStock = this.totalStock - actualActiveCount;
+		this.updatedAt = reconciledAt;
+	}
+
+	/**
+	 * 재고 초과발급 회수 전용. 회수된 건수만큼 issued_quantity를 줄인다.
+	 * 초과발급 상황에서는 remaining_stock이 "남은 자리"를 의미하지 않으므로 건드리지 않는다
+	 * (remaining_stock을 포함한 전체 재계산은 초과분 회수가 끝난 뒤 {@link #reconcileStock}의 책임).
+	 */
+	public void releaseSlots(int releasedCount, LocalDateTime releasedAt) {
+		this.issuedQuantity -= releasedCount;
+		this.updatedAt = releasedAt;
+	}
 }
