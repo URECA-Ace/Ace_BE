@@ -77,6 +77,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @TestPropertySource(properties = {
+		// 백그라운드 스케쥴러가 회차 상태와 집계 컬럼을 바꾸면 검증 결과가 타이밍에 좌우되는 것을 방지
+		"coupon.campaign.aggregate-snapshot.enabled=false",
 		"coupon.issue.persistence.mode=SYNC",
 		"spring.jpa.open-in-view=false",
 		"spring.jpa.show-sql=false"
