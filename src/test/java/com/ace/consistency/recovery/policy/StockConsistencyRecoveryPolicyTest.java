@@ -1,4 +1,4 @@
-package com.ace.consistency.recovery;
+package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,6 +24,9 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.recovery.RecoveryOutcome;
+import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponEventStatus;

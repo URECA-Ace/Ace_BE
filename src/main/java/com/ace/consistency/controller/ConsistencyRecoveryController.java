@@ -13,8 +13,8 @@ import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.dto.RecoveryRequest;
 import com.ace.consistency.dto.RecoveryResultResponse;
 import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
-import com.ace.consistency.recovery.RecoveryAction;
 import com.ace.consistency.recovery.RecoveryResult;
+import com.ace.consistency.recovery.enums.RecoveryAction;
 
 import lombok.RequiredArgsConstructor;
 

@@ -3,6 +3,7 @@ package com.ace.consistency.recovery;
 import java.util.Map;
 
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

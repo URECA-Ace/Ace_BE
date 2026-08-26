@@ -1,4 +1,4 @@
-package com.ace.consistency.recovery;
+package com.ace.consistency.recovery.policy;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -11,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.recovery.RecoveryOutcome;
+import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;

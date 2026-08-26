@@ -1,6 +1,8 @@
-package com.ace.consistency.recovery;
+package com.ace.consistency.recovery.policy;
 
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.recovery.RecoveryOutcome;
+import com.ace.consistency.recovery.enums.RecoveryAction;
 
 /**
  * 특정 ConsistencyCheck 하나에 대한 복구 정책.

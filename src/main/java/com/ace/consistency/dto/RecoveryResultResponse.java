@@ -4,7 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import com.ace.consistency.recovery.RecoveryResult;
-import com.ace.consistency.recovery.RecoveryResultStatus;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

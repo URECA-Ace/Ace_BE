@@ -1,4 +1,4 @@
-package com.ace.consistency.recovery;
+package com.ace.consistency.recovery.enums;
 
 /**
  * 관리자가 위반 결과에 대해 선택하는 복구 방식.

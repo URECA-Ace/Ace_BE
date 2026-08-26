@@ -18,9 +18,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
-import com.ace.consistency.recovery.RecoveryAction;
 import com.ace.consistency.recovery.RecoveryResult;
-import com.ace.consistency.recovery.RecoveryResultStatus;
+import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 
 @WebMvcTest(ConsistencyRecoveryController.class)
 class ConsistencyRecoveryControllerTest {

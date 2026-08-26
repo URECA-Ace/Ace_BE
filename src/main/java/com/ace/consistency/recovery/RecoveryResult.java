@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import com.ace.consistency.common.DiffDetailConverter;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;

@@ -25,6 +25,10 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
+import com.ace.consistency.recovery.policy.ConsistencyRecoveryPolicy;
+import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 import com.ace.consistency.repository.VerificationResultRepository;
 
 @ExtendWith(MockitoExtension.class)
