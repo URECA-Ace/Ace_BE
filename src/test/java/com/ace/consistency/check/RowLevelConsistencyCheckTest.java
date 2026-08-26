@@ -52,12 +52,15 @@ class RowLevelConsistencyCheckTest {
 	}
 
 	@Test
-	void 이력_구조_검증은_이벤트와_전체_범위를_지원한다() {
+	void 이력_구조_검증은_이벤트와_시간_구간과_전체_범위를_지원한다() {
 		CouponHistoryStructuralConsistencyCheck check =
 				new CouponHistoryStructuralConsistencyCheck(jdbcTemplate);
 
 		assertThat(check.supportedScopeTypes())
-				.containsExactlyInAnyOrder(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+				.containsExactlyInAnyOrder(
+						Scope.ScopeType.EVENT,
+						Scope.ScopeType.AS_OF_RANGE,
+						Scope.ScopeType.ALL);
 	}
 
 	@Test

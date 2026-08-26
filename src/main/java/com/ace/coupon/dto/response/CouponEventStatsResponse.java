@@ -10,5 +10,7 @@ public record CouponEventStatsResponse(
 		Long allocatedQuantity,
 		Long remainingStock,
 		CouponEventStatus status,
-		OffsetDateTime observedAt) {
+		OffsetDateTime observedAt,
+		Long confirmedQuantity,
+		Long pendingQuantity) {
 }

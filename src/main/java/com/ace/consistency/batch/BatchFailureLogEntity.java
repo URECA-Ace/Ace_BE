@@ -1,5 +1,12 @@
 package com.ace.consistency.batch;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.step.StepExecution;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -11,12 +18,6 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.job.JobExecution;
-import org.springframework.batch.core.step.StepExecution;
-
-import java.time.LocalDateTime;
-import java.util.List;
 
 /**
  * batch_failure_log 테이블 매핑 엔티티.

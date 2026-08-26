@@ -43,6 +43,12 @@ public enum ErrorCode {
 			"초기화할 수 없는 회차입니다."),
 	CAMPAIGN_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
 			"캠페인 초기화에 실패했습니다."),
+	
+	// 상태 변경/ 관리
+	INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서 요청한 처리를 할 수 없습니다."),
+	ALREADY_USED(HttpStatus.CONFLICT, "이미 사용된 쿠폰입니다."),
+	NOT_YET_USED(HttpStatus.CONFLICT, "사용되지 않은 쿠폰은 취소할 수 없습니다."),
+	ALREADY_EXPIRED(HttpStatus.CONFLICT, "만료된 쿠폰입니다."),
 
 	// 시스템
 	CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE(
@@ -51,7 +57,12 @@ public enum ErrorCode {
 	ISSUE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 요청을 일시적으로 처리할 수 없습니다."),
 	EVENT_STATS_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 현황을 일시적으로 조회할 수 없습니다."),
 	ISSUE_PERSIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 처리 중 오류가 발생했습니다."),
-	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
+	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+
+	// 정합성 검증
+	UNSUPPORTED_SCOPE(HttpStatus.INTERNAL_SERVER_ERROR, "지원하지 않는 정합성 검증 스코프입니다."),
+	CHECK_POSTPONED(HttpStatus.SERVICE_UNAVAILABLE, "처리 중인 데이터가 있어 정합성 검증을 보류합니다."),
+	CHECK_IMPOSSIBLE(HttpStatus.GONE, "원본 데이터가 유실되어 정합성 검증을 수행할 수 없습니다.");
 
 	private final HttpStatus status;
 	private final String defaultMessage;

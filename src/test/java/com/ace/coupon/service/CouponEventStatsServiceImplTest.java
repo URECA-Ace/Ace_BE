@@ -44,7 +44,7 @@ class CouponEventStatsServiceImplTest {
 	void returnsRealtimeStats() {
 		Instant observedAt = Instant.parse("2026-08-18T08:30:00Z");
 		given(statsReader.read(19L)).willReturn(new CouponEventStatsSnapshot(
-				19L, 10_000L, 8_271L, 1_729L, CouponEventStatus.OPEN, observedAt));
+				19L, 10_000L, 8_271L, 1_729L, CouponEventStatus.OPEN, observedAt, 8_200L, 71L));
 
 		CouponEventStatsResponse response = service.findStats(19L);
 
@@ -54,6 +54,8 @@ class CouponEventStatsServiceImplTest {
 		assertThat(response.remainingStock()).isEqualTo(1_729L);
 		assertThat(response.status()).isEqualTo(CouponEventStatus.OPEN);
 		assertThat(response.observedAt().toInstant()).isEqualTo(observedAt);
+		assertThat(response.confirmedQuantity()).isEqualTo(8_200L);
+		assertThat(response.pendingQuantity()).isEqualTo(71L);
 	}
 
 	@Test

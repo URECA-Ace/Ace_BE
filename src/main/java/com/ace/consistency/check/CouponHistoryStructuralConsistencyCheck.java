@@ -24,6 +24,10 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	private static final String SCOPE_CONDITION = """
 			(
 				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR (:scopeMode = 'AS_OF_RANGE' AND (
+					h.recorded_at IS NULL
+					OR (h.recorded_at >= :from AND h.recorded_at < :to)
+				))
 				OR :scopeMode = 'ALL_GLOBAL'
 				OR (:scopeMode = 'ALL_PAGE' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
 			)
@@ -59,7 +63,7 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
-		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.AS_OF_RANGE, Scope.ScopeType.ALL);
 	}
 
 	@Override
@@ -85,11 +89,15 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {
 		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean rangeScope = scope.getType() == Scope.ScopeType.AS_OF_RANGE;
 		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
 		return new MapSqlParameterSource()
-				.addValue("scopeMode", eventScope ? "EVENT" : pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
+				.addValue("scopeMode", eventScope ? "EVENT"
+						: rangeScope ? "AS_OF_RANGE"
+						: pagedAll ? "ALL_PAGE" : "ALL_GLOBAL")
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
-				.addValue("to", scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
+				.addValue("from", rangeScope ? scope.getFrom() : null)
+				.addValue("to", rangeScope || scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
 	}
 }

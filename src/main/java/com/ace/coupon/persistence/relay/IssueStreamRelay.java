@@ -233,34 +233,62 @@ public class IssueStreamRelay implements SmartLifecycle {
 		}
 
 		IssueRecord issueRecord = parsed.get();
+		IssueFailureStage stage = IssueFailureStage.RELAY;
 		try {
 			persistenceService.persist(issueRecord);
+			// 저장 실패에 보상하면 안 되므로 coordinator.persist() 대신 확정만 따로 부른다
+			// 확정 실패는 XACK 하지 않고 재처리
+			// 저장은 멱등이라 다시 돌아도 안전
+			stage = IssueFailureStage.CONFIRM;
+			coordinator.confirmPersisted(issueRecord, record.getId().getValue());
 			acknowledge(key, record.getId());
 		} catch (RuntimeException exception) {
-			handleFailure(key, record.getId(), issueRecord, deliveryCount, exception);
+			handleFailure(key, record.getId(), issueRecord, deliveryCount, stage, exception);
 		}
 	}
 
 	// 한도 전에는 원복 X
+	// stage 로 두 경로가 갈린다
+	//   RELAY   저장 실패. 한도 초과 시 원복 후 XACK
+	//   CONFIRM 저장은 커밋됨. 원복 금지, XACK 도 하지 않고 pending 에 남겨 재확정을 기다린다
 	private void handleFailure(
 			String key,
 			RecordId recordId,
 			IssueRecord issueRecord,
 			long deliveryCount,
+			IssueFailureStage stage,
 			RuntimeException exception) {
 
+		boolean persisted = stage == IssueFailureStage.CONFIRM;
+		String phase = persisted ? "발급 확정" : "발급 저장";
+
 		if (deliveryCount < properties.maxDeliveryAttempts()) {
-			log.warn("발급 저장 실패, 재처리 예정: requestId={}, delivery={}/{}",
-					issueRecord.requestId(), deliveryCount, properties.maxDeliveryAttempts(), exception);
+			log.warn("{} 실패, 재처리 예정: requestId={}, delivery={}/{}",
+					phase, issueRecord.requestId(), deliveryCount,
+					properties.maxDeliveryAttempts(), exception);
 			return;
 		}
 
 		String incidentId = UUID.randomUUID().toString();
+
+		// 확정 실패는 보상 경로를 타지 않는다
+		// 저장이 이미 커밋됐는데 probe 가 ABSENT 를 내면 재고가 복구돼 초과 발급이 된다
+		// XACK 하지 않고 pending 에 남기면 Redis 회복 후 XCLAIM 이 회수해 다시 확정한다
+		if (persisted) {
+			log.error("발급 확정 재시도 한도 초과, pending 을 유지합니다: requestId={}, incidentId={}",
+					issueRecord.requestId(), incidentId, exception);
+			if (deliveryCount == properties.maxDeliveryAttempts()) {
+				// 한도에 처음 닿았을 때만 기록한다. 매 주기 남기면 실패 로그가 부푼다
+				coordinator.recordConfirmAbandoned(issueRecord, incidentId, exception);
+			}
+			return;
+		}
+
 		log.error("발급 저장 재시도 한도 초과, 원복합니다: requestId={}, incidentId={}",
 				issueRecord.requestId(), incidentId, exception);
 
 		CouponIssueCompensationResult compensation =
-				coordinator.abandon(issueRecord, IssueFailureStage.RELAY, incidentId, exception);
+				coordinator.abandon(issueRecord, stage, incidentId, exception);
 
 		// 원복 결과가 불확실하면 XACK 하지 않는다
 		// 여기서 지우면 저장도 원복도 안 된 채 재처리 수단만 사라진다

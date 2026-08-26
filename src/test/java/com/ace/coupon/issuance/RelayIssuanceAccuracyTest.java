@@ -144,6 +144,13 @@ class RelayIssuanceAccuracyTest {
 				SELECT COUNT(*) FROM coupon_issue WHERE event_id = ? AND message_id IS NOT NULL
 				""")).isEqualTo(stock);
 
+		// 확정 수 = 저장 수
+		// RELAY 는 at-least-once 라 같은 엔트리가 재전달되는데,
+		// 확정이 CAS 안에서 카운터를 올리므로 재전달에도 값이 부풀지 않는다
+		assertThat(redisTemplate.<String, String>opsForHash()
+						.get(CouponRedisKeys.campaign(eventId).metadata(), "confirmedQuantity"))
+				.isEqualTo(String.valueOf(stock));
+
 		// 전부 XACK 되어 pending 이 남지 않아야 한다
 		assertThat(redisTemplate.<String, String>opsForStream().pending(
 						CouponRedisKeys.campaign(eventId).issueStream(), "issue-persist",

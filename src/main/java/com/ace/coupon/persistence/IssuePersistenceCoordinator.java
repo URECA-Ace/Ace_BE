@@ -6,6 +6,7 @@ import com.ace.coupon.persistence.failure.IssueFailure;
 import com.ace.coupon.persistence.failure.IssueFailureRecorder;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
+import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class IssuePersistenceCoordinator {
 
-	private static final String COMPENSATION_CALL_FAILED = "CALL_FAILED";
+	private static final String CALL_FAILED = "CALL_FAILED";
 	private static final String COMPENSATION_SKIPPED_PERSISTED = "SKIPPED_PERSISTED";
 	private static final String COMPENSATION_SKIPPED_UNVERIFIED = "SKIPPED_UNVERIFIED";
 
@@ -29,12 +30,92 @@ public class IssuePersistenceCoordinator {
 	// stage: 실패 시 기록할 단계
 	// coupon_issue.issue_id 반환
 	public long persist(IssueRecord record, IssueFailureStage stage, String incidentId) {
+		long issueId;
 		try {
-			return persistenceService.persist(record);
+			issueId = persistenceService.persist(record);
 		} catch (RuntimeException failure) {
 			compensate(record, stage, incidentId, failure);
 			throw failure;
 		}
+		confirmQuietly(record, incidentId);
+		return issueId;
+	}
+
+	// 저장이 커밋된 뒤 요청 상태를 CONFIRMED(RELAY 전용)
+	// 보상은 하지 않지만 재시도는 함
+	// 재시도해도 결과가 같은 거절은 그대로 삼킴 안 그러면 엔트리가 Stream 에서 빠지지 X
+	public void confirmPersisted(IssueRecord record, String incidentId) {
+		CouponIssueConfirmResult result;
+		try {
+			result = issueProcessor.confirm(
+					record.campaignId(), record.userId(), record.requestId());
+		} catch (RuntimeException confirmFailure) {
+			log.warn("확정 호출 실패, 재처리 대상입니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, confirmFailure);
+			recordConfirmFailure(record, incidentId, CALL_FAILED, summary(confirmFailure));
+			throw confirmFailure;
+		}
+
+		if (isConfirmed(result)) {
+			return;
+		}
+
+		recordRejectedConfirm(record, incidentId, result);
+		if (result == CouponIssueConfirmResult.INTERNAL_WRITE_ERROR) {
+			// 예외는 아니지만 Redis 쓰기 실패라 재시도하면 성공할 수 있다
+			throw new IllegalStateException(
+					"발급 확정 쓰기에 실패했습니다: requestId=" + record.requestId());
+		}
+	}
+
+	// 커밋이 끝난 뒤에만 호출(SYNC 전용)
+	// 예외를 밖으로 던지지 않는다. 저장은 이미 커밋됐는데 요청 스레드가 500 을 응답하게 된다
+	private void confirmQuietly(IssueRecord record, String incidentId) {
+		try {
+			CouponIssueConfirmResult result = issueProcessor.confirm(
+					record.campaignId(), record.userId(), record.requestId());
+			if (isConfirmed(result)) {
+				return;
+			}
+			recordRejectedConfirm(record, incidentId, result);
+		} catch (RuntimeException confirmFailure) {
+			log.warn("확정 처리 실패 - 상태 조회만 어긋납니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, confirmFailure);
+			recordConfirmFailure(record, incidentId, CALL_FAILED, summary(confirmFailure));
+		}
+	}
+
+	private boolean isConfirmed(CouponIssueConfirmResult result) {
+		return result == CouponIssueConfirmResult.CONFIRMED_NOW
+				|| result == CouponIssueConfirmResult.ALREADY_CONFIRMED;
+	}
+
+	private void recordRejectedConfirm(
+			IssueRecord record, String incidentId, CouponIssueConfirmResult result) {
+		log.warn("확정되지 않았습니다: requestId={}, result={}, incidentId={}",
+				record.requestId(), result, incidentId);
+		recordConfirmFailure(record, incidentId, String.valueOf(result), "확정 거절: " + result);
+	}
+
+	// 여기서 예외가 나가면 RELAY 가 저장된 건을 무한 재처리
+	private void recordConfirmFailure(
+			IssueRecord record, String incidentId, String confirmResult, String detail) {
+		try {
+			failureRecorder.record(IssueFailure.of(
+					record, IssueFailureStage.CONFIRM, confirmResult, detail, incidentId));
+		} catch (RuntimeException recordFailure) {
+			log.error("확정 실패 기록에 실패했습니다: requestId={}, incidentId={}",
+					record.requestId(), incidentId, recordFailure);
+		}
+	}
+
+	// 확정을 포기하고 흔적만(RELAY 전용)
+	// 저장이 이미 커밋된 상태라 보상 경로를 타면 안 된다
+	// probe 는 같은 requestId 의 다른 발급을 ABSENT 로 판정하므로, 그 경로에 들어가면
+	// MySQL 에 행이 있는 채로 재고가 복구돼 초과 발급이 된다
+	public void recordConfirmAbandoned(
+			IssueRecord record, String incidentId, RuntimeException cause) {
+		recordConfirmFailure(record, incidentId, CALL_FAILED, summary(cause));
 	}
 
 	// 저장을 포기하고 되돌림
@@ -74,11 +155,11 @@ public class IssuePersistenceCoordinator {
 			failureRecorder.record(IssueFailure.of(
 					record,
 					IssueFailureStage.COMPENSATE,
-					COMPENSATION_CALL_FAILED,
+					CALL_FAILED,
 					summary(compensationFailure),
 					incidentId));
 			result = null;
-			compensationResult = COMPENSATION_CALL_FAILED;
+			compensationResult = CALL_FAILED;
 		}
 
 		failureRecorder.record(IssueFailure.of(

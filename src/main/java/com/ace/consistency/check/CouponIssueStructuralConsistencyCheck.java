@@ -34,7 +34,7 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 				OR ci.issue_sequence <= 0 OR ci.request_id IS NULL OR ci.request_id NOT REGEXP
 					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				OR (ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
-					'^[1-9][0-9]*-[0-9]+-[0-9]+$')
+					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
 				OR ci.issued_at IS NULL OR ci.valid_from IS NULL OR ci.valid_to IS NULL OR ci.created_at IS NULL
 				OR ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to OR ci.created_at < ci.issued_at
@@ -54,7 +54,7 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				              THEN 'INVALID_REQUEST_ID'
 				         WHEN ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
-				              '^[1-9][0-9]*-[0-9]+-[0-9]+$'
+				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				              THEN 'INVALID_MESSAGE_ID_FORMAT'
 			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
 			              THEN 'INVALID_STATUS'

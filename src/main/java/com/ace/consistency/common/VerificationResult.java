@@ -1,5 +1,6 @@
 package com.ace.consistency.common;
 
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.entity.VerificationResultEntity;
 import lombok.*;
 
@@ -58,7 +59,11 @@ public final class VerificationResult {
 				0, Collections.emptyMap(), describe(cause), executedAt, durationMillis);
 	}
 
+	// ConsistencyCheckException이면 클래스명 대신 ErrorCode로 원인을 구분한다.
 	private static String describe(Throwable cause) {
+		if (cause instanceof ConsistencyCheckException consistencyCheckException) {
+			return consistencyCheckException.getErrorCode().name() + ": " + cause.getMessage();
+		}
 		return cause.getClass().getSimpleName() + ": " + cause.getMessage();
 	}
 
