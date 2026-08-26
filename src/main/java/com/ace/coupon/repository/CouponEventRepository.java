@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -62,4 +63,35 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	int openDueEvents(
 			@Param("scheduledStatus") CouponEventStatus scheduledStatus,
 			@Param("openStatus") CouponEventStatus openStatus);
+
+	// 주기 집계 스냅샷 대상 회차
+	// 마감 시각이 지난 회차는 제외
+	@Query("""
+			SELECT event.id
+			FROM CouponEvent event
+			WHERE event.status = :status
+				AND event.closeAt > CURRENT_TIMESTAMP
+			ORDER BY event.id
+			""")
+	List<Long> findSnapshotTargetEventIds(
+			@Param("status") CouponEventStatus status,
+			Pageable pageable);
+
+	// Redis가 갖고 있는 확정 수를 coupon_event 집계 컬럼에 반영
+	// 값은 Redis에만 쌓고 주기적으로 이 조건부 UPDATE 한 번으로
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.issuedQuantity = :confirmedQuantity,
+				event.remainingStock = event.totalStock - :confirmedQuantity,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.totalStock = :totalStock
+				AND event.issuedQuantity <= :confirmedQuantity
+			""")
+	int applyAggregateSnapshot(
+			@Param("eventId") Long eventId,
+			@Param("totalStock") Integer totalStock,
+			@Param("confirmedQuantity") Integer confirmedQuantity);
 }

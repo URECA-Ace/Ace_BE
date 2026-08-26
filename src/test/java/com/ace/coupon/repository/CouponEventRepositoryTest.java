@@ -102,6 +102,141 @@ class CouponEventRepositoryTest {
 				.containsExactlyInAnyOrder(scheduled.getId(), open.getId());
 	}
 
+	@Test
+	@DisplayName("확정 수를 반영하면 남은 재고를 총 재고에서 빼서 함께 갱신")
+	void appliesConfirmedQuantityAndDerivesRemainingStock() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 21, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int updatedCount = couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 400);
+
+		assertThat(updatedCount).isOne();
+		CouponEvent applied = findEvent(event.getId());
+		assertThat(applied.getIssuedQuantity()).isEqualTo(400);
+		assertThat(applied.getRemainingStock()).isEqualTo(9_600);
+		// StockConsistencyCheck 의 검사식이 성립해야 함
+		assertThat(applied.getIssuedQuantity() + applied.getRemainingStock())
+				.isEqualTo(applied.getTotalStock());
+	}
+
+	@Test
+	@DisplayName("더 낮은 확정 수가 늦게 도착해도 이미 반영된 집계를 되돌리지 않는다")
+	void doesNotRollBackAggregateWhenStaleSnapshotArrives() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 22, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 400);
+		int staleUpdatedCount = couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 300);
+
+		assertThat(staleUpdatedCount).isZero();
+		CouponEvent applied = findEvent(event.getId());
+		assertThat(applied.getIssuedQuantity()).isEqualTo(400);
+		assertThat(applied.getRemainingStock()).isEqualTo(9_600);
+	}
+
+	@Test
+	@DisplayName("같은 확정 수를 다시 반영해도 결과가 같다")
+	void appliesSameConfirmedQuantityIdempotently() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 23, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 400);
+		int secondUpdatedCount = couponEventRepository.applyAggregateSnapshot(event.getId(), 10_000, 400);
+
+		assertThat(secondUpdatedCount).isOne();
+		CouponEvent applied = findEvent(event.getId());
+		assertThat(applied.getIssuedQuantity()).isEqualTo(400);
+		assertThat(applied.getRemainingStock()).isEqualTo(9_600);
+	}
+
+	@Test
+	@DisplayName("총 재고가 다른 현황은 다른 회차의 값으로 보고 반영X")
+	void ignoresSnapshotWhoseTotalStockDiffers() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent event = persistEvent(
+				coupon, 24, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int updatedCount = couponEventRepository.applyAggregateSnapshot(event.getId(), 9_999, 400);
+
+		assertThat(updatedCount).isZero();
+		CouponEvent untouched = findEvent(event.getId());
+		assertThat(untouched.getIssuedQuantity()).isZero();
+		assertThat(untouched.getRemainingStock()).isEqualTo(10_000);
+	}
+
+	@Test
+	@DisplayName("집계 스냅샷 대상 조회는 요청한 상태의 회차만 반환")
+	void findsSnapshotTargetsOfRequestedStatusOnly() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent open = persistEvent(
+				coupon, 25, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent closed = persistEvent(
+				coupon, 26, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.CLOSED, databaseNow);
+		CouponEvent scheduled = persistEvent(
+				coupon, 27, databaseNow.plusMinutes(10), databaseNow.plusMinutes(20),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		entityManager.flush();
+
+		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
+				CouponEventStatus.OPEN, PageRequest.of(0, 100));
+
+		assertThat(eventIds).contains(open.getId());
+		assertThat(eventIds).doesNotContain(closed.getId(), scheduled.getId());
+	}
+
+	@Test
+	@DisplayName("집계 스냅샷 대상 조회는 마감 시각이 지난 회차를 제외")
+	void excludesEventsPastCloseAtFromSnapshotTargets() {
+		LocalDateTime databaseNow = databaseNow();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent issuing = persistEvent(
+				coupon, 28, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent pastClose = persistEvent(
+				coupon, 29, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+
+		List<Long> eventIds = couponEventRepository.findSnapshotTargetEventIds(
+				CouponEventStatus.OPEN, PageRequest.of(0, 100));
+
+		assertThat(eventIds).contains(issuing.getId());
+		assertThat(eventIds).doesNotContain(pastClose.getId());
+	}
+
+	private LocalDateTime databaseNow() {
+		return entityManager
+				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
+				.getSingleResult()
+				.toLocalDateTime();
+	}
+
+	private CouponEvent findEvent(Long eventId) {
+		return couponEventRepository.findById(eventId).orElseThrow();
+	}
+
 	private Coupon persistCoupon(LocalDateTime now) {
 		Coupon coupon = Coupon.builder()
 				.couponName("예약 오픈 테스트 쿠폰")
