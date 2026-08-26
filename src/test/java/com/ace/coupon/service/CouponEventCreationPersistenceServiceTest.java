@@ -47,7 +47,9 @@ class CouponEventCreationPersistenceServiceTest {
 		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
 		LocalDateTime openAt = now.plusDays(1);
 		LocalDateTime closeAt = openAt.plusHours(12);
-		given(couponRepository.findById(1L)).willReturn(Optional.of(coupon));
+		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository.findByCoupon_IdAndRound(1L, 24))
+				.willReturn(Optional.empty());
 		given(couponEventRepository.saveAndFlush(Mockito.any(CouponEvent.class)))
 				.willAnswer(invocation -> {
 					CouponEvent event = invocation.getArgument(0);
@@ -55,7 +57,8 @@ class CouponEventCreationPersistenceServiceTest {
 					return event;
 				});
 
-		service.create(1L, 24, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now);
+		service.createOrReuse(
+				1L, 24, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now);
 
 		ArgumentCaptor<CouponEvent> captor = ArgumentCaptor.forClass(CouponEvent.class);
 		Mockito.verify(couponEventRepository).saveAndFlush(captor.capture());
@@ -74,6 +77,47 @@ class CouponEventCreationPersistenceServiceTest {
 		assertThat(initialization.getEventId()).isEqualTo(10L);
 		assertThat(initialization.getStatus().name()).isEqualTo("PENDING");
 		assertThat(initialization.getAttemptCount()).isZero();
+		Mockito.verify(couponRepository).findByIdForUpdate(1L);
+	}
+
+	@Test
+	@DisplayName("명시 회차의 동일 설정 재요청은 쿠폰 행 락 안에서 기존 캠페인을 재사용한다")
+	void reusesExplicitRoundWhileCouponIsLocked() {
+		Coupon coupon = Coupon.builder().id(1L).build();
+		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
+		LocalDateTime openAt = now.plusHours(1);
+		LocalDateTime closeAt = now.plusHours(2);
+		CouponEvent existing = event(coupon, 24, 10_000, openAt, closeAt, now);
+		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository.findByCoupon_IdAndRound(1L, 24))
+				.willReturn(Optional.of(existing));
+
+		CouponEvent result = service.createOrReuse(
+				1L, 24, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now);
+
+		assertThat(result).isSameAs(existing);
+		Mockito.verify(couponRepository).findByIdForUpdate(1L);
+		Mockito.verify(couponEventRepository, Mockito.never())
+				.saveAndFlush(Mockito.any(CouponEvent.class));
+	}
+
+	@Test
+	@DisplayName("명시 회차의 설정이 다르면 쿠폰 행 락 안에서 409 비즈니스 예외를 발생시킨다")
+	void rejectsConflictingExplicitRoundWhileCouponIsLocked() {
+		Coupon coupon = Coupon.builder().id(1L).build();
+		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
+		LocalDateTime openAt = now.plusHours(1);
+		LocalDateTime closeAt = now.plusHours(2);
+		CouponEvent existing = event(coupon, 24, 5_000, openAt, closeAt, now);
+		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository.findByCoupon_IdAndRound(1L, 24))
+				.willReturn(Optional.of(existing));
+
+		assertThatThrownBy(() -> service.createOrReuse(
+				1L, 24, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode())
+								.isEqualTo(ErrorCode.EVENT_CONFIGURATION_CONFLICT));
 	}
 
 	@Test
@@ -82,6 +126,10 @@ class CouponEventCreationPersistenceServiceTest {
 		Coupon coupon = Coupon.builder().id(1L).build();
 		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
 		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository
+				.findFirstByCoupon_IdAndTotalStockAndOpenAtAndCloseAtAndPerUserLimitOrderByIdAsc(
+						1L, 10_000, now.plusHours(1), now.plusHours(2), 1))
+				.willReturn(Optional.empty());
 		given(couponEventRepository.findMaxRoundByCouponId(1L)).willReturn(2);
 		given(couponEventRepository.saveAndFlush(Mockito.any(CouponEvent.class)))
 				.willAnswer(invocation -> {
@@ -90,7 +138,7 @@ class CouponEventCreationPersistenceServiceTest {
 					return event;
 				});
 
-		CouponEvent saved = service.createNextRound(
+		CouponEvent saved = service.createNextRoundOrReuse(
 				1L, 10_000, now.plusHours(1), now.plusHours(2),
 				CouponEventStatus.SCHEDULED, now);
 
@@ -100,11 +148,34 @@ class CouponEventCreationPersistenceServiceTest {
 	}
 
 	@Test
+	@DisplayName("자동 회차 재요청은 동일 설정 캠페인을 재사용해 새 회차를 만들지 않는다")
+	void reusesAutomaticallyCreatedCampaignByConfiguration() {
+		Coupon coupon = Coupon.builder().id(1L).build();
+		LocalDateTime now = LocalDateTime.of(2099, 8, 18, 12, 0);
+		LocalDateTime openAt = now.plusHours(1);
+		LocalDateTime closeAt = now.plusHours(2);
+		CouponEvent existing = event(coupon, 3, 10_000, openAt, closeAt, now);
+		given(couponRepository.findByIdForUpdate(1L)).willReturn(Optional.of(coupon));
+		given(couponEventRepository
+				.findFirstByCoupon_IdAndTotalStockAndOpenAtAndCloseAtAndPerUserLimitOrderByIdAsc(
+						1L, 10_000, openAt, closeAt, 1))
+				.willReturn(Optional.of(existing));
+
+		CouponEvent result = service.createNextRoundOrReuse(
+				1L, 10_000, openAt, closeAt, CouponEventStatus.SCHEDULED, now);
+
+		assertThat(result).isSameAs(existing);
+		Mockito.verify(couponEventRepository, Mockito.never()).findMaxRoundByCouponId(1L);
+		Mockito.verify(couponEventRepository, Mockito.never())
+				.saveAndFlush(Mockito.any(CouponEvent.class));
+	}
+
+	@Test
 	@DisplayName("존재하지 않는 쿠폰에는 캠페인을 생성하지 않는다")
 	void rejectsMissingCoupon() {
-		given(couponRepository.findById(99L)).willReturn(Optional.empty());
+		given(couponRepository.findByIdForUpdate(99L)).willReturn(Optional.empty());
 
-		assertThatThrownBy(() -> service.create(
+		assertThatThrownBy(() -> service.createOrReuse(
 				99L, 1, 10_000,
 				LocalDateTime.now().plusHours(1),
 				LocalDateTime.now().plusHours(2),
@@ -113,5 +184,28 @@ class CouponEventCreationPersistenceServiceTest {
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode())
 								.isEqualTo(ErrorCode.COUPON_NOT_FOUND));
+	}
+
+	private CouponEvent event(
+			Coupon coupon,
+			int round,
+			int totalStock,
+			LocalDateTime openAt,
+			LocalDateTime closeAt,
+			LocalDateTime now) {
+		return CouponEvent.builder()
+				.id(10L)
+				.coupon(coupon)
+				.round(round)
+				.openAt(openAt)
+				.closeAt(closeAt)
+				.totalStock(totalStock)
+				.remainingStock(totalStock)
+				.issuedQuantity(0)
+				.perUserLimit(1)
+				.status(CouponEventStatus.SCHEDULED)
+				.createdAt(now)
+				.updatedAt(now)
+				.build();
 	}
 }
