@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
@@ -56,8 +57,10 @@ class StockConsistencyRecoveryPolicyRollbackIntegrationTest extends ConsistencyC
 				"StockConsistencyCheck", TriggerType.ON_DEMAND, Scope.ofEvent(eventId),
 				1, Map.of("eventId", eventId), LocalDateTime.now(), 10L));
 
-		RecoveryOutcome outcome = policy.recover(target, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE, eventId);
+		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
+		assertThat(outcomes).hasSize(1);
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("재고 복구 중 오류가 발생했습니다");
 

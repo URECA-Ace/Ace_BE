@@ -18,7 +18,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPE_CONDITION = """
@@ -69,8 +68,7 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 			FROM coupon_issue ci
 			WHERE %s AND %s
 			ORDER BY ci.issue_id
-			LIMIT %d
-			""".formatted(SCOPE_CONDITION, BASE_CONDITION, SAMPLE_LIMIT);
+			""".formatted(SCOPE_CONDITION, BASE_CONDITION);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

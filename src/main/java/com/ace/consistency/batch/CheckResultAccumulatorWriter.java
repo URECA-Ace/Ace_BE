@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * {@link ConsistencyCheckItemProcessor}가 페이지마다 만들어내는 {@link ConsistencyCheck.CheckOutcome}을
  * Step이 끝날 때까지 누적하는 {@link ItemWriter}. DB에 쓰지 않고, 실패 건수(violationCount)와
- * 샘플 데이터({@code SAMPLE_LIMIT}개까지)만 메모리에 모아둔다. Step 종료 후
+ * 샘플 데이터 전체를 메모리에 모아둔다. Step 종료 후
  * {@link ConsistencyStepCompletionListener}가 이 writer의 누적 결과를 읽어 최종
  * VerificationResult를 만든다.
  *
@@ -25,7 +25,6 @@ public class CheckResultAccumulatorWriter implements ItemWriter<ConsistencyCheck
 
     private static final String VIOLATION_COUNT_KEY = "checkResultAccumulatorWriter.violationCount";
     private static final String SAMPLES_KEY = "checkResultAccumulatorWriter.samples";
-    private static final int SAMPLE_LIMIT = 20;
 
     private int violationCount;
     private List<Map<String, Object>> samples;
@@ -51,19 +50,11 @@ public class CheckResultAccumulatorWriter implements ItemWriter<ConsistencyCheck
 
     @SuppressWarnings("unchecked")
     private void addSamples(ConsistencyCheck.CheckOutcome outcome) {
-        if (samples.size() >= SAMPLE_LIMIT) {
-            return;
-        }
         List<Map<String, Object>> pageSamples = (List<Map<String, Object>>) outcome.getDiffDetail().get("sample");
         if (pageSamples == null) {
             return;
         }
-        for (Map<String, Object> sample : pageSamples) {
-            if (samples.size() >= SAMPLE_LIMIT) {
-                break;
-            }
-            samples.add(sample);
-        }
+        samples.addAll(pageSamples);
     }
 
     @Override

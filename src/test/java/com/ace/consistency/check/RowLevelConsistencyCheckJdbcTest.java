@@ -112,7 +112,7 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
-	void 전체_위반_건수는_20건_샘플_제한과_무관하게_계산한다() {
+	void 위반_건수와_샘플은_제한없이_전부_계산된다() {
 		for (int index = 0; index < 25; index++) {
 			insertIssue(null, null, 1L);
 		}
@@ -122,7 +122,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(25);
-		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(20);
+		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(25);
 	}
 
 	@Test

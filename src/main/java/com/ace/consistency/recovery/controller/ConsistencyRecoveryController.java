@@ -41,14 +41,18 @@ public class ConsistencyRecoveryController {
 	}
 
 	@PostMapping("/{resultId}/recover")
-	public ResponseEntity<ApiResponse<RecoveryResultResponse>> recover(
+	public ResponseEntity<ApiResponse<List<RecoveryResultResponse>>> recover(
 			@PathVariable Long resultId,
 			@RequestBody RecoveryRequest request) {
 
 		RecoveryAction action = parseAction(request.getAction());
-		RecoveryResult result = dispatcher.recover(resultId, action, request.getEventId());
+		List<RecoveryResult> results = dispatcher.recover(resultId, action);
 
-		return ResponseEntity.ok(ApiResponse.success(RecoveryResultResponse.from(result)));
+		List<RecoveryResultResponse> response = results.stream()
+				.map(RecoveryResultResponse::from)
+				.toList();
+
+		return ResponseEntity.ok(ApiResponse.success(response));
 	}
 
 	private RecoveryAction parseAction(String action) {

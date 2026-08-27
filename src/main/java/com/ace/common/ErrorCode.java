@@ -69,7 +69,7 @@ public enum ErrorCode {
 	RECOVERY_NOT_APPLICABLE(HttpStatus.CONFLICT, "위반(FAIL) 상태인 검증 결과만 복구할 수 있습니다."),
 	RECOVERY_POLICY_NOT_FOUND(HttpStatus.CONFLICT, "해당 검증 항목에는 복구 정책이 정의되어 있지 않습니다."),
 	RECOVERY_NOT_SUPPORTED_FOR_ALL_SCOPE(HttpStatus.CONFLICT, "ALL 스코프로 생성된 검증 결과는 이벤트 단위로 다시 검증한 뒤 복구할 수 있습니다."),
-	RECOVERY_EVENT_ID_REQUIRED(HttpStatus.BAD_REQUEST, "ALL 스코프 검증 결과를 복구하려면 대상 eventId를 지정해야 합니다.");
+	RECOVERY_TARGET_EVENTS_NOT_FOUND(HttpStatus.CONFLICT, "복구할 위반 이벤트를 검증 결과에서 찾을 수 없습니다.");
 
 	private final HttpStatus status;
 	private final String defaultMessage;

@@ -1,6 +1,7 @@
 package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
@@ -91,8 +94,10 @@ class StockConsistencyRecoveryPolicyTest {
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(couponEvent));
 		given(couponIssueRepository.countByCouponEvent_IdAndStatusIn(eq(EVENT_ID), anyList())).willReturn(70L);
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER);
 
+		assertThat(outcomes).hasSize(1);
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(couponEvent.getIssuedQuantity()).isEqualTo(70);
 		assertThat(couponEvent.getRemainingStock()).isEqualTo(30); // totalStock(100) - actualActiveCount(70)
@@ -108,8 +113,9 @@ class StockConsistencyRecoveryPolicyTest {
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(couponEvent));
 		given(couponIssueRepository.countByCouponEvent_IdAndStatusIn(eq(EVENT_ID), anyList())).willReturn(105L);
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER);
 
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("STOCK_REVOKE_EXCESS_ISSUANCE");
 		assertThat(couponEvent.getIssuedQuantity()).isEqualTo(100); // 건드리지 않음
@@ -119,33 +125,67 @@ class StockConsistencyRecoveryPolicyTest {
 	void 이벤트가_존재하지_않으면_예외를_던지지_않고_FAIL_Outcome을_반환한다() {
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.empty());
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_RECONCILE_COUNTER);
 
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("eventId=" + EVENT_ID);
 	}
 
 	@Test
-	void ALL_스코프_target이어도_Dispatcher가_넘겨준_eventId만_사용해서_복구한다() {
+	void ALL_스코프_target이면_diffDetail_sample에_있는_이벤트마다_복구해서_각각의_outcome을_반환한다() {
+		Map<String, Object> diffDetail = Map.of("sample", List.of(
+				Map.of("eventId", (Object) EVENT_ID),
+				Map.of("eventId", (Object) 2L)));
 		VerificationResultEntity allScopeTarget = VerificationResultEntity.from(VerificationResult.fail(
-				"StockConsistencyCheck", TriggerType.SCHEDULED, Scope.all(List.of(EVENT_ID, 2L), LocalDateTime.now()),
-				2, Map.of(), LocalDateTime.now(), 10L));
+				"StockConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
+				2, diffDetail, LocalDateTime.now(), 10L));
 
-		CouponEvent couponEvent = couponEventWithCounters(100, 80, 10);
-		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(couponEvent));
+		CouponEvent couponEvent1 = couponEventWithCounters(100, 80, 10);
+		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(couponEvent1));
 		given(couponIssueRepository.countByCouponEvent_IdAndStatusIn(eq(EVENT_ID), anyList())).willReturn(70L);
 
-		RecoveryOutcome outcome = policy.recover(allScopeTarget, RecoveryAction.STOCK_RECONCILE_COUNTER, EVENT_ID);
+		CouponEvent couponEvent2 = CouponEvent.builder()
+				.id(2L)
+				.round(1)
+				.openAt(LocalDateTime.now().minusDays(1))
+				.closeAt(LocalDateTime.now().plusDays(1))
+				.totalStock(50)
+				.issuedQuantity(40)
+				.remainingStock(5)
+				.perUserLimit(1)
+				.status(CouponEventStatus.OPEN)
+				.createdAt(LocalDateTime.now())
+				.updatedAt(LocalDateTime.now())
+				.build();
+		given(couponEventRepository.findByIdForUpdate(2L)).willReturn(Optional.of(couponEvent2));
+		given(couponIssueRepository.countByCouponEvent_IdAndStatusIn(eq(2L), anyList())).willReturn(30L);
 
-		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
-		assertThat(outcome.getRevalidationScope().getType()).isEqualTo(Scope.ScopeType.EVENT);
-		assertThat(outcome.getRevalidationScope().getEventId()).isEqualTo(EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(allScopeTarget, RecoveryAction.STOCK_RECONCILE_COUNTER);
+
+		assertThat(outcomes).hasSize(2);
+		assertThat(outcomes).allMatch(outcome -> outcome.getStatus() == RecoveryResultStatus.SUCCESS);
+		assertThat(outcomes.get(0).getRevalidationScope().getEventId()).isEqualTo(EVENT_ID);
+		assertThat(outcomes.get(1).getRevalidationScope().getEventId()).isEqualTo(2L);
+	}
+
+	@Test
+	void ALL_스코프_target인데_diffDetail에_sample이_없으면_예외를_던진다() {
+		VerificationResultEntity allScopeTarget = VerificationResultEntity.from(VerificationResult.fail(
+				"StockConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
+				0, Map.of(), LocalDateTime.now(), 10L));
+
+		assertThatThrownBy(() -> policy.recover(allScopeTarget, RecoveryAction.STOCK_RECONCILE_COUNTER))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
+				.isEqualTo(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
 	}
 
 	@Test
 	void 지원하지_않는_액션이면_FAIL_Outcome을_반환한다() {
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.DEFAULT, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.DEFAULT);
 
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("STOCK_RECONCILE_COUNTER").contains("STOCK_REVOKE_EXCESS_ISSUANCE");
 	}
@@ -157,9 +197,9 @@ class StockConsistencyRecoveryPolicyTest {
 		given(couponIssueRepository.findByCouponEvent_IdAndStatusInOrderByIssueSequenceDesc(eq(EVENT_ID), anyList()))
 				.willReturn(List.of(issueWithStatus(1L, CouponIssueStatus.ISSUED)));
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
-		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(outcomes.get(0).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		verify(couponIssueRepository, never()).findByIdForUpdate(any());
 	}
 
@@ -176,8 +216,9 @@ class StockConsistencyRecoveryPolicyTest {
 		given(couponIssueRepository.findByIdForUpdate(3L)).willReturn(Optional.of(mostRecent));
 		given(couponIssueRepository.findByIdForUpdate(2L)).willReturn(Optional.of(usedIssue));
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL); // 회수 불가 건이 남아 있으므로 관리자 확인 필요
 		assertThat(outcome.getDetail()).containsEntry("excessCount", 2);
 		assertThat(mostRecent.getStatus()).isEqualTo(CouponIssueStatus.CANCELED);
@@ -198,8 +239,9 @@ class StockConsistencyRecoveryPolicyTest {
 				.willReturn(List.of(mostRecent, oldest));
 		given(couponIssueRepository.findByIdForUpdate(2L)).willReturn(Optional.of(mostRecent));
 
-		RecoveryOutcome outcome = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE, EVENT_ID);
+		List<RecoveryOutcome> outcomes = policy.recover(failResultFor(EVENT_ID), RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
+		RecoveryOutcome outcome = outcomes.get(0);
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(mostRecent.getStatus()).isEqualTo(CouponIssueStatus.CANCELED);
 		assertThat(couponEvent.getIssuedQuantity()).isEqualTo(1);

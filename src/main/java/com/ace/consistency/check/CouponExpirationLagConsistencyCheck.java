@@ -20,7 +20,6 @@ import java.util.Set;
 @Component
 public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final long allowedDelayMillis;
 	private final Clock clock;
@@ -68,8 +67,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 			      AND ci.used_at <= :checkedAt
 			) violation
 			ORDER BY violation.issue_id
-			LIMIT %d
-			""".formatted(SAMPLE_LIMIT);
+			""";
 	private static final String EVENT_VIOLATION_SQL = """
 			SELECT violation.issue_id, violation.event_id, violation.status,
 			       violation.valid_to, violation.used_at, violation.violation_type,
@@ -92,8 +90,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 			      AND ci.used_at <= :checkedAt
 			) violation
 			ORDER BY violation.issue_id
-			LIMIT %d
-			""".formatted(SAMPLE_LIMIT);
+			""";
 	private static final String ALL_VIOLATION_SQL = """
 			SELECT violation.issue_id, violation.event_id, violation.status,
 			       violation.valid_to, violation.used_at, violation.violation_type,
@@ -116,8 +113,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 			      AND ci.used_at < :checkedAt
 			) violation
 			ORDER BY violation.issue_id
-			LIMIT %d
-			""".formatted(SAMPLE_LIMIT);
+			""";
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

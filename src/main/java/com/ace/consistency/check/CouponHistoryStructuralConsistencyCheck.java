@@ -18,7 +18,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPE_CONDITION = """
@@ -58,8 +57,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 			         WHEN h.from_status IS NULL AND h.to_status <> 'ISSUED' THEN 'INVALID_INITIAL_TRANSITION'
 			         ELSE 'INVALID_STATUS_TRANSITION'
 			       END AS violation_type
-			%s%s AND %s ORDER BY h.history_id LIMIT %d
-			""").formatted(FROM_SQL, SCOPE_CONDITION, BASE_CONDITION, SAMPLE_LIMIT);
+			%s%s AND %s ORDER BY h.history_id
+			""").formatted(FROM_SQL, SCOPE_CONDITION, BASE_CONDITION);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

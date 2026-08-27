@@ -1,6 +1,7 @@
 package com.ace.consistency.recovery;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -54,21 +55,27 @@ public class ConsistencyRecoveryDispatcher {
 				.collect(Collectors.toMap(ConsistencyCheck::getName, Function.identity()));
 	}
 
-	/** 관리자 화면에서 이 검증 결과에 대해 선택 가능한 복구 액션 목록을 조회한다. */
+	/**
+	 * 관리자 화면에서 이 검증 결과에 대해 선택 가능한 복구 액션 목록을 조회한다.
+	 * 복구 정책이 아직 없는 체크도 관리자가 수동으로 확인해야 할 대상으로 화면에 노출되어야
+	 * 하므로, findPolicy()처럼 예외를 던지지 않고 빈 목록을 반환한다. 실제 복구 요청(recover())은
+	 * 여전히 findPolicy()를 통해 RECOVERY_POLICY_NOT_FOUND로 거부된다.
+	 */
 	public List<RecoveryAction> availableActions(Long verificationResultId) {
 		VerificationResultEntity target = verificationResultRepository.findById(verificationResultId)
 				.orElseThrow(() -> new ConsistencyCheckException(ErrorCode.VERIFICATION_RESULT_NOT_FOUND));
 
-		return findPolicy(target.getCheckName()).availableActions();
+		ConsistencyRecoveryPolicy policy = policiesByCheckName.get(target.getCheckName());
+		return policy == null ? List.of() : policy.availableActions();
 	}
 
 	/**
-	 * @param eventId ALL 스코프 검증 결과를 복구할 때, 그 안의 여러 위반 이벤트 중 어느 것을 복구할지
-	 *                호출부(관리자 UI/배치)가 명시적으로 지정한다. EVENT 스코프 결과는 target 자체가
-	 *                이벤트를 특정하므로 무시된다(null이어도 된다).
+	 * target 하나가 얼마나 많은 위반을 담고 있고 그걸 어떤 단위(이벤트, 발급 건 등)로 나눠
+	 * 복구해야 하는지는 체크마다 다르므로, Dispatcher는 그 판단을 정책에 완전히 위임한다.
+	 * 정책이 반환한 RecoveryOutcome 리스트를 그대로 순회하며 각각 이력을 저장하고 재검증한다.
 	 */
 	@Transactional
-	public RecoveryResult recover(Long verificationResultId, RecoveryAction action, Long eventId) {
+	public List<RecoveryResult> recover(Long verificationResultId, RecoveryAction action) {
 		VerificationResultEntity target = verificationResultRepository.findById(verificationResultId)
 				.orElseThrow(() -> new ConsistencyCheckException(ErrorCode.VERIFICATION_RESULT_NOT_FOUND));
 
@@ -77,29 +84,33 @@ public class ConsistencyRecoveryDispatcher {
 		}
 
 		ConsistencyRecoveryPolicy policy = findPolicy(target.getCheckName());
+		List<RecoveryOutcome> outcomes = policy.recover(target, action);
 
-		Long resolvedEventId = resolveEventId(target, eventId);
-		RecoveryOutcome outcome = policy.recover(target, action, resolvedEventId);
+		List<RecoveryResult> results = new ArrayList<>();
+		boolean allRecovered = true;
+		for (RecoveryOutcome outcome : outcomes) {
+			RecoveryResult saved = recoveryResultRepository.save(
+					RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
+			results.add(saved);
 
-		RecoveryResult saved = recoveryResultRepository.save(
-				RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
-
-		if (outcome.getStatus() == RecoveryResultStatus.FAIL) {
-			target.markRecoveryFailed();
-			return saved;
+			if (outcome.getStatus() == RecoveryResultStatus.FAIL) {
+				allRecovered = false;
+				continue;
+			}
+			if (!reverifyPassed(target, outcome.getRevalidationScope())) {
+				allRecovered = false;
+			}
 		}
 
-		reverify(target, outcome.getRevalidationScope());
+		if (allRecovered) {
+			target.markRecovered();
+		} else {
+			target.markRecoveryFailed();
+		}
 
-		return saved;
+		return results;
 	}
 
-	/**
-	 * target이 ALL 스코프여도(예: 배치로 여러 이벤트를 한 번에 검증한 결과) 위반은 이벤트 단위로
-	 * 존재하므로, 어느 이벤트를 복구할지는 항상 이벤트 하나로 확정지어 정책에 넘긴다.
-	 * EVENT 스코프는 target이 이미 이벤트를 특정하므로 호출부가 넘긴 eventId는 쓰지 않고,
-	 * ALL 스코프는 target만으로 대상을 알 수 없으므로 호출부가 반드시 eventId를 지정해야 한다.
-	 */
 	private ConsistencyRecoveryPolicy findPolicy(String checkName) {
 		ConsistencyRecoveryPolicy policy = policiesByCheckName.get(checkName);
 		if (policy == null) {
@@ -108,17 +119,8 @@ public class ConsistencyRecoveryDispatcher {
 		return policy;
 	}
 
-	private Long resolveEventId(VerificationResultEntity target, Long eventId) {
-		if (target.getScopeType() == Scope.ScopeType.EVENT) {
-			return target.getEventId();
-		}
-		if (eventId == null) {
-			throw new ConsistencyCheckException(ErrorCode.RECOVERY_EVENT_ID_REQUIRED);
-		}
-		return eventId;
-	}
-
-	private void reverify(VerificationResultEntity target, Scope revalidationScope) {
+	/** @return 재검증이 통과했으면 true. */
+	private boolean reverifyPassed(VerificationResultEntity target, Scope revalidationScope) {
 		// Runner.run()은 ALL 스코프를 지원하지 않는다(ALL은 Spring Batch 비동기 전용).
 		// 정책이 revalidationScope를 이벤트 단위로 좁히지 못하고 ALL을 그대로 반환하면 재검증할 수 없다.
 		if (revalidationScope.getType() == Scope.ScopeType.ALL) {
@@ -129,10 +131,6 @@ public class ConsistencyRecoveryDispatcher {
 		List<VerificationResult> results = verificationRunner.run(
 				List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
 
-		if (results.get(0).isPass()) {
-			target.markRecovered();
-		} else {
-			target.markRecoveryFailed();
-		}
+		return results.get(0).isPass();
 	}
 }

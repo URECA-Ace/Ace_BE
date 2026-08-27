@@ -29,8 +29,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class DuplicateConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
-
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String EVENT_SQL = """
@@ -113,7 +111,6 @@ public class DuplicateConsistencyCheck implements ConsistencyCheck {
 		Map<String, Object> diff = new LinkedHashMap<>();
 		diff.put("violationCount", violations.size());
 		diff.put("sample", violations.stream()
-				.limit(SAMPLE_LIMIT)
 				.map(row -> Map.of(
 						"eventId", row.get("event_id"),
 						"userId", row.get("user_id"),

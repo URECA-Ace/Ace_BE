@@ -1,13 +1,13 @@
 package com.ace.consistency.controller;
 
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import com.ace.consistency.recovery.controller.ConsistencyRecoveryController;
@@ -33,21 +33,21 @@ class ConsistencyRecoveryControllerTest {
 	private ConsistencyRecoveryDispatcher dispatcher;
 
 	@Test
-	void 유효한_액션이면_복구를_실행하고_결과를_반환한다() throws Exception {
+	void 유효한_액션이면_복구를_실행하고_결과_목록을_반환한다() throws Exception {
 		RecoveryResult result = RecoveryResult.from(1L,
 				com.ace.consistency.recovery.RecoveryOutcome.success(
 						com.ace.consistency.common.Scope.ofEvent(1L),
 						Map.of("issue_id", 4), "복구완료"),
 				LocalDateTime.now());
-		given(dispatcher.recover(eq(1L), eq(RecoveryAction.DEFAULT), isNull())).willReturn(result);
+		given(dispatcher.recover(eq(1L), eq(RecoveryAction.DEFAULT))).willReturn(List.of(result));
 
 		mockMvc.perform(post("/internal/consistency/results/1/recover")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"action\":\"DEFAULT\"}"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.result").value("success"))
-				.andExpect(jsonPath("$.data.message").value("복구완료"))
-				.andExpect(jsonPath("$.data.status").value(RecoveryResultStatus.SUCCESS.name()));
+				.andExpect(jsonPath("$.data[0].message").value("복구완료"))
+				.andExpect(jsonPath("$.data[0].status").value(RecoveryResultStatus.SUCCESS.name()));
 	}
 
 	@Test

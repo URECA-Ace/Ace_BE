@@ -11,6 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.ace.common.ErrorCode;
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
@@ -35,9 +37,9 @@ import lombok.extern.slf4j.Slf4j;
  * - STOCK_REVOKE_EXCESS_ISSUANCE: 실제 활성 발급 건수가 total_stock을 넘어선 "진짜 초과발급".
  *   가장 최근에 발급된 ISSUED 건부터 초과분만큼 CANCELED로 되돌려 슬롯을 반납한다.
  *
- * target이 ALL 스코프여도(여러 이벤트를 한 번에 검증한 배치 결과) 이 정책은 항상 eventId
- * 하나만 넘겨받아 그 이벤트 하나만 복구한다. eventId는 Dispatcher가 target의 스코프를 보고
- * 이미 확정해서 넘겨준 값이다.
+ * target이 ALL 스코프여도(여러 이벤트를 한 번에 검증한 배치 결과) 이 정책은 target에서 직접
+ * 위반 이벤트 목록을 뽑아내 이벤트마다 복구를 수행하고, 이벤트별 RecoveryOutcome을 모아 리스트로
+ * 반환한다. 한 이벤트의 복구 실패가 다른 이벤트의 복구를 막지 않도록 이벤트 단위로 개별 처리한다.
  */
 @Component
 @RequiredArgsConstructor
@@ -66,7 +68,16 @@ public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy
 
 	@Override
 	@Transactional
-	public RecoveryOutcome recover(VerificationResultEntity target, RecoveryAction action, Long eventId) {
+	public List<RecoveryOutcome> recover(VerificationResultEntity target, RecoveryAction action) {
+		List<Long> eventIds = resolveEventIds(target);
+		List<RecoveryOutcome> outcomes = new ArrayList<>();
+		for (Long eventId : eventIds) {
+			outcomes.add(recoverOneEvent(eventId, action));
+		}
+		return outcomes;
+	}
+
+	private RecoveryOutcome recoverOneEvent(Long eventId, RecoveryAction action) {
 		try {
 			return switch (action) {
 				case STOCK_RECONCILE_COUNTER -> reconcileCounter(eventId);
@@ -82,6 +93,29 @@ public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy
 			return RecoveryOutcome.failure(Scope.ofEvent(eventId), Map.of(),
 					"재고 복구 중 오류가 발생했습니다: " + ex.getMessage());
 		}
+	}
+
+	/**
+	 * EVENT 스코프는 target 자체가 이벤트를 특정한다. ALL 스코프는 target만으로 대상을 알 수
+	 * 없으므로, 그 체크를 실행했을 때 저장해둔 diffDetail.sample(위반 건 목록)에서 eventId를
+	 * 뽑아 위반 이벤트 목록을 복원한다. sample은 SAMPLE_LIMIT 없이 위반 전체를 담고 있으므로
+	 * 이 목록이 곧 실제 위반 이벤트 전체와 같다.
+	 */
+	@SuppressWarnings("unchecked")
+	private List<Long> resolveEventIds(VerificationResultEntity target) {
+		if (target.getScopeType() == Scope.ScopeType.EVENT) {
+			return List.of(target.getEventId());
+		}
+
+		List<Map<String, Object>> sample = (List<Map<String, Object>>) target.getDiffDetail().get("sample");
+		if (sample == null || sample.isEmpty()) {
+			throw new ConsistencyCheckException(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
+		}
+
+		return sample.stream()
+				.map(row -> ((Number) row.get("eventId")).longValue())
+				.distinct()
+				.toList();
 	}
 
 	/**
