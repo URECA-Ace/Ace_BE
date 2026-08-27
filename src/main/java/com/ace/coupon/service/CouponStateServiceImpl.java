@@ -10,8 +10,10 @@ import org.springframework.stereotype.Service;
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
+import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.entity.CouponStateIdempotency;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,14 @@ public class CouponStateServiceImpl implements CouponStateService {
 
 	private final CouponStateProcessor processor;
 	private final CouponStateIdempotencyRepository idempotencyRepository;
+	private final CouponIssueRepository couponIssueRepository;
+
+	@Override
+	public Long findIssueId(Long eventId, Long userId) {
+		return couponIssueRepository.findByCouponEvent_IdAndUser_Id(eventId, userId)
+				.map(CouponIssue::getId)
+				.orElse(null);
+	}
 
 	@Override
 	public CouponStateChangeResponse use(Long issueId, Long userId, UUID idempotencyKey, String reason) {
