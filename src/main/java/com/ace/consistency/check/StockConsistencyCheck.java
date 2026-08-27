@@ -20,29 +20,49 @@ import java.util.Set;
  *   - issued_quantity = 활성 발급 건수(ISSUED+USED+EXPIRED)
  *
  * EVENT 스코프: 특정 event_id 하나만 검사 (WHERE 절에 event_id 필터 추가)
- * ALL 스코프: 전체 이벤트 대상으로 검사 (필터 없음)
+ * ALL 스코프: 마감된 회차(SOLD_OUT / CLOSED)만 검사
+ *
+ * 마감된 회차는 :to 컷오프 없이 전체 발급 건수와 비교
+ * issued_quantity 는 마감 시점의 최신 확정 수인데 컷오프를 걸면 직전 safety margin 구간의
+ * 발급이 COUNT 에서만 빠져 오탐이 난다. 마감 이후에는 새로 저장되는 건이 없어 안전하다.
  */
 @Component
 @RequiredArgsConstructor
 public class StockConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
-
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
-	private static final String SQL = """
-            SELECT ce.event_id,
-                   ce.total_stock,
-                   ce.issued_quantity,
-                   ce.remaining_stock,
-                   COUNT(CASE WHEN ci.status IN ('ISSUED','USED','EXPIRED') THEN 1 END) AS actual_active_count
-            FROM coupon_event ce
-            LEFT JOIN coupon_issue ci ON ci.event_id = ce.event_id
-            WHERE (:eventId IS NULL OR ce.event_id = :eventId)
-            GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
-            HAVING ce.total_stock != actual_active_count + ce.remaining_stock
-                OR ce.issued_quantity != actual_active_count
+	private static final String ALL_SQL = """
+			SELECT ce.event_id,
+				   ce.total_stock,
+				   ce.issued_quantity,
+				   ce.remaining_stock,
+				   COUNT(CASE WHEN ci.status IN ('ISSUED','USED','EXPIRED') THEN 1 END) AS actual_active_count
+			FROM coupon_event ce
+			LEFT JOIN coupon_issue ci FORCE INDEX (idx_coupon_issue_event_user_status_created)
+				   ON ci.event_id = ce.event_id
+			WHERE ce.event_id IN (:eventIds)
+			  AND ce.status IN ('SOLD_OUT','CLOSED')
+			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
+			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
+				OR ce.issued_quantity != actual_active_count
             """;
+
+	private static final String EVENT_SQL = """
+			SELECT ce.event_id,
+				   ce.total_stock,
+				   ce.issued_quantity,
+				   ce.remaining_stock,
+				   COUNT(CASE WHEN ci.status IN ('ISSUED','USED','EXPIRED') THEN 1 END) AS actual_active_count
+			FROM coupon_event ce
+			LEFT JOIN coupon_issue ci
+				   ON ci.event_id = ce.event_id
+			WHERE ce.event_id IN (:eventId)
+			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
+			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
+				OR ce.issued_quantity != actual_active_count
+            """;
+
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
@@ -51,11 +71,22 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public CheckOutcome check(Scope scope) {
-		Long eventIdFilter = scope.getType() == Scope.ScopeType.EVENT ? scope.getEventId() : null;
-
-		MapSqlParameterSource params = new MapSqlParameterSource("eventId", eventIdFilter);
-
-		List<Map<String, Object>> violations = jdbcTemplate.queryForList(SQL, params);
+		List<Map<String, Object>> violations;
+		switch(scope.getType()){
+			case EVENT -> {
+				Long eventIdFilter = scope.getEventId();
+				MapSqlParameterSource param = new MapSqlParameterSource("eventId", eventIdFilter);
+				violations = jdbcTemplate.queryForList(EVENT_SQL, param);
+			}
+			case ALL -> {
+				List<Long> eventIds = scope.getEventIds();
+				// 마감된 회차만 검사하므로 :to 컷오프를 쓰지 않는다. ALL_SQL 주석 참조
+				MapSqlParameterSource param = new MapSqlParameterSource()
+						.addValue("eventIds", eventIds);
+				violations = jdbcTemplate.queryForList(ALL_SQL, param); // ALL_SQL로 수정
+			}
+			default -> throw new IllegalArgumentException("Unsupported scope type: " + scope.getType());
+		}
 
 		if (violations.isEmpty()) {
 			return CheckOutcome.pass();
@@ -68,7 +99,6 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 		Map<String, Object> diff = new LinkedHashMap<>();
 		diff.put("violationCount", violations.size());
 		diff.put("sample", violations.stream()
-				.limit(SAMPLE_LIMIT)
 				.map(row -> Map.of(
 						"eventId", row.get("event_id"),
 						"totalStock", row.get("total_stock"),

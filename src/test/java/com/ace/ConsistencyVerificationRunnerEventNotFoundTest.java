@@ -1,5 +1,6 @@
 package com.ace;
 
+import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
 import com.ace.consistency.check.DuplicateConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
@@ -8,10 +9,10 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.coupon.service.CouponIssueService;
 import jakarta.persistence.EntityNotFoundException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
@@ -29,9 +30,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * Runner는 CouponEventRepository(Spring Data JPA)에 의존하는데, 이건 @JdbcTest 슬라이스에서는
  * 로드되지 않는 컴포넌트라서 @SpringBootTest로 전체 컨텍스트를 띄운다
  * (그만큼 StockAndDuplicateConsistencyCheckTest보다 느리다).
+ *
+ * ConsistencyCheckIntegrationTestBase가 띄우는 Testcontainers MySQL에 대고 실행한다.
  */
-@SpringBootTest
-class ConsistencyVerificationRunnerEventNotFoundTest {
+class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckIntegrationTestBase {
 
 	// Redis + Lua 기반 실제 구현체가 추가되기 전까지 전체 Context에서만 대체한다.
 	@MockitoBean
@@ -46,8 +48,16 @@ class ConsistencyVerificationRunnerEventNotFoundTest {
 	@Autowired
 	private DuplicateConsistencyCheck duplicateConsistencyCheck;
 
-	@Autowired
-	private NamedParameterJdbcTemplate jdbcTemplate;
+	private Long createdEventId;
+
+	@AfterEach
+	void cleanUpEvent() {
+		if (createdEventId != null) {
+			jdbcTemplate.update("DELETE FROM coupon_event WHERE event_id = :eventId",
+					new MapSqlParameterSource("eventId", createdEventId));
+			createdEventId = null;
+		}
+	}
 
 	/**
 	 * [검증 목적] 존재하지 않는 event_id로 Runner.run()을 호출하면 EventNotFoundException이
@@ -91,7 +101,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest {
 	 */
 	@Test
 	void 존재하는_이벤트면_정상적으로_결과를_반환한다() {
-		Long existingEventId = findAnyEventId();
+		Long existingEventId = insertDummyEvent();
 		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
 
 		assertDoesNotThrow(() -> {
@@ -108,10 +118,15 @@ class ConsistencyVerificationRunnerEventNotFoundTest {
 				Map.of(), Long.class);
 	}
 
-	private Long findAnyEventId() {
-		return jdbcTemplate.queryForObject(
-				"SELECT event_id FROM coupon_event ORDER BY event_id LIMIT 1",
-				Map.of(), Long.class);
+	private Long insertDummyEvent() {
+		long eventId = generateUniqueId();
+		String sql = """
+                INSERT INTO coupon_event (event_id, coupon_id, round, open_at, close_at, total_stock, remaining_stock, issued_quantity, per_user_limit, status, created_at, updated_at)
+                VALUES (:eventId, :eventId, 1, NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY), 100, 100, 0, 1, 'OPEN', NOW(), NOW())
+                """;
+		jdbcTemplate.update(sql, new MapSqlParameterSource("eventId", eventId));
+		createdEventId = eventId;
+		return eventId;
 	}
 
 	private long countVerificationResults() {

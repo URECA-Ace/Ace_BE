@@ -18,8 +18,10 @@ public enum ErrorCode {
 	IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "동일한 Idempotency-Key가 다른 요청에 사용되었습니다."),
 	EVENT_NOT_OPEN(HttpStatus.BAD_REQUEST, "아직 발급 시작 전입니다."),
 	EVENT_CLOSED(HttpStatus.BAD_REQUEST, "종료된 캠페인입니다."),
+	EVENT_CONFIGURATION_CONFLICT(HttpStatus.CONFLICT, "동일 회차의 캠페인이 다른 설정으로 이미 존재합니다."),
 
 	// 조회
+	COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "쿠폰을 찾을 수 없습니다."),
 	EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "캠페인을 찾을 수 없습니다."),
 	ISSUE_NOT_FOUND(HttpStatus.NOT_FOUND, "발급 내역을 찾을 수 없습니다."),
 	RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없습니다."),
@@ -34,10 +36,40 @@ public enum ErrorCode {
 	METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다."),
 	UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 요청 형식입니다."),
 
+	// 캠페인 운영
+	CAMPAIGN_CONFIG_CONFLICT(HttpStatus.CONFLICT,
+			"이미 다른 설정으로 초기화된 캠페인입니다."),
+	CAMPAIGN_NOT_INITIALIZABLE(HttpStatus.BAD_REQUEST,
+			"초기화할 수 없는 회차입니다."),
+	CAMPAIGN_INIT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+			"캠페인 초기화에 실패했습니다."),
+	
+	// 상태 변경/ 관리
+	INVALID_STATE_TRANSITION(HttpStatus.CONFLICT, "현재 상태에서 요청한 처리를 할 수 없습니다."),
+	ALREADY_USED(HttpStatus.CONFLICT, "이미 사용된 쿠폰입니다."),
+	NOT_YET_USED(HttpStatus.CONFLICT, "사용되지 않은 쿠폰은 취소할 수 없습니다."),
+	ALREADY_EXPIRED(HttpStatus.CONFLICT, "만료된 쿠폰입니다."),
+
 	// 시스템
+	CAMPAIGN_INITIALIZATION_TEMPORARILY_UNAVAILABLE(
+			HttpStatus.SERVICE_UNAVAILABLE,
+			"쿠폰 캠페인 발급 상태를 초기화할 수 없습니다."),
 	ISSUE_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 요청을 일시적으로 처리할 수 없습니다."),
+	EVENT_STATS_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 발급 현황을 일시적으로 조회할 수 없습니다."),
 	ISSUE_PERSIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "발급 처리 중 오류가 발생했습니다."),
-	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다.");
+	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 오류가 발생했습니다."),
+
+	// 정합성 검증
+	UNSUPPORTED_SCOPE(HttpStatus.INTERNAL_SERVER_ERROR, "지원하지 않는 정합성 검증 스코프입니다."),
+	CHECK_POSTPONED(HttpStatus.SERVICE_UNAVAILABLE, "처리 중인 데이터가 있어 정합성 검증을 보류합니다."),
+	CHECK_IMPOSSIBLE(HttpStatus.GONE, "원본 데이터가 유실되어 정합성 검증을 수행할 수 없습니다."),
+
+	// 정합성 복구
+	VERIFICATION_RESULT_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 결과를 찾을 수 없습니다."),
+	RECOVERY_NOT_APPLICABLE(HttpStatus.CONFLICT, "위반(FAIL) 상태인 검증 결과만 복구할 수 있습니다."),
+	RECOVERY_POLICY_NOT_FOUND(HttpStatus.CONFLICT, "해당 검증 항목에는 복구 정책이 정의되어 있지 않습니다."),
+	RECOVERY_NOT_SUPPORTED_FOR_ALL_SCOPE(HttpStatus.CONFLICT, "ALL 스코프로 생성된 검증 결과는 이벤트 단위로 다시 검증한 뒤 복구할 수 있습니다."),
+	RECOVERY_TARGET_EVENTS_NOT_FOUND(HttpStatus.CONFLICT, "복구할 위반 이벤트를 검증 결과에서 찾을 수 없습니다.");
 
 	private final HttpStatus status;
 	private final String defaultMessage;

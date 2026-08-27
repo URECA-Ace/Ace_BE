@@ -10,6 +10,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -25,6 +26,10 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
 		name = "coupon_issue",
+		indexes = {
+				@Index(name = "idx_coupon_issue_event_user_status_created",
+						columnList = "event_id, user_id, status, created_at")
+		},
 		uniqueConstraints = {
 				@UniqueConstraint(
 						name = "uk_coupon_issue_event_user",
@@ -91,6 +96,43 @@ public class CouponIssue {
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
+	// Stream 원본 위치를 결정적 UUID로 변환하므로 표준 UUID 문자열 길이와 일치한다.
 	@Column(name = "message_id", length = 36)
 	private String messageId;
+
+
+	public void use(LocalDateTime usedAt) {
+		validateTransition(CouponIssueStatus.USED);
+		this.status = CouponIssueStatus.USED;
+		this.usedAt = usedAt;
+		this.canceledAt = null;
+	}
+
+	// 사용 취소
+	public void cancel(LocalDateTime canceledAt) {
+		validateTransition(CouponIssueStatus.ISSUED);
+		this.status = CouponIssueStatus.ISSUED;
+		this.usedAt = null;
+		this.canceledAt = canceledAt;
+	}
+
+	/**
+	 * 재고 초과발급 복구 전용 전이. 일반 사용자 API가 쓰는 {@link CouponIssueStatus#allowedTransitions()}
+	 * 상태머신과는 무관하게, ISSUED 상태의 건만 CANCELED로 되돌린다(슬롯 반납).
+	 */
+	public void revoke(LocalDateTime revokedAt) {
+		if (this.status != CouponIssueStatus.ISSUED) {
+			throw new IllegalStateException(
+					String.format("상태 전이 불가: %s -> %s", this.status, CouponIssueStatus.CANCELED));
+		}
+		this.status = CouponIssueStatus.CANCELED;
+		this.canceledAt = revokedAt;
+	}
+
+	private void validateTransition(CouponIssueStatus target) {
+		if (!this.status.canTransitTo(target)) {
+			throw new IllegalStateException(
+					String.format("상태 전이 불가: %s -> %s", this.status, target));
+		}
+	}
 }

@@ -38,7 +38,17 @@ services:
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
-    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - "60"
+      - "1"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -46,6 +56,30 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    networks:
+      - ace-net
+
+  redis-benchmark:
+    image: redis:8.2
+    container_name: ace-redis-benchmark
+    profiles: ["benchmark"]
+    ports:
+      - "${REDIS_BENCHMARK_PORT:-6380}:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory-policy
+      - noeviction
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
     networks:
       - ace-net
 

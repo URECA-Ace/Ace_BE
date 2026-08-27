@@ -22,8 +22,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.common.exception.CouponException;
 
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import lombok.extern.slf4j.Slf4j;
@@ -37,10 +39,30 @@ public class GlobalExceptionHandler {
 	private static final String EVENT_SEQUENCE_CONSTRAINT = "uk_coupon_issue_event_sequence";
 	private static final String REQUEST_ID_CONSTRAINT = "uk_coupon_issue_request_id";
 	private static final String MESSAGE_ID_CONSTRAINT = "uk_coupon_issue_message_id";
+	private static final String COUPON_EVENT_ROUND_CONSTRAINT = "uk_coupon_event_coupon_round";
 
 	@ExceptionHandler(CouponException.class)
 	public ResponseEntity<ApiResponse<Void>> handleCoupon(
 			CouponException ex,
+			HttpServletRequest request) {
+		ErrorCode errorCode = ex.getErrorCode();
+		String incidentId = null;
+
+		if (errorCode.getStatus().is5xxServerError()) {
+			// 저장 실패처럼 이미 실패 기록을 남긴 경로는 같은 식별자를 그대로 쓴다.
+			// 여기서 새로 발급하면 응답의 incidentId 와 issue_failure_log 가 서로 다른 값이 된다
+			incidentId = logServerError(errorCode.name(), ex, request, ex.getIncidentId());
+		} else {
+			log.warn("[{}] request rejected: method={}, path={}",
+					errorCode, request.getMethod(), request.getRequestURI());
+		}
+
+		return build(errorCode, ex.getMessage(), incidentId);
+	}
+
+	@ExceptionHandler(ConsistencyCheckException.class)
+	public ResponseEntity<ApiResponse<Void>> handleConsistencyCheck(
+			ConsistencyCheckException ex,
 			HttpServletRequest request) {
 		ErrorCode errorCode = ex.getErrorCode();
 		String incidentId = null;
@@ -132,6 +154,12 @@ public class GlobalExceptionHandler {
 			String incidentId = logServerError(ErrorCode.ISSUE_PERSIST_FAILED.name(), ex, request);
 			return build(ErrorCode.ISSUE_PERSIST_FAILED, null, incidentId);
 		}
+		if (COUPON_EVENT_ROUND_CONSTRAINT.equals(constraintName)) {
+			log.warn("[{}] duplicate coupon event round blocked: method={}, path={}",
+					ErrorCode.EVENT_CONFIGURATION_CONFLICT,
+					request.getMethod(), request.getRequestURI());
+			return build(ErrorCode.EVENT_CONFIGURATION_CONFLICT, null);
+		}
 
 		String incidentId = logServerError(ErrorCode.INTERNAL_ERROR.name(), ex, request);
 		return build(ErrorCode.INTERNAL_ERROR, null, incidentId);
@@ -140,6 +168,12 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(NoResourceFoundException.class)
 	public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException ex) {
 		return build(ErrorCode.RESOURCE_NOT_FOUND, null);
+	}
+
+	// Runner가 존재하지 않는 쿠폰 이벤트를 감지하면 공통 404 응답으로 변환한다.
+	@ExceptionHandler(EntityNotFoundException.class)
+	public ResponseEntity<ApiResponse<Void>> handleEntityNotFound(EntityNotFoundException ex) {
+		return build(ErrorCode.EVENT_NOT_FOUND, ex.getMessage());
 	}
 
 	@ExceptionHandler(ResponseStatusException.class)
@@ -200,7 +234,8 @@ public class GlobalExceptionHandler {
 				String normalized = message.toLowerCase(Locale.ROOT);
 				for (String knownConstraint : new String[]{
 						ISSUE_USER_CONSTRAINT, EVENT_SEQUENCE_CONSTRAINT,
-						REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT}) {
+						REQUEST_ID_CONSTRAINT, MESSAGE_ID_CONSTRAINT,
+						COUPON_EVENT_ROUND_CONSTRAINT}) {
 					if (normalized.contains(knownConstraint)) {
 						return knownConstraint;
 					}
@@ -212,7 +247,17 @@ public class GlobalExceptionHandler {
 	}
 
 	private String logServerError(String code, Throwable ex, HttpServletRequest request) {
-		String incidentId = UUID.randomUUID().toString();
+		return logServerError(code, ex, request, null);
+	}
+
+	private String logServerError(
+			String code,
+			Throwable ex,
+			HttpServletRequest request,
+			String presetIncidentId) {
+		String incidentId = presetIncidentId != null
+				? presetIncidentId
+				: UUID.randomUUID().toString();
 		log.error("[{}] server error: incidentId={}, method={}, path={}, exceptionType={}\n{}",
 				code, incidentId, request.getMethod(), request.getRequestURI(),
 				ex.getClass().getName(), sanitizedStackTrace(ex));

@@ -26,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.ace.common.exception.CouponException;
 
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
@@ -121,6 +122,14 @@ class GlobalExceptionHandlerTest {
 	}
 
 	@Test
+	@DisplayName("캠페인 회차 UNIQUE 충돌은 409 설정 충돌로 구분한다")
+	void duplicateCouponEventRound() throws Exception {
+		mockMvc.perform(get("/test/duplicate-coupon-event-round"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.error.code").value("EVENT_CONFIGURATION_CONFLICT"));
+	}
+
+	@Test
 	@DisplayName("@Valid 검증 실패는 400 INVALID_REQUEST 로 응답한다")
 	void validationFailure() throws Exception {
 		mockMvc.perform(post("/test/validate")
@@ -176,6 +185,17 @@ class GlobalExceptionHandlerTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("MISSING_PARAMETER"))
 				.andExpect(jsonPath("$.error.message").value("필수 파라미터가 없습니다: eventId"));
+	}
+
+	@Test
+	@DisplayName("존재하지 않는 이벤트는 404 EVENT_NOT_FOUND로 응답한다")
+	void eventNotFound() throws Exception {
+		mockMvc.perform(get("/test/event-not-found"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.result").value("error"))
+				.andExpect(jsonPath("$.error.code").value("EVENT_NOT_FOUND"))
+				.andExpect(jsonPath("$.error.message")
+						.value("해당 eventId는 존재하지 않습니다. eventId: 999"));
 	}
 
 	@Test
@@ -277,6 +297,12 @@ class GlobalExceptionHandlerTest {
 					"Duplicate entry for key 'uk_coupon_issue_event_sequence'");
 		}
 
+		@GetMapping("/test/duplicate-coupon-event-round")
+		void duplicateCouponEventRound() {
+			throw new DataIntegrityViolationException(
+					"Duplicate entry for key 'uk_coupon_event_coupon_round'");
+		}
+
 		@GetMapping("/test/response-status")
 		void responseStatus() {
 			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "일시적으로 이용할 수 없습니다.");
@@ -295,6 +321,11 @@ class GlobalExceptionHandlerTest {
 		@GetMapping("/test/boom")
 		void boom() {
 			throw new IllegalStateException("내부 상태 오류 - 응답에 노출되면 안 됨");
+		}
+
+		@GetMapping("/test/event-not-found")
+		void eventNotFound() {
+			throw new EntityNotFoundException("해당 eventId는 존재하지 않습니다. eventId: 999");
 		}
 
 		@GetMapping("/test/internal-coupon-error")

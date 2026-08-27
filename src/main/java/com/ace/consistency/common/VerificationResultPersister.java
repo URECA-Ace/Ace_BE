@@ -2,7 +2,6 @@ package com.ace.consistency.common;
 
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
-import com.ace.event.consistency.ConsistencyCheckFailedEvent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -18,6 +17,7 @@ import java.util.List;
 public class VerificationResultPersister {
 
 	private final VerificationResultRepository resultRepository;
+	//todo: notify 도메인 머지 후 주석해제
 	private final ApplicationEventPublisher eventPublisher;
 
 	@Transactional
@@ -27,6 +27,8 @@ public class VerificationResultPersister {
 				results.stream().map(VerificationResultEntity::from).toList()
 		);
 
+		//todo: notify 도메인 머지 후 주석해제
+		/*
 		results.stream()
 				.filter(r -> !r.isPass())
 				.forEach(r -> eventPublisher.publishEvent(
@@ -39,5 +41,6 @@ public class VerificationResultPersister {
 								.detectedAt(LocalDateTime.now())
 								.build()
 				));
+		*/
 	}
 }
