@@ -198,6 +198,36 @@ class ConfirmFailureRetryServiceTest {
 		assertThat(lastOne.isResolved()).isTrue();
 	}
 
+	@Test
+	@DisplayName("회수할 대상이 없으면 경보 집계 쿼리를 돌리지 않는다")
+	void skipsAlertQueriesWhenNothingToRetry() {
+		SweepResult result = service.retryFailedConfirmations();
+
+		assertThat(result.scanned()).isZero();
+		assertThat(result.hasUnrecovered()).isFalse();
+		verify(failureLogRepository, never()).countUnrecoverable(any(), any());
+		verify(failureLogRepository, never()).findBlockedEventIds(any(), any());
+	}
+
+	@Test
+	@DisplayName("같은 상태가 이어지면 경보를 다시 남기지 않는다")
+	void doesNotRepeatIdenticalAlert() {
+		// 매번 남기면 주기마다 같은 경보가 쌓인다
+		IssueFailureLog first = failure(1L);
+		givenTargets(first);
+		givenConfirm(first, CouponIssueConfirmResult.CORRUPTED_STATE);
+		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(1L);
+		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(101L));
+
+		SweepResult firstSweep = service.retryFailedConfirmations();
+		SweepResult secondSweep = service.retryFailedConfirmations();
+
+		// 상태가 같으므로 두 결과의 경보 내용이 동일하다
+		assertThat(firstSweep.hasUnrecovered()).isTrue();
+		assertThat(secondSweep.hasUnrecovered()).isTrue();
+		assertThat(secondSweep.blockedEventIds()).isEqualTo(firstSweep.blockedEventIds());
+	}
+
 	private void givenTargets(IssueFailureLog... failures) {
 		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(0L), any()))
 				.willReturn(List.of(failures));

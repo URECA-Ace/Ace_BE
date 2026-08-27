@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,9 @@ public class ConfirmFailureRetryService {
 	private static final Set<String> RETRYABLE_RESULTS = Set.of(
 			IssuePersistenceCoordinator.CALL_FAILED,
 			CouponIssueConfirmResult.INTERNAL_WRITE_ERROR.name());
+
+	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
+	private final AtomicReference<String> lastReport = new AtomicReference<>();
 
 	private final IssueFailureLogRepository failureLogRepository;
 	private final RedisCouponIssueProcessor issueProcessor;
@@ -73,6 +77,11 @@ public class ConfirmFailureRetryService {
 			if (targets.size() < RETRY_BATCH_SIZE) {
 				break;
 			}
+		}
+
+		if (scanned == 0) {
+			// 회수할 대상이 없으면 상태가 달라지지 않았다
+			return SweepResult.idle();
 		}
 
 		SweepResult result = new SweepResult(
@@ -136,6 +145,13 @@ public class ConfirmFailureRetryService {
 	// 회수하지 못한 건이 어느 회차를 막고 있는지 표시
 	private void warnWhenUnrecovered(SweepResult result) {
 		if (!result.hasUnrecovered()) {
+			lastReport.set(null);
+			return;
+		}
+		// 확인 필요 건은 사람이 손대기 전까지 사라지지 않는다
+		// 매번 남기면 같은 경보가 주기마다 반복되므로 달라졌을 때만 남긴다
+		String report = result.signature();
+		if (report.equals(lastReport.getAndSet(report))) {
 			return;
 		}
 		log.warn("확정 실패를 회수하지 못했습니다. "
@@ -154,6 +170,17 @@ public class ConfirmFailureRetryService {
 			int retryFailed,
 			long unrecoverable,
 			List<Long> blockedEventIds) {
+
+		// 회수할 대상이 없던 주기
+		static SweepResult idle() {
+			return new SweepResult(0, 0, 0, 0, 0, 0, 0L, List.of());
+		}
+
+		// 경보 중복 판단용
+		String signature() {
+			return expired + "/" + notRetryable + "/" + retryFailed
+					+ "/" + unrecoverable + "/" + blockedEventIds;
+		}
 
 		// 확정 카운터가 올라간 건수
 		public int recovered() {

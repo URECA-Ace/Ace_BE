@@ -25,7 +25,11 @@ import java.time.LocalDateTime;
 		name = "issue_failure_log",
 		indexes = {
 				@Index(name = "idx_issue_failure_log_request", columnList = "request_id"),
-				@Index(name = "idx_issue_failure_log_event_stage", columnList = "event_id, failure_stage")
+				@Index(name = "idx_issue_failure_log_event_stage", columnList = "event_id, failure_stage"),
+				// 재처리 대상 조회용
+				@Index(
+						name = "idx_issue_failure_log_retry",
+						columnList = "failure_stage, compensation_result, resolved_at, failure_id")
 		}
 )
 @Getter
