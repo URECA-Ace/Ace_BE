@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import com.ace.coupon.service.CouponEventOpenService;
+import com.ace.coupon.service.CouponEventOpenService.TransitionResult;
 
 class CouponEventOpenSchedulerTest {
 
@@ -21,10 +22,13 @@ class CouponEventOpenSchedulerTest {
 	}
 
 	@Test
-	@DisplayName("스케줄러 실행 시 오픈 대상 캠페인 전환을 한 번 요청한다")
-	void delegatesOpeningDueEvents() {
-		scheduler.openDueEvents();
+	@DisplayName("스케줄러 실행 시 예약 오픈과 자동 마감 전환을 한 번 요청한다")
+	void delegatesDueEventTransitions() {
+		Mockito.when(couponEventOpenService.transitionDueEvents())
+				.thenReturn(new TransitionResult(1, 1));
 
-		verify(couponEventOpenService).openDueEvents();
+		scheduler.transitionDueEvents();
+
+		verify(couponEventOpenService).transitionDueEvents();
 	}
 }

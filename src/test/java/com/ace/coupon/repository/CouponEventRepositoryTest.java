@@ -71,6 +71,44 @@ class CouponEventRepositoryTest {
 	}
 
 	@Test
+	@DisplayName("마감 시각에 도달한 SCHEDULED, OPEN, SOLD_OUT 캠페인을 CLOSED로 전환한다")
+	void closesAllDueCampaignStatuses() {
+		LocalDateTime databaseNow = entityManager
+				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
+				.getSingleResult()
+				.toLocalDateTime();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent scheduled = persistEvent(
+				coupon, 31, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		CouponEvent open = persistEvent(
+				coupon, 32, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent soldOut = persistEvent(
+				coupon, 33, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
+				CouponEventStatus.SOLD_OUT, databaseNow);
+		CouponEvent future = persistEvent(
+				coupon, 34, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
+				CouponEventStatus.OPEN, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int first = couponEventRepository.closeDueEvents(
+				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
+				CouponEventStatus.CLOSED);
+		int duplicate = couponEventRepository.closeDueEvents(
+				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
+				CouponEventStatus.CLOSED);
+
+		assertThat(first).isEqualTo(3);
+		assertThat(duplicate).isZero();
+		assertThat(findStatus(scheduled.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(soldOut.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(future.getId())).isEqualTo(CouponEventStatus.OPEN);
+	}
+
+	@Test
 	@DisplayName("Redis 복구 대상 조회는 마감 전 SCHEDULED와 OPEN 캠페인만 반환한다")
 	void findsOnlyActiveCampaignsForRedisRecovery() {
 		LocalDateTime databaseNow = entityManager
