@@ -55,7 +55,7 @@ public class ConfirmFailureRetryService {
 			IssueFailureLogRepository failureLogRepository,
 			RedisCouponIssueProcessor issueProcessor,
 			CouponIssueRedisProperties properties,
-			@Value("${coupon.issue.confirm-retry.batch-size:100}") int batchSize) {
+			@Value("${coupon.issue.confirm-retry.batch-size:1000}") int batchSize) {
 		this.failureLogRepository = failureLogRepository;
 		this.issueProcessor = issueProcessor;
 		this.properties = properties;

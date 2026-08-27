@@ -24,7 +24,7 @@ public class ConfirmFailureRetryScheduler {
 
 	@Scheduled(
 			initialDelayString = "${coupon.issue.confirm-retry.initial-delay-ms:10000}",
-			fixedDelayString = "${coupon.issue.confirm-retry.fixed-delay-ms:300000}")
+			fixedDelayString = "${coupon.issue.confirm-retry.fixed-delay-ms:60000}")
 	public void retryFailedConfirmations() {
 		try {
 			ConfirmFailureRetryService.SweepResult result =
