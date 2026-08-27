@@ -27,7 +27,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPE_CONDITION = """
@@ -61,8 +60,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
                   (sub.rn > 1 AND NOT (sub.from_status <=> sub.prev_to_status))
               )
             ORDER BY sub.issue_id
-            LIMIT %d
-            """.formatted(SCOPE_CONDITION, SAMPLE_LIMIT);
+            """.formatted(SCOPE_CONDITION);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

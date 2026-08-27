@@ -25,7 +25,11 @@ import java.time.LocalDateTime;
 		name = "issue_failure_log",
 		indexes = {
 				@Index(name = "idx_issue_failure_log_request", columnList = "request_id"),
-				@Index(name = "idx_issue_failure_log_event_stage", columnList = "event_id, failure_stage")
+				@Index(name = "idx_issue_failure_log_event_stage", columnList = "event_id, failure_stage"),
+				// 재처리 대상 조회용
+				@Index(
+						name = "idx_issue_failure_log_retry",
+						columnList = "failure_stage, compensation_result, resolved_at, last_attempt_at")
 		}
 )
 @Getter
@@ -69,4 +73,52 @@ public class IssueFailureLog {
 
 	@Column(name = "occurred_at", nullable = false, columnDefinition = "datetime(6)")
 	private LocalDateTime occurredAt;
+
+	// 마지막으로 재확인을 시도한 시각
+	// NULL 이면 아직 시도한 적이 없다
+	@Column(name = "last_attempt_at", columnDefinition = "datetime(6)")
+	private LocalDateTime lastAttemptAt;
+
+	// 재확인을 시도한 횟수
+	// 같은 건이 계속 실패하는 것을 드러낸다
+	@Column(name = "attempt_count", nullable = false, columnDefinition = "int not null default 0")
+	private int attemptCount;
+
+	// 회수가 끝난 시각
+	@Column(name = "resolved_at", columnDefinition = "datetime(6)")
+	private LocalDateTime resolvedAt;
+
+	public boolean isResolved() {
+		return resolvedAt != null;
+	}
+
+	// 재확인을 시도했다는 사실을 남긴다
+	// 성공/실패와 무관하게 기록해야 다음 회전에서 뒤로 밀린다
+	public void recordAttempt(LocalDateTime attemptedAt) {
+		if (attemptedAt == null) {
+			throw new IllegalArgumentException("시도 시각이 필요합니다.");
+		}
+		this.lastAttemptAt = attemptedAt;
+		this.attemptCount++;
+	}
+
+	// 재확인 결과를 최신 판정으로 갱신
+	// 갱신하지 않으면 최초 기록값이 남아 재처리기가 매 주기 같은 건을 다시 집는다
+	public void updateConfirmResult(String confirmResult) {
+		if (confirmResult == null || confirmResult.isBlank()) {
+			throw new IllegalArgumentException("확정 판정 값이 필요합니다.");
+		}
+		this.compensationResult = confirmResult;
+	}
+
+	// 확정이 실제로 끝난 건만 해소로 표시
+	public void resolve(LocalDateTime resolvedAt) {
+		if (resolvedAt == null) {
+			throw new IllegalArgumentException("해소 시각이 필요합니다.");
+		}
+		if (this.resolvedAt != null) {
+			return;
+		}
+		this.resolvedAt = resolvedAt;
+	}
 }

@@ -32,6 +32,8 @@ import com.ace.coupon.service.CouponIssueService;
 @Tag("issuance-accuracy")
 @SpringBootTest
 @TestPropertySource(properties = {
+		// 백그라운드 스케쥴러가 회차 상태와 집계 컬럼을 바꾸면 검증 결과가 타이밍에 좌우되는 것을 방지
+		"coupon.campaign.aggregate-snapshot.enabled=false",
 		"coupon.issue.persistence.mode=RELAY",
 		"coupon.issue.persistence.refresh-interval=1s",
 		"coupon.issue.persistence.block-timeout=100ms",

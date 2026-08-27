@@ -18,7 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class IssuePersistenceCoordinator {
 
-	private static final String CALL_FAILED = "CALL_FAILED";
+	// 확정 호출 자체가 예외로 끝난 경우
+	public static final String CALL_FAILED = "CALL_FAILED";
 	private static final String COMPENSATION_SKIPPED_PERSISTED = "SKIPPED_PERSISTED";
 	private static final String COMPENSATION_SKIPPED_UNVERIFIED = "SKIPPED_UNVERIFIED";
 

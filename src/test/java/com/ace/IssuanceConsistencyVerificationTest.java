@@ -54,6 +54,7 @@ import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.issuance.IssuanceTestFixture;
 import com.ace.coupon.redis.CampaignRedisInitializer;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.coupon.service.CouponEventLifecycleService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
@@ -77,6 +78,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @TestPropertySource(properties = {
+		// 백그라운드 스케쥴러가 회차 상태와 집계 컬럼을 바꾸면 검증 결과가 타이밍에 좌우되는 것을 방지
+		"coupon.campaign.aggregate-snapshot.enabled=false",
 		"coupon.issue.persistence.mode=SYNC",
 		"spring.jpa.open-in-view=false",
 		"spring.jpa.show-sql=false"
@@ -125,6 +128,9 @@ class IssuanceConsistencyVerificationTest {
 
 	@Autowired
 	private JobRepository jobRepository;
+
+	@Autowired
+	private CouponEventLifecycleService lifecycleService;
 
 	@Autowired
 	private StockConsistencyCheck stockConsistencyCheck;
@@ -215,6 +221,16 @@ class IssuanceConsistencyVerificationTest {
 		}
 	}
 
+	private Map<String, Object> aggregateOfEvent() {
+		return jdbcTemplate.queryForMap(
+				"SELECT status, total_stock, issued_quantity, remaining_stock FROM coupon_event WHERE event_id = ?",
+				eventId);
+	}
+
+	private int intOf(Map<String, Object> row, String column) {
+		return ((Number) row.get(column)).intValue();
+	}
+
 	// 부하에 참여하지 않아 이 이벤트에 발급 이력이 없는 user_id를 하나 빌려온다 (FK/유니크 제약을 안전하게 피한다)
 	private long freshUserId() {
 		return jdbcTemplate.queryForObject("""
@@ -244,9 +260,51 @@ class IssuanceConsistencyVerificationTest {
 
 	@Test
 	@Order(1)
-	@DisplayName("1만 건이 정상 적재되면 모든 정합성 검증을 통과한다")
+	@DisplayName("발급이 끝나고 파이프라인이 비면 회차를 소진 처리하고 집계 컬럼을 확정한다")
+	void marksSoldOutAndFinalizesAggregate() {
+		// 재고 차감은 Redis 안에서만 일어나므로, 발급이 끝나도 집계 컬럼은 회차를 만든 시점 값 그대로다
+		Map<String, Object> beforeSweep = aggregateOfEvent();
+		assertThat(beforeSweep.get("status")).isEqualTo("OPEN");
+		assertThat(intOf(beforeSweep, "issued_quantity")).isZero();
+		assertThat(intOf(beforeSweep, "remaining_stock")).isEqualTo(stock);
+
+		lifecycleService.sweep();
+
+		// markSoldOut 은 집계를 건드리지 않는다.
+		// 상태와 집계가 함께 맞아야 최종 스냅샷이 상태 전환보다 먼저 반영됐다는 뜻이다
+		Map<String, Object> afterSweep = aggregateOfEvent();
+		assertThat(afterSweep.get("status")).isEqualTo("SOLD_OUT");
+		assertThat(intOf(afterSweep, "issued_quantity")).isEqualTo(stock);
+		assertThat(intOf(afterSweep, "remaining_stock")).isZero();
+	}
+
+	@Test
+	@Order(2)
+	@DisplayName("마감 시각이 지나면 회차를 마감하고 확정된 집계를 그대로 유지한다")
+	void closesEventAndKeepsFinalizedAggregate() {
+		// 실제 운영에서 close_at 이 지나는 것과 같은 상태로 만든다.
+		// 마감 판정은 DB의 CURRENT_TIMESTAMP 로 하므로 시각도 DB 쪽에서 만든다.
+		// JVM 시각을 넣으면 컨테이너와 시간대가 달라(UTC vs KST) 미래 시각이 된다
+		jdbcTemplate.update(
+				"UPDATE coupon_event SET close_at = CURRENT_TIMESTAMP - INTERVAL 1 MINUTE WHERE event_id = ?",
+				eventId);
+
+		lifecycleService.sweep();
+
+		// coupon_event.status 가 검증팀의 Drain 조건이다
+		Map<String, Object> aggregate = aggregateOfEvent();
+		assertThat(aggregate.get("status")).isEqualTo("CLOSED");
+		assertThat(intOf(aggregate, "issued_quantity")).isEqualTo(stock);
+		assertThat(intOf(aggregate, "remaining_stock")).isZero();
+	}
+
+	@Test
+	@Order(3)
+	@DisplayName("마감까지 끝난 회차는 모든 정합성 검증을 통과한다")
 	@Timeout(180)
-	void passesAllChecksOnCleanLoad() throws Exception {
+	void passesAllChecksOnClosedEvent() throws Exception {
+		// 이 회차는 앞의 두 테스트에서 최종 스냅샷 반영과 마감을 거쳤다.
+		// 집계 컬럼을 옮기는 경로가 없으면 StockConsistencyCheck 가 여기서 위반을 잡는다
 		Long maxIdBefore = jdbcTemplate.queryForObject(
 				"SELECT COALESCE(MAX(id), 0) FROM verification_result", Long.class);
 
@@ -284,7 +342,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(2)
+	@Order(4)
 	@DisplayName("재고 카운터에 반영되지 않은 초과 발급이 섞이면 재고 정합성 검증이 잡아낸다")
 	void detectsOverIssuance() {
 		LocalDateTime now = LocalDateTime.now();
@@ -298,7 +356,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(3)
+	@Order(5)
 	@DisplayName("필수값이 깨진 발급 건이 섞이면 발급 구조 정합성 검증이 잡아낸다")
 	void detectsStructuralViolation() {
 		LocalDateTime now = LocalDateTime.now();
@@ -312,7 +370,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(4)
+	@Order(6)
 	@DisplayName("허용되지 않은 상태 전이 이력이 섞이면 이력 구조 정합성 검증이 잡아낸다")
 	void detectsInvalidHistoryTransition() {
 		LocalDateTime now = LocalDateTime.now();
@@ -330,7 +388,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(5)
+	@Order(7)
 	@DisplayName("이력이 하나도 없는 발급 건이 섞이면 상태 동기화 정합성 검증이 잡아낸다")
 	void detectsMissingHistory() {
 		LocalDateTime now = LocalDateTime.now();
@@ -345,7 +403,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(6)
+	@Order(8)
 	@DisplayName("발급 시각과 이력 시각이 크게 어긋나면 시간 동기화 정합성 검증이 잡아낸다")
 	void detectsTimeDesync() {
 		LocalDateTime issuedAt = LocalDateTime.now();
@@ -362,7 +420,7 @@ class IssuanceConsistencyVerificationTest {
 	}
 
 	@Test
-	@Order(7)
+	@Order(9)
 	@DisplayName("만료 배치 처리 지연을 넘긴 발급 건이 섞이면 만료 지연 정합성 검증이 잡아낸다")
 	void detectsExpirationBatchDelay() {
 		// 기본 허용 지연은 24시간(application.properties) - valid_to 를 25시간 전으로 만들어 넘긴다
