@@ -78,6 +78,15 @@ public class IssueFailureLog {
 		return resolvedAt != null;
 	}
 
+	// 재확인 결과를 최신 판정으로 갱신
+	// 갱신하지 않으면 최초 기록값이 남아 재처리기가 매 주기 같은 건을 다시 집는다
+	public void updateConfirmResult(String confirmResult) {
+		if (confirmResult == null || confirmResult.isBlank()) {
+			throw new IllegalArgumentException("확정 판정 값이 필요합니다.");
+		}
+		this.compensationResult = confirmResult;
+	}
+
 	// 확정이 실제로 끝난 건만 해소로 표시
 	public void resolve(LocalDateTime resolvedAt) {
 		if (resolvedAt == null) {
