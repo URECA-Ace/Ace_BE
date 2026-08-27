@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.ace.coupon.dto.response.CouponIssuanceLogItemResponse;
 import com.ace.coupon.dto.response.CouponIssuanceLogResponse;
+import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.service.CouponIssuanceLogService;
 
 @WebMvcTest(CouponIssuanceLogController.class)
@@ -40,7 +41,11 @@ class CouponIssuanceLogControllerTest {
 						EVENT_ID,
 						List.of(new CouponIssuanceLogItemResponse(
 								101L,
+								"홍*동",
+								"hon****@example.com",
+								"010-****-5678",
 								21,
+								CouponIssueStatus.ISSUED,
 								OffsetDateTime.parse("2026-08-27T10:00:00+09:00"),
 								OffsetDateTime.parse("2026-08-27T10:00:01+09:00"))),
 						21,
@@ -53,7 +58,13 @@ class CouponIssuanceLogControllerTest {
 				.andExpect(header().string("Cache-Control", "no-store"))
 				.andExpect(jsonPath("$.data.eventId").value(EVENT_ID))
 				.andExpect(jsonPath("$.data.logs[0].userId").value(101))
+				.andExpect(jsonPath("$.data.logs[0].maskedUserName").value("홍*동"))
+				.andExpect(jsonPath("$.data.logs[0].maskedUserEmail")
+						.value("hon****@example.com"))
+				.andExpect(jsonPath("$.data.logs[0].maskedUserPhone")
+						.value("010-****-5678"))
 				.andExpect(jsonPath("$.data.logs[0].issueSequence").value(21))
+				.andExpect(jsonPath("$.data.logs[0].status").value("ISSUED"))
 				.andExpect(jsonPath("$.data.logs[0].confirmedAt")
 						.value("2026-08-27T10:00:01+09:00"))
 				.andExpect(jsonPath("$.data.nextSequence").value(21))
