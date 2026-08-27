@@ -141,9 +141,12 @@ class RedisCouponIssueIntegrationTest {
 		initializer.initialize(campaignId, 10, now.minusSeconds(10), now.plusSeconds(600));
 
 		CampaignCloseDecision closeDecision = closer.close(campaignId);
+		CampaignCloseDecision replayDecision = closer.close(campaignId);
 		CouponIssueDecision issueDecision = processor.issue(campaignId, 1L, UUID.randomUUID());
 
 		assertThat(closeDecision.result()).isEqualTo(CampaignCloseResult.CLOSED);
+		assertThat(replayDecision.result()).isEqualTo(CampaignCloseResult.ALREADY_CLOSED);
+		assertThat(replayDecision.closedAt()).isEqualTo(closeDecision.closedAt());
 		assertThat(issueDecision.code()).isEqualTo(CouponIssueLuaCode.EVENT_CLOSED);
 		assertThat(statsReader.read(campaignId).status()).isEqualTo(CouponEventStatus.CLOSED);
 	}

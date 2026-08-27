@@ -38,16 +38,16 @@ class CampaignRedisCloserTest {
 	}
 
 	@Test
-	@DisplayName("Lua 마감 결과와 Redis 관측 시각을 반환한다")
+	@DisplayName("Lua 마감 결과와 실제 마감 시각을 반환한다")
 	void closesUsingRedisServerTime() {
-		long observedAt = Instant.parse("2026-08-27T01:00:00Z").toEpochMilli();
+		long closedAt = Instant.parse("2026-08-27T01:00:00Z").toEpochMilli();
 		given(redisTemplate.execute(any(RedisScript.class), anyList()))
-				.willReturn(List.of(0L, observedAt, 0L, ""));
+				.willReturn(List.of(0L, closedAt, 0L, ""));
 
 		CampaignCloseDecision decision = closer.close(51L);
 
 		assertThat(decision.result()).isEqualTo(CampaignCloseResult.CLOSED);
-		assertThat(decision.observedAt()).isEqualTo(Instant.ofEpochMilli(observedAt));
+		assertThat(decision.closedAt()).isEqualTo(Instant.ofEpochMilli(closedAt));
 		verify(failureObserver).observe(RedisLuaDiagnosticStage.NONE, "CLOSED", "");
 	}
 }

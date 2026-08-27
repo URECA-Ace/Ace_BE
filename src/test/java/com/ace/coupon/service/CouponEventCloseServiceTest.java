@@ -101,17 +101,39 @@ class CouponEventCloseServiceTest {
 	}
 
 	@Test
-	@DisplayName("Redis 키가 없어도 마감 시각을 당겨 sweep 이 이어받게 한다")
-	void advancesCloseAtWhenRedisWasNotInitialized() {
+	@DisplayName("Redis 키가 없으면 DB 마감 시각을 변경하지 않고 재시도 가능 오류를 반환한다")
+	void rejectsCloseWhenRedisWasNotInitialized() {
 		given(couponEventRepository.findById(51L))
-				.willReturn(Optional.of(event(CouponEventStatus.OPEN)))
-				.willReturn(Optional.of(event(CouponEventStatus.CLOSED)));
+				.willReturn(Optional.of(event(CouponEventStatus.OPEN)));
 		given(campaignRedisCloser.close(51L))
 				.willReturn(new CampaignCloseDecision(CampaignCloseResult.NOT_INITIALIZED, CLOSED_AT));
-		given(lifecycleService.closeIfDrained(51L)).willReturn(CloseAttempt.CLOSED);
 
-		assertThat(service.close(51L).status()).isEqualTo(CouponEventStatus.CLOSED);
-		verify(couponEventRepository).advanceCloseAt(anyLong(), any(), any());
+		assertThatThrownBy(() -> service.close(51L))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode())
+								.isEqualTo(ErrorCode.CAMPAIGN_CLOSE_TEMPORARILY_UNAVAILABLE));
+		verify(couponEventRepository, never()).advanceCloseAt(anyLong(), any(), any());
+		verify(lifecycleService, never()).closeIfDrained(anyLong());
+	}
+
+	@Test
+	@DisplayName("반복 마감은 Redis에 저장된 기존 마감 시각을 반환한다")
+	void returnsExistingCloseAtForRepeatedClose() {
+		Instant existingCloseAt = CLOSED_AT.minusSeconds(30);
+		given(couponEventRepository.findById(51L))
+				.willReturn(Optional.of(event(CouponEventStatus.OPEN)));
+		given(campaignRedisCloser.close(51L))
+				.willReturn(new CampaignCloseDecision(
+						CampaignCloseResult.ALREADY_CLOSED, existingCloseAt));
+		given(lifecycleService.closeIfDrained(51L)).willReturn(CloseAttempt.WAITING_FOR_DRAIN);
+
+		var response = service.close(51L);
+
+		assertThat(response.closedAt().toInstant()).isEqualTo(existingCloseAt);
+		verify(couponEventRepository).advanceCloseAt(
+				51L,
+				List.of(CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
+				LocalDateTime.ofInstant(existingCloseAt, ZoneId.of("Asia/Seoul")));
 	}
 
 	@Test
