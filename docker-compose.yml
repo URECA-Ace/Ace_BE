@@ -141,10 +141,37 @@ services:
         rm -rf /volume/*
         tar xzf "$$FILE" -C /volume
         echo "복원 완료"
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: ace-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - ace-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ace-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - ace-net
+
 volumes:
   mysql-data:
   redis-data:
   kafka-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   ace-net:
