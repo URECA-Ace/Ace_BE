@@ -1,7 +1,5 @@
 package com.ace.coupon.dto.response;
 
-import java.time.Instant;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 
@@ -20,14 +18,7 @@ public record CouponEventSummaryResponse(
 		OffsetDateTime closeAt,
 		OffsetDateTime statusChangedAt) {
 
-	public static CouponEventSummaryResponse from(CouponEvent event, ZoneId zoneId, Instant observedAt) {
-		Instant openAt = event.getOpenAt().atZone(zoneId).toInstant();
-		Instant closeAt = event.getCloseAt().atZone(zoneId).toInstant();
-		CouponEventStatus effectiveStatus = effectiveStatus(event.getStatus(), observedAt, openAt, closeAt);
-		LocalDateTime statusChangedAt = effectiveStatus == event.getStatus()
-				? event.getUpdatedAt()
-				: effectiveStatus == CouponEventStatus.OPEN ? event.getOpenAt() : event.getCloseAt();
-
+	public static CouponEventSummaryResponse from(CouponEvent event, ZoneId zoneId) {
 		return new CouponEventSummaryResponse(
 				event.getId(),
 				event.getCoupon().getId(),
@@ -35,29 +26,9 @@ public record CouponEventSummaryResponse(
 				event.getRound(),
 				event.getTotalStock(),
 				event.getRemainingStock(),
-				effectiveStatus,
+				event.getStatus(),
 				event.getOpenAt().atZone(zoneId).toOffsetDateTime(),
 				event.getCloseAt().atZone(zoneId).toOffsetDateTime(),
-				statusChangedAt.atZone(zoneId).toOffsetDateTime());
-	}
-
-	private static CouponEventStatus effectiveStatus(
-			CouponEventStatus storedStatus,
-			Instant observedAt,
-			Instant openAt,
-			Instant closeAt) {
-		if (storedStatus == CouponEventStatus.CLOSED) {
-			return CouponEventStatus.CLOSED;
-		}
-		if (observedAt.isBefore(openAt)) {
-			return CouponEventStatus.SCHEDULED;
-		}
-		if (!observedAt.isBefore(closeAt)) {
-			return CouponEventStatus.CLOSED;
-		}
-		if (storedStatus == CouponEventStatus.SOLD_OUT) {
-			return CouponEventStatus.SOLD_OUT;
-		}
-		return CouponEventStatus.OPEN;
+				event.getUpdatedAt().atZone(zoneId).toOffsetDateTime());
 	}
 }
