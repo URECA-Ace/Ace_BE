@@ -1,5 +1,6 @@
 package com.ace.coupon.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -16,6 +17,10 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/v1/events")
+@ConditionalOnProperty(
+		prefix = "coupon.campaign.close-admin",
+		name = "enabled",
+		havingValue = "true")
 @RequiredArgsConstructor
 @Validated
 public class CouponEventCloseController {

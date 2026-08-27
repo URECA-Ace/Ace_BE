@@ -37,10 +37,10 @@ public class CampaignRedisCloser {
 		}
 
 		CampaignCloseResult result = CampaignCloseResult.from(number(response.get(0)));
-		Instant observedAt = Instant.ofEpochMilli(number(response.get(1)));
+		Instant closedAt = Instant.ofEpochMilli(number(response.get(1)));
 		RedisLuaDiagnosticStage stage = RedisLuaDiagnosticStage.from(number(response.get(2)));
 		failureObserver.observe(stage, result.name(), text(response.get(3)));
-		return new CampaignCloseDecision(result, observedAt);
+		return new CampaignCloseDecision(result, closedAt);
 	}
 
 	private long number(Object value) {

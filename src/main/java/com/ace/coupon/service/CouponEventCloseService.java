@@ -68,7 +68,7 @@ public class CouponEventCloseService {
 		CampaignCloseDecision decision = closeInRedis(eventId);
 		validateRedisDecision(decision.result());
 
-		LocalDateTime closedAt = toLocalDateTime(decision.observedAt());
+		LocalDateTime closedAt = toLocalDateTime(decision.closedAt());
 		couponEventRepository.advanceCloseAt(eventId, CLOSABLE_STATUSES, closedAt);
 
 		// 상태 전환은 Drain 을 확인하는 한 경로로만
@@ -114,11 +114,11 @@ public class CouponEventCloseService {
 
 	private void validateRedisDecision(CampaignCloseResult result) {
 		switch (result) {
-			case CLOSED, ALREADY_CLOSED, NOT_INITIALIZED -> {
-				// Redis가 없으면 발급도 불가능하다. 마감 시각을 당겨 두면 sweep 이 이어받는다.
+			case CLOSED, ALREADY_CLOSED -> {
+				// Redis가 반환한 실제 마감 시각을 DB에 반영한다.
 			}
 			case INVALID_STATE -> throw new CouponException(ErrorCode.INVALID_STATE_TRANSITION);
-			case CORRUPTED_STATE, INTERNAL_WRITE_ERROR -> throw new CouponException(
+			case NOT_INITIALIZED, CORRUPTED_STATE, INTERNAL_WRITE_ERROR -> throw new CouponException(
 					ErrorCode.CAMPAIGN_CLOSE_TEMPORARILY_UNAVAILABLE);
 		}
 	}
