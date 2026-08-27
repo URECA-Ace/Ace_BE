@@ -96,6 +96,22 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			@Param("scheduledStatus") CouponEventStatus scheduledStatus,
 			@Param("openStatus") CouponEventStatus openStatus);
 
+	/**
+	 * 마감 시각에 도달한 캠페인을 한 번의 조건부 UPDATE로 전환한다.
+	 * 오픈 스케줄러가 지연돼 SCHEDULED에 머문 회차와 SOLD_OUT 회차도 최종 CLOSED로 수렴한다.
+	 */
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.status = :closedStatus,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.status IN :closableStatuses
+				AND event.closeAt <= CURRENT_TIMESTAMP
+			""")
+	int closeDueEvents(
+			@Param("closableStatuses") List<CouponEventStatus> closableStatuses,
+			@Param("closedStatus") CouponEventStatus closedStatus);
+
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("""
 			UPDATE CouponEvent event
