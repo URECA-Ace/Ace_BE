@@ -22,8 +22,8 @@ public class CouponEventOpenScheduler {
 	private final CouponEventOpenService couponEventOpenService;
 
 	@Scheduled(
-			initialDelayString = "${coupon.campaign.status-scheduler.initial-delay-ms:1000}",
-			fixedDelayString = "${coupon.campaign.status-scheduler.fixed-delay-ms:1000}")
+			cron = "${coupon.campaign.status-scheduler.cron:1,31 * * * * *}",
+			zone = "${coupon.campaign.status-scheduler.zone:Asia/Seoul}")
 	public void transitionDueEvents() {
 		var result = couponEventOpenService.transitionDueEvents();
 		if (result.openedCount() > 0 || result.closedCount() > 0) {

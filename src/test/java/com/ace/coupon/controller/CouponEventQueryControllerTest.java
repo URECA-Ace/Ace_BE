@@ -39,14 +39,16 @@ class CouponEventQueryControllerTest {
 						51L, 7L, "U+ 데이터 하루 무제한 쿠폰", 3,
 						10_000, 10_000, CouponEventStatus.OPEN,
 						OffsetDateTime.parse("2026-08-25T10:00:00+09:00"),
-						OffsetDateTime.parse("2026-08-25T23:59:59+09:00"))));
+						OffsetDateTime.parse("2026-08-25T23:59:59+09:00"),
+						OffsetDateTime.parse("2026-08-25T10:00:01+09:00"))));
 
 		mockMvc.perform(get("/api/v1/events/recent"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.result").value("success"))
 				.andExpect(jsonPath("$.data[0].eventId").value(51))
 				.andExpect(jsonPath("$.data[0].couponName").value("U+ 데이터 하루 무제한 쿠폰"))
-				.andExpect(jsonPath("$.data[0].round").value(3));
+				.andExpect(jsonPath("$.data[0].round").value(3))
+				.andExpect(jsonPath("$.data[0].statusChangedAt").value("2026-08-25T10:00:01+09:00"));
 
 		verify(couponEventQueryService).findRecentEvents(null, 6);
 	}
