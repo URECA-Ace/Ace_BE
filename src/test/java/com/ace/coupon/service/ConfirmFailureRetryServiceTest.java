@@ -30,6 +30,9 @@ import com.ace.coupon.service.ConfirmFailureRetryService.SweepResult;
 
 class ConfirmFailureRetryServiceTest {
 
+	private static final int BATCH_SIZE = 3;
+	private static final int MAX_PAGES = 2;
+
 	private IssueFailureLogRepository failureLogRepository;
 	private RedisCouponIssueProcessor issueProcessor;
 	private ConfirmFailureRetryService service;
@@ -41,7 +44,9 @@ class ConfirmFailureRetryServiceTest {
 		service = new ConfirmFailureRetryService(
 				failureLogRepository,
 				issueProcessor,
-				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")));
+				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
+				BATCH_SIZE,
+				MAX_PAGES);
 
 		given(failureLogRepository.findRetryTargets(any(), any(), anyLong(), any()))
 				.willReturn(List.of());
@@ -178,35 +183,72 @@ class ConfirmFailureRetryServiceTest {
 	@DisplayName("대상이 한 페이지를 넘으면 커서로 다음 페이지까지 훑는다")
 	void sweepsBeyondTheFirstPage() {
 		// 재시도 가능한 건만 남아도 계속 실패하면 앞 페이지가 채워진다
-		List<IssueFailureLog> firstPage = new ArrayList<>();
-		for (long id = 1; id <= 100; id++) {
-			firstPage.add(failure(id));
-		}
-		IssueFailureLog lastOne = failure(101L);
+		List<IssueFailureLog> firstPage = List.of(failure(1L), failure(2L), failure(3L));
+		IssueFailureLog lastOne = failure(4L);
 		given(failureLogRepository.findRetryTargets(
 				any(), any(), Mockito.eq(0L), any()))
 				.willReturn(firstPage);
 		given(failureLogRepository.findRetryTargets(
-				any(), any(), Mockito.eq(100L), any()))
+				any(), any(), Mockito.eq(3L), any()))
 				.willReturn(List.of(lastOne));
 		given(issueProcessor.confirm(any(), any(), any()))
 				.willReturn(CouponIssueConfirmResult.CONFIRMED_NOW);
 
 		SweepResult result = service.retryFailedConfirmations();
 
-		assertThat(result.scanned()).isEqualTo(101);
+		assertThat(result.scanned()).isEqualTo(4);
 		assertThat(lastOne.isResolved()).isTrue();
 	}
 
 	@Test
-	@DisplayName("회수할 대상이 없으면 경보 집계 쿼리를 돌리지 않는다")
-	void skipsAlertQueriesWhenNothingToRetry() {
+	@DisplayName("재시도 대상이 없어도 막힌 회차는 조회해 보고한다")
+	void reportsBlockedEventsEvenWhenNothingIsRetryable() {
+		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(2L);
+		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(55L));
+
+		SweepResult result = service.retryFailedConfirmations();
+
+		assertThat(result.scanned()).isZero();
+		assertThat(result.unrecoverable()).isEqualTo(2L);
+		assertThat(result.blockedEventIds()).containsExactly(55L);
+		assertThat(result.hasUnrecovered()).isTrue();
+	}
+
+	@Test
+	@DisplayName("아무 실패도 남아 있지 않으면 이상으로 보지 않는다")
+	void reportsNothingWhenLogIsEmpty() {
 		SweepResult result = service.retryFailedConfirmations();
 
 		assertThat(result.scanned()).isZero();
 		assertThat(result.hasUnrecovered()).isFalse();
-		verify(failureLogRepository, never()).countUnrecoverable(any(), any());
-		verify(failureLogRepository, never()).findBlockedEventIds(any(), any());
+	}
+
+	@Test
+	@DisplayName("앞쪽이 계속 실패해도 다음 주기에 뒤쪽 건까지 도달한다")
+	void reachesLaterRecordsAcrossSweeps() {
+		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(0L), any()))
+				.willReturn(List.of(failure(1L), failure(2L), failure(3L)));
+		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(3L), any()))
+				.willReturn(List.of(failure(4L), failure(5L), failure(6L)));
+		IssueFailureLog reachable = failure(7L);
+		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(6L), any()))
+				.willReturn(List.of(reachable));
+		// 앞쪽 여섯 건은 계속 실패하고 마지막 건만 성공한다
+		UUID reachableRequestId = UUID.fromString(reachable.getRequestId());
+		given(issueProcessor.confirm(any(), any(), any())).willAnswer(invocation -> {
+			if (reachableRequestId.equals(invocation.getArgument(2))) {
+				return CouponIssueConfirmResult.CONFIRMED_NOW;
+			}
+			throw new RedisConnectionFailureException("down");
+		});
+
+		// 첫 주기는 한도(2페이지)까지만 훑는다
+		service.retryFailedConfirmations();
+		assertThat(reachable.isResolved()).isFalse();
+
+		// 두 번째 주기가 앞 주기 끝에서 이어받아 뒤쪽 건에 도달한다
+		service.retryFailedConfirmations();
+		assertThat(reachable.isResolved()).isTrue();
 	}
 
 	@Test

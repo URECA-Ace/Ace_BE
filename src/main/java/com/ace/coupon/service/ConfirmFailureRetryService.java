@@ -4,8 +4,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -17,17 +19,19 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.IssueFailureLogRepository;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 // 확정만 실패한 건을 다시 확정
+
+// 전제: 이 재처리는 인스턴스마다 독립적으로 돈다
+// 확정은 CAS 안에서 카운터를 올려 멱등이라 여러 인스턴스가 같은 건을 처리해도 값은 어긋나지 않는다
+// 다만 backlog 가 큰 시점에는 Redis / DB 부하가 인스턴스 수만큼 늘어난다
+// 다중 인스턴스로 가려면 단일 실행 보장(분산 락 또는 lease)이 먼저 필요하다
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ConfirmFailureRetryService {
 
-	private static final int RETRY_BATCH_SIZE = 100;
-	private static final int MAX_PAGES = 50;
+
 	// 경보에 실을 회차 수
 	private static final int BLOCKED_EVENT_SAMPLE_SIZE = 20;
 
@@ -39,9 +43,32 @@ public class ConfirmFailureRetryService {
 	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
 	private final AtomicReference<String> lastReport = new AtomicReference<>();
 
+	// 주기 사이에 이어지는 커서
+	// 매번 0 에서 시작하면 앞쪽 batchSize x maxPages 건이 계속 실패할 때
+	// 그 뒤 건은 영원히 도달하지 못한다. 끝까지 가면 처음으로 돌아온다
+	private final AtomicLong sweepCursor = new AtomicLong();
+
 	private final IssueFailureLogRepository failureLogRepository;
 	private final RedisCouponIssueProcessor issueProcessor;
 	private final CouponIssueRedisProperties properties;
+
+	// 한 주기가 훑는 양의 상한
+	// batchSize x maxPages 를 넘으면 다음 주기가 이어받는다
+	private final int batchSize;
+	private final int maxPages;
+
+	public ConfirmFailureRetryService(
+			IssueFailureLogRepository failureLogRepository,
+			RedisCouponIssueProcessor issueProcessor,
+			CouponIssueRedisProperties properties,
+			@Value("${coupon.issue.confirm-retry.batch-size:100}") int batchSize,
+			@Value("${coupon.issue.confirm-retry.max-pages:50}") int maxPages) {
+		this.failureLogRepository = failureLogRepository;
+		this.issueProcessor = issueProcessor;
+		this.properties = properties;
+		this.batchSize = batchSize;
+		this.maxPages = maxPages;
+	}
 
 	public SweepResult retryFailedConfirmations() {
 		int scanned = 0;
@@ -51,14 +78,17 @@ public class ConfirmFailureRetryService {
 		int notRetryable = 0;
 		int retryFailed = 0;
 
-		long lastSeenId = 0L;
-		for (int page = 0; page < MAX_PAGES; page++) {
+		long lastSeenId = sweepCursor.get();
+		for (int page = 0; page < maxPages; page++) {
 			List<IssueFailureLog> targets = failureLogRepository.findRetryTargets(
 					IssueFailureStage.CONFIRM,
 					RETRYABLE_RESULTS,
 					lastSeenId,
-					PageRequest.of(0, RETRY_BATCH_SIZE));
+					PageRequest.of(0, batchSize));
 			if (targets.isEmpty()) {
+				// 끝까지
+				// 다음 주기는 처음부터
+				lastSeenId = 0L;
 				break;
 			}
 
@@ -74,16 +104,17 @@ public class ConfirmFailureRetryService {
 			}
 
 			lastSeenId = targets.get(targets.size() - 1).getId();
-			if (targets.size() < RETRY_BATCH_SIZE) {
+			if (targets.size() < batchSize) {
+				lastSeenId = 0L;
 				break;
 			}
 		}
+		// 한도까지 훑고도 남았으면 이어서 볼 위치를 남긴다
+		sweepCursor.set(lastSeenId);
 
-		if (scanned == 0) {
-			// 회수할 대상이 없으면 상태가 달라지지 않았다
-			return SweepResult.idle();
-		}
-
+		// 재시도 대상이 없다는 것과 막힌 회차가 없다는 것은 다르다
+		// 되살릴 수 없는 건만 남아 있으면 findRetryTargets 는 비지만 회차는 계속 막혀 있다
+		// 그 상태를 비어 있다고 보고하면 막힌 회차가 은폐된다
 		SweepResult result = new SweepResult(
 				scanned, resolved, alreadyResolved, expired, notRetryable, retryFailed,
 				failureLogRepository.countUnrecoverable(
@@ -170,11 +201,6 @@ public class ConfirmFailureRetryService {
 			int retryFailed,
 			long unrecoverable,
 			List<Long> blockedEventIds) {
-
-		// 회수할 대상이 없던 주기
-		static SweepResult idle() {
-			return new SweepResult(0, 0, 0, 0, 0, 0, 0L, List.of());
-		}
 
 		// 경보 중복 판단용
 		String signature() {
