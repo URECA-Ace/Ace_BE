@@ -69,4 +69,23 @@ public class IssueFailureLog {
 
 	@Column(name = "occurred_at", nullable = false, columnDefinition = "datetime(6)")
 	private LocalDateTime occurredAt;
+
+	// 회수가 끝난 시각
+	@Column(name = "resolved_at", columnDefinition = "datetime(6)")
+	private LocalDateTime resolvedAt;
+
+	public boolean isResolved() {
+		return resolvedAt != null;
+	}
+
+	// 확정이 실제로 끝난 건만 해소로 표시
+	public void resolve(LocalDateTime resolvedAt) {
+		if (resolvedAt == null) {
+			throw new IllegalArgumentException("해소 시각이 필요합니다.");
+		}
+		if (this.resolvedAt != null) {
+			return;
+		}
+		this.resolvedAt = resolvedAt;
+	}
 }
