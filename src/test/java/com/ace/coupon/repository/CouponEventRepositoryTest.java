@@ -75,44 +75,6 @@ class CouponEventRepositoryTest {
 	}
 
 	@Test
-	@DisplayName("마감 시각에 도달한 SCHEDULED, OPEN, SOLD_OUT 캠페인을 CLOSED로 전환한다")
-	void closesAllDueCampaignStatuses() {
-		LocalDateTime databaseNow = entityManager
-				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
-				.getSingleResult()
-				.toLocalDateTime();
-		Coupon coupon = persistCoupon(databaseNow);
-		CouponEvent scheduled = persistEvent(
-				coupon, 31, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
-				CouponEventStatus.SCHEDULED, databaseNow);
-		CouponEvent open = persistEvent(
-				coupon, 32, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
-				CouponEventStatus.OPEN, databaseNow);
-		CouponEvent soldOut = persistEvent(
-				coupon, 33, databaseNow.minusMinutes(20), databaseNow.minusMinutes(10),
-				CouponEventStatus.SOLD_OUT, databaseNow);
-		CouponEvent future = persistEvent(
-				coupon, 34, databaseNow.minusMinutes(1), databaseNow.plusMinutes(10),
-				CouponEventStatus.OPEN, databaseNow);
-		entityManager.flush();
-		entityManager.clear();
-
-		int first = couponEventRepository.closeDueEvents(
-				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
-				CouponEventStatus.CLOSED);
-		int duplicate = couponEventRepository.closeDueEvents(
-				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
-				CouponEventStatus.CLOSED);
-
-		assertThat(first).isEqualTo(3);
-		assertThat(duplicate).isZero();
-		assertThat(findStatus(scheduled.getId())).isEqualTo(CouponEventStatus.CLOSED);
-		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.CLOSED);
-		assertThat(findStatus(soldOut.getId())).isEqualTo(CouponEventStatus.CLOSED);
-		assertThat(findStatus(future.getId())).isEqualTo(CouponEventStatus.OPEN);
-	}
-
-	@Test
 	@DisplayName("Redis 복구 대상 조회는 마감 전 SCHEDULED와 OPEN 캠페인만 반환한다")
 	void findsOnlyActiveCampaignsForRedisRecovery() {
 		LocalDateTime databaseNow = entityManager
@@ -145,8 +107,8 @@ class CouponEventRepositoryTest {
 	}
 
 	@Test
-	@DisplayName("OPEN 캠페인만 조건부로 CLOSED 전환해 중복 마감을 방지한다")
-	void closesOnlyOpenEventOnce() {
+	@DisplayName("수동 마감은 마감 시각만 앞당기고 상태는 그대로 둔다")
+	void advancesCloseAtWithoutChangingStatus() {
 		LocalDateTime databaseNow = entityManager
 				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
 				.getSingleResult()
@@ -161,18 +123,21 @@ class CouponEventRepositoryTest {
 		entityManager.flush();
 		entityManager.clear();
 
-		int first = couponEventRepository.closeOpenEvent(
-				open.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
-		int duplicate = couponEventRepository.closeOpenEvent(
-				open.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
-		int scheduledResult = couponEventRepository.closeOpenEvent(
-				scheduled.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
+		List<CouponEventStatus> closable =
+				List.of(CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
+		int updated = couponEventRepository.advanceCloseAt(open.getId(), closable, databaseNow);
+		// 이미 당겨진 뒤라 되돌리는 방향으로는 움직이지 않는다
+		int repeated = couponEventRepository.advanceCloseAt(open.getId(), closable, databaseNow);
+		int notClosable = couponEventRepository.advanceCloseAt(
+				scheduled.getId(), closable, databaseNow);
 
-		assertThat(first).isOne();
-		assertThat(duplicate).isZero();
-		assertThat(scheduledResult).isZero();
-		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.CLOSED);
-		assertThat(findStatus(scheduled.getId())).isEqualTo(CouponEventStatus.SCHEDULED);
+		assertThat(updated).isOne();
+		assertThat(repeated).isZero();
+		assertThat(notClosable).isZero();
+		// 상태는 sweep 이 Drain 을 확인한 뒤에만 바꾼다
+		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.OPEN);
+		assertThat(findCloseAt(open.getId())).isEqualTo(databaseNow);
+		assertThat(findCloseAt(scheduled.getId())).isEqualTo(databaseNow.plusMinutes(20));
 	}
 
 	@Test
@@ -448,6 +413,11 @@ class CouponEventRepositoryTest {
 
 	private CouponEvent findEvent(Long eventId) {
 		return couponEventRepository.findById(eventId).orElseThrow();
+	}
+
+	private LocalDateTime findCloseAt(Long eventId) {
+		entityManager.clear();
+		return findEvent(eventId).getCloseAt();
 	}
 
 	private Coupon persistCoupon(LocalDateTime now) {

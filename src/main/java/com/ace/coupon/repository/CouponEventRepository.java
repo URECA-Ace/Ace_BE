@@ -105,33 +105,29 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 			@Param("openStatus") CouponEventStatus openStatus);
 
 	/**
-	 * 마감 시각에 도달한 캠페인을 한 번의 조건부 UPDATE로 전환한다.
-	 * 오픈 스케줄러가 지연돼 SCHEDULED에 머문 회차와 SOLD_OUT 회차도 최종 CLOSED로 수렴한다.
+	 * 수동 마감 요청을 받은 회차의 마감 시각을 현재로 당긴다.
+	 *
+	 * <p>상태는 여기서 바꾸지 않는다. {@code CLOSED} 는 검증팀의 Drain 조건이라
+	 * 파이프라인이 비었는지 확인한 뒤 {@link #markClosed} 로만 전환해야 한다.
+	 * 마감 시각만 당겨 두면 이후 sweep 이 이 회차를 마감 대상으로 집어 간다.
+	 *
+	 * <p>이미 마감 시각이 지난 회차는 갱신하지 않는다. 되돌리는 방향으로 시각이
+	 * 움직이면 Redis 가 이미 차단한 시점과 어긋난다.
 	 */
+	@Transactional
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("""
 			UPDATE CouponEvent event
-			SET event.status = :closedStatus,
-				event.updatedAt = CURRENT_TIMESTAMP
-			WHERE event.status IN :closableStatuses
-				AND event.closeAt <= CURRENT_TIMESTAMP
-			""")
-	int closeDueEvents(
-			@Param("closableStatuses") List<CouponEventStatus> closableStatuses,
-			@Param("closedStatus") CouponEventStatus closedStatus);
-
-	@Modifying(clearAutomatically = true, flushAutomatically = true)
-	@Query("""
-			UPDATE CouponEvent event
-			SET event.status = :closedStatus,
+			SET event.closeAt = :closeAt,
 				event.updatedAt = CURRENT_TIMESTAMP
 			WHERE event.id = :eventId
-				AND event.status = :openStatus
+				AND event.status IN :statuses
+				AND event.closeAt > :closeAt
 			""")
-	int closeOpenEvent(
+	int advanceCloseAt(
 			@Param("eventId") Long eventId,
-			@Param("openStatus") CouponEventStatus openStatus,
-			@Param("closedStatus") CouponEventStatus closedStatus);
+			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("closeAt") LocalDateTime closeAt);
 
 	// 주기 집계 스냅샷 대상 회차
 	// 마감 시각이 지난 회차는 제외

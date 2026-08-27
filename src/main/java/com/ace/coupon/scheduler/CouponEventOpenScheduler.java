@@ -13,24 +13,20 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(
-		prefix = "coupon.campaign.status-scheduler",
+		prefix = "coupon.campaign.open-scheduler",
 		name = "enabled",
-		havingValue = "true",
-		matchIfMissing = true)
+		havingValue = "true")
 public class CouponEventOpenScheduler {
 
 	private final CouponEventOpenService couponEventOpenService;
 
 	@Scheduled(
-			cron = "${coupon.campaign.status-scheduler.cron:1,31 * * * * *}",
-			zone = "${coupon.campaign.status-scheduler.zone:Asia/Seoul}")
-	public void transitionDueEvents() {
-		var result = couponEventOpenService.transitionDueEvents();
-		if (result.openedCount() > 0 || result.closedCount() > 0) {
-			log.info(
-					"예약 시각에 도달한 쿠폰 캠페인 상태를 전환했습니다. openedCount={}, closedCount={}",
-					result.openedCount(),
-					result.closedCount());
+			initialDelayString = "${coupon.campaign.open-scheduler.initial-delay-ms:1000}",
+			fixedDelayString = "${coupon.campaign.open-scheduler.fixed-delay-ms:1000}")
+	public void openDueEvents() {
+		int openedCount = couponEventOpenService.openDueEvents();
+		if (openedCount > 0) {
+			log.info("예약 시각에 도달한 쿠폰 캠페인을 오픈했습니다. openedCount={}", openedCount);
 		}
 	}
 }

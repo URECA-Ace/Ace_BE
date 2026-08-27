@@ -3,9 +3,6 @@ package com.ace.coupon.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.inOrder;
-
-import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,26 +24,17 @@ class CouponEventOpenServiceTest {
 	}
 
 	@Test
-	@DisplayName("마감 대상을 먼저 닫고 오픈 시각에 도달한 캠페인을 연다")
-	void transitionsDueEventsInFailClosedOrder() {
-		given(couponEventRepository.closeDueEvents(
-				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
-				CouponEventStatus.CLOSED))
-				.willReturn(1);
+	@DisplayName("오픈 시각에 도달한 SCHEDULED 캠페인을 OPEN으로 전환한다")
+	void opensDueEvents() {
 		given(couponEventRepository.openDueEvents(
 				CouponEventStatus.SCHEDULED,
 				CouponEventStatus.OPEN))
 				.willReturn(2);
 
-		var result = service.transitionDueEvents();
+		int openedCount = service.openDueEvents();
 
-		assertThat(result.openedCount()).isEqualTo(2);
-		assertThat(result.closedCount()).isOne();
-		var order = inOrder(couponEventRepository);
-		order.verify(couponEventRepository).closeDueEvents(
-				List.of(CouponEventStatus.SCHEDULED, CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT),
-				CouponEventStatus.CLOSED);
-		order.verify(couponEventRepository).openDueEvents(
+		assertThat(openedCount).isEqualTo(2);
+		verify(couponEventRepository).openDueEvents(
 				CouponEventStatus.SCHEDULED,
 				CouponEventStatus.OPEN);
 	}
@@ -54,9 +42,11 @@ class CouponEventOpenServiceTest {
 	@Test
 	@DisplayName("이미 전환된 캠페인만 있으면 추가 상태 변경 없이 0건을 반환한다")
 	void returnsZeroWhenNoScheduledEventIsDue() {
-		var result = service.transitionDueEvents();
+		given(couponEventRepository.openDueEvents(
+				CouponEventStatus.SCHEDULED,
+				CouponEventStatus.OPEN))
+				.willReturn(0);
 
-		assertThat(result.openedCount()).isZero();
-		assertThat(result.closedCount()).isZero();
+		assertThat(service.openDueEvents()).isZero();
 	}
 }
