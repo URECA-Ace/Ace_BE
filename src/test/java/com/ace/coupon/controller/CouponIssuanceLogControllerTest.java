@@ -19,7 +19,6 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.ace.coupon.dto.response.CouponIssuanceLogItemResponse;
 import com.ace.coupon.dto.response.CouponIssuanceLogResponse;
-import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.service.CouponIssuanceLogService;
 
 @WebMvcTest(CouponIssuanceLogController.class)
@@ -45,7 +44,7 @@ class CouponIssuanceLogControllerTest {
 								"hon****@example.com",
 								"010-****-5678",
 								21,
-								CouponIssueStatus.ISSUED,
+								"ISSUED",
 								OffsetDateTime.parse("2026-08-27T10:00:00+09:00"),
 								OffsetDateTime.parse("2026-08-27T10:00:01+09:00"))),
 						21,

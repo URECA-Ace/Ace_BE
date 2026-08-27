@@ -24,6 +24,7 @@ import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.repository.CouponEventRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.user.entity.User;
+import com.ace.user.repository.UserRepository;
 
 class CouponIssuanceLogServiceTest {
 
@@ -32,15 +33,21 @@ class CouponIssuanceLogServiceTest {
 
 	private CouponEventRepository couponEventRepository;
 	private CouponIssueRepository couponIssueRepository;
+	private RedisPendingIssuanceLogReader pendingLogReader;
+	private UserRepository userRepository;
 	private CouponIssuanceLogService couponIssuanceLogService;
 
 	@BeforeEach
 	void setUp() {
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		couponIssueRepository = Mockito.mock(CouponIssueRepository.class);
+		pendingLogReader = Mockito.mock(RedisPendingIssuanceLogReader.class);
+		userRepository = Mockito.mock(UserRepository.class);
 		couponIssuanceLogService = new CouponIssuanceLogService(
 				couponEventRepository,
 				couponIssueRepository,
+				pendingLogReader,
+				userRepository,
 				Clock.fixed(Instant.parse("2026-08-27T01:00:00Z"), ZONE_ID));
 	}
 
@@ -71,7 +78,7 @@ class CouponIssuanceLogServiceTest {
 			assertThat(log.maskedUserName()).isEqualTo("홍*동");
 			assertThat(log.maskedUserEmail()).isEqualTo("hon****@example.com");
 			assertThat(log.maskedUserPhone()).isEqualTo("010-****-5678");
-			assertThat(log.status()).isEqualTo(CouponIssueStatus.ISSUED);
+			assertThat(log.status()).isEqualTo("ISSUED");
 		});
 		assertThat(result.logs().getFirst().confirmedAt().toString())
 				.isEqualTo("2026-08-27T10:00:01+09:00");
