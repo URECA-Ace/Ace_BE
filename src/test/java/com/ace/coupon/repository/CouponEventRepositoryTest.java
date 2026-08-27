@@ -102,6 +102,37 @@ class CouponEventRepositoryTest {
 				.containsExactlyInAnyOrder(scheduled.getId(), open.getId());
 	}
 
+	@Test
+	@DisplayName("OPEN 캠페인만 조건부로 CLOSED 전환해 중복 마감을 방지한다")
+	void closesOnlyOpenEventOnce() {
+		LocalDateTime databaseNow = entityManager
+				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
+				.getSingleResult()
+				.toLocalDateTime();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent open = persistEvent(
+				coupon, 21, databaseNow.minusMinutes(1), databaseNow.plusMinutes(20),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent scheduled = persistEvent(
+				coupon, 22, databaseNow.plusMinutes(10), databaseNow.plusMinutes(20),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		int first = couponEventRepository.closeOpenEvent(
+				open.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
+		int duplicate = couponEventRepository.closeOpenEvent(
+				open.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
+		int scheduledResult = couponEventRepository.closeOpenEvent(
+				scheduled.getId(), CouponEventStatus.OPEN, CouponEventStatus.CLOSED);
+
+		assertThat(first).isOne();
+		assertThat(duplicate).isZero();
+		assertThat(scheduledResult).isZero();
+		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.CLOSED);
+		assertThat(findStatus(scheduled.getId())).isEqualTo(CouponEventStatus.SCHEDULED);
+	}
+
 	private Coupon persistCoupon(LocalDateTime now) {
 		Coupon coupon = Coupon.builder()
 				.couponName("예약 오픈 테스트 쿠폰")
