@@ -77,6 +77,67 @@ class StockConsistencyRecoveryPolicyRollbackIntegrationTest extends ConsistencyC
 		assertThat(issuedQuantity).isEqualTo(3);
 	}
 
+	@Test
+	@DisplayName("ALL 스코프로 여러 이벤트를 복구할 때, 한 이벤트의 예외는 그 이벤트만 롤백시키고 앞뒤 이벤트의 커밋에는 영향을 주지 않는다")
+	void 이벤트_A_성공_B_예외_C_성공_시나리오에서_B만_롤백되고_A와_C는_각각_커밋된다() {
+		long eventA = generateUniqueId();
+		long eventB = generateUniqueId();
+		long eventC = generateUniqueId();
+		for (long eventId : List.of(eventA, eventB, eventC)) {
+			insertDummyEvent(eventId, 1, 2, -1);
+			insertDummyIssue(eventId, 2); // 초과분(회수 대상)
+			insertDummyIssue(eventId, 1);
+		}
+
+		// 이벤트 A의 History 저장은 성공, 이벤트 B는 History 저장에서 장애, 이벤트 C는 다시 성공한다.
+		given(couponHistoryRepository.save(any()))
+				.willReturn(mock(CouponHistory.class))
+				.willThrow(new RuntimeException("강제 실패 - 이벤트 B History 저장 중 장애 발생"))
+				.willReturn(mock(CouponHistory.class));
+
+		Map<String, Object> diffDetail = Map.of("sample", List.of(
+				Map.of("eventId", (Object) eventA),
+				Map.of("eventId", (Object) eventB),
+				Map.of("eventId", (Object) eventC)));
+		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
+				"StockConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
+				3, diffDetail, LocalDateTime.now(), 10L));
+
+		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
+
+		assertThat(outcomes).hasSize(3);
+		assertThat(outcomes.get(0).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS); // A
+		assertThat(outcomes.get(1).getStatus()).isEqualTo(RecoveryResultStatus.FAIL); // B
+		assertThat(outcomes.get(2).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS); // C
+
+		assertThat(issueStatus(eventA, 2)).isEqualTo("CANCELED");
+		assertThat(issuedQuantity(eventA)).isEqualTo(1);
+
+		// B는 History 저장 실패로 트랜잭션이 롤백되어, revoke() 호출로 메모리상 CANCELED였던 상태가
+		// 커밋되지 않고 원래 상태(ISSUED)로 남아 있어야 한다.
+		assertThat(issueStatus(eventB, 2)).isEqualTo("ISSUED");
+		assertThat(issuedQuantity(eventB)).isEqualTo(2);
+
+		// B의 롤백이 C의 처리나 커밋을 막지 않아야 한다.
+		assertThat(issueStatus(eventC, 2)).isEqualTo("CANCELED");
+		assertThat(issuedQuantity(eventC)).isEqualTo(1);
+	}
+
+	private String issueStatus(long eventId, int issueSequence) {
+		MapSqlParameterSource params = new MapSqlParameterSource()
+				.addValue("eventId", eventId)
+				.addValue("issueSequence", issueSequence);
+		return jdbcTemplate.queryForObject(
+				"SELECT status FROM coupon_issue WHERE event_id = :eventId AND issue_sequence = :issueSequence",
+				params, String.class);
+	}
+
+	private Integer issuedQuantity(long eventId) {
+		return jdbcTemplate.queryForObject(
+				"SELECT issued_quantity FROM coupon_event WHERE event_id = :eventId",
+				new MapSqlParameterSource("eventId", eventId), Integer.class);
+	}
+
 	private void insertDummyEvent(long eventId, int totalStock, int issuedQuantity, int remainingStock) {
 		String sql = """
 				INSERT INTO coupon_event (event_id, coupon_id, round, open_at, close_at, total_stock, remaining_stock, issued_quantity, per_user_limit, status, created_at, updated_at)
