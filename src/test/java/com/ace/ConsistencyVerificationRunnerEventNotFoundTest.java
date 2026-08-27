@@ -1,7 +1,7 @@
 package com.ace;
 
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
-import com.ace.consistency.check.DuplicateConsistencyCheck;
+import com.ace.consistency.check.StateMachineConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
@@ -46,7 +46,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	private StockConsistencyCheck stockConsistencyCheck;
 
 	@Autowired
-	private DuplicateConsistencyCheck duplicateConsistencyCheck;
+	private StateMachineConsistencyCheck stateMachineConsistencyCheck;
 
 	private Long createdEventId;
 
@@ -66,7 +66,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하지_않는_이벤트로_Runner를_호출하면_EventNotFoundException이_발생한다() {
 		Long nonExistentEventId = findNonExistentEventId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, stateMachineConsistencyCheck);
 
 		EntityNotFoundException ex = assertThrows(EntityNotFoundException.class,
 				() -> runner.run(checks, Scope.ofEvent(nonExistentEventId), TriggerType.ON_DEMAND));
@@ -83,7 +83,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하지_않는_이벤트면_결과가_저장되지_않는다() {
 		Long nonExistentEventId = findNonExistentEventId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, stateMachineConsistencyCheck);
 
 		long before = countVerificationResults();
 
@@ -102,7 +102,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하는_이벤트면_정상적으로_결과를_반환한다() {
 		Long existingEventId = insertDummyEvent();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, stateMachineConsistencyCheck);
 
 		assertDoesNotThrow(() -> {
 			var results = runner.run(checks, Scope.ofEvent(existingEventId), TriggerType.ON_DEMAND);
