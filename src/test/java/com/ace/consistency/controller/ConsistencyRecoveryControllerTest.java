@@ -3,6 +3,7 @@ package com.ace.consistency.controller;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -15,6 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import static org.mockito.ArgumentMatchers.any;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -22,8 +26,10 @@ import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
 import com.ace.consistency.recovery.RecoveryResult;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
+import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 
-@WebMvcTest(ConsistencyRecoveryController.class)
+@WebMvcTest(value = ConsistencyRecoveryController.class,
+		properties = "consistency.recovery.admin.enabled=true")
 class ConsistencyRecoveryControllerTest {
 
 	@Autowired
@@ -31,6 +37,9 @@ class ConsistencyRecoveryControllerTest {
 
 	@MockitoBean
 	private ConsistencyRecoveryDispatcher dispatcher;
+
+	@MockitoBean
+	private RecoveryResultRepository recoveryResultRepository;
 
 	@Test
 	void 유효한_액션이면_복구를_실행하고_결과_목록을_반환한다() throws Exception {
@@ -58,5 +67,31 @@ class ConsistencyRecoveryControllerTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.result").value("error"))
 				.andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
+	}
+
+	@Test
+	void 프론트용_경로에서_복구_방법을_조회한다() throws Exception {
+		given(dispatcher.availableActions(1L)).willReturn(List.of(RecoveryAction.STOCK_RECONCILE_COUNTER));
+
+		mockMvc.perform(get("/api/v1/consistency/results/1/recovery-methods"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data[0].action").value("STOCK_RECONCILE_COUNTER"))
+				.andExpect(jsonPath("$.data[0].label").value("재고 카운터 재계산"));
+	}
+
+	@Test
+	void 최신순_복구_이력을_페이지로_조회한다() throws Exception {
+		RecoveryResult result = RecoveryResult.from(1L,
+				com.ace.consistency.recovery.RecoveryOutcome.success(
+						com.ace.consistency.common.Scope.ofEvent(1L), Map.of(), "복구완료"),
+				LocalDateTime.now());
+		given(recoveryResultRepository.findAllByOrderByCreatedAtDesc(any(Pageable.class)))
+				.willReturn(new PageImpl<>(List.of(result)));
+
+		mockMvc.perform(get("/api/v1/consistency/recoveries?page=0&size=10"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.content[0].verificationResultId").value(1))
+				.andExpect(jsonPath("$.data.totalElements").value(1))
+				.andExpect(jsonPath("$.data.hasNext").value(false));
 	}
 }

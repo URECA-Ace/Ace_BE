@@ -4,6 +4,8 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.entity.VerificationResultEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -19,6 +21,8 @@ import java.util.Optional;
  */
 @Repository
 public interface VerificationResultRepository extends JpaRepository<VerificationResultEntity, Long> {
+
+	Page<VerificationResultEntity> findByStatus(VerificationResult.Status status, Pageable pageable);
 
 	@Query("""
 			SELECT MAX(v.scopeTo)

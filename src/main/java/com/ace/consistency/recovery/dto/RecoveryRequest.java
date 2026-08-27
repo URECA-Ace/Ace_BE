@@ -2,6 +2,7 @@ package com.ace.consistency.recovery.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import jakarta.validation.constraints.NotBlank;
 
 /**
  * 관리자가 위반 결과 화면에서 선택한 복구 액션. action이 아직 정의되지 않은 값이면 400으로 응답한다.
@@ -12,5 +13,6 @@ import lombok.Getter;
 @AllArgsConstructor
 public class RecoveryRequest {
 
+	@NotBlank(message = "복구 액션은 필수입니다.")
 	private final String action;
 }
