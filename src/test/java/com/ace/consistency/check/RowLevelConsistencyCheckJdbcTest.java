@@ -60,6 +60,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				  valid_from DATETIME(6),
 				  valid_to DATETIME(6),
 				  used_at DATETIME(6),
+				  canceled_at DATETIME(6),
 				  created_at DATETIME(6),
 				  message_id VARCHAR(36)
 				)
@@ -111,7 +112,7 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
-	void 전체_위반_건수는_20건_샘플_제한과_무관하게_계산한다() {
+	void 위반_건수와_샘플은_제한없이_전부_계산된다() {
 		for (int index = 0; index < 25; index++) {
 			insertIssue(null, null, 1L);
 		}
@@ -121,7 +122,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(25);
-		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(20);
+		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(25);
 	}
 
 	@Test
@@ -207,6 +208,29 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("INVALID_REQUEST_ID");
+	}
+
+	@Test
+	void canceled_at이_있는_CANCELED_상태는_구조_검증을_통과한다() {
+		insertIssueWithCanceledAt("CANCELED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+		assertThat(outcome.getViolationCount()).isZero();
+	}
+
+	@Test
+	void canceled_at이_없는_CANCELED_상태는_구조_위반으로_검출한다() {
+		insertIssueWithCanceledAt("CANCELED", null, 1L);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getDiffDetail().get("sample").toString())
+				.contains("MISSING_CANCELED_AT");
 	}
 
 	@Test
@@ -343,6 +367,18 @@ class RowLevelConsistencyCheckJdbcTest {
 	void 사용_취소에_따른_USED에서_ISSUED로의_복원을_허용한다() {
 		long issueId = insertIssue("ISSUED", null, 1L);
 		insertHistory(issueId, "USED", "ISSUED", LocalDateTime.of(2026, 8, 18, 11, 0));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+		assertThat(outcome.getViolationCount()).isZero();
+	}
+
+	@Test
+	void 재고_초과발급_회수에_따른_ISSUED에서_CANCELED로의_전이를_허용한다() {
+		long issueId = insertIssueWithCanceledAt("CANCELED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+		insertHistory(issueId, "ISSUED", "CANCELED", LocalDateTime.of(2026, 8, 18, 11, 0));
 
 		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
 				.check(Scope.all(TEST_CHECKED_AT));
@@ -562,6 +598,13 @@ class RowLevelConsistencyCheckJdbcTest {
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {
 		return insertIssue(status, usedAt, eventId,
 				IssueRecord.messageId(eventId, "1755000000000-0"));
+	}
+
+	private long insertIssueWithCanceledAt(String status, LocalDateTime canceledAt, long eventId) {
+		long issueId = insertIssue(status, null, eventId);
+		jdbcTemplate.update("UPDATE coupon_issue SET canceled_at = ? WHERE issue_id = ?",
+				canceledAt == null ? null : Timestamp.valueOf(canceledAt), issueId);
+		return issueId;
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId, String messageId) {

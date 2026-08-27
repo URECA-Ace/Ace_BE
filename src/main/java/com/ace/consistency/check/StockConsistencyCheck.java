@@ -30,8 +30,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class StockConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
-
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String ALL_SQL = """
@@ -101,7 +99,6 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 		Map<String, Object> diff = new LinkedHashMap<>();
 		diff.put("violationCount", violations.size());
 		diff.put("sample", violations.stream()
-				.limit(SAMPLE_LIMIT)
 				.map(row -> Map.of(
 						"eventId", row.get("event_id"),
 						"totalStock", row.get("total_stock"),

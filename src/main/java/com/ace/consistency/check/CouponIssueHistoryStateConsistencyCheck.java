@@ -22,7 +22,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPED_ISSUE_CONDITION = """
@@ -73,8 +72,7 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 			%s
 			WHERE %s
 			ORDER BY ci.issue_id
-			LIMIT %d
-			""".formatted(LATEST_HISTORY_CTE, LATEST_HISTORY_JOIN, CONDITION, SAMPLE_LIMIT);
+			""".formatted(LATEST_HISTORY_CTE, LATEST_HISTORY_JOIN, CONDITION);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

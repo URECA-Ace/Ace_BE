@@ -22,7 +22,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private static final String SCOPE_CONDITION = """
 			(
@@ -43,8 +42,7 @@ public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
 			    GROUP BY event_id, issue_sequence
 			    HAVING COUNT(*) > 1
 			) sub
-			LIMIT %d
-			""".formatted(SCOPE_CONDITION, SAMPLE_LIMIT);
+			""".formatted(SCOPE_CONDITION);
 	// Scope.ofEvent(eventId)     /     테스트용 ALL(global), Scope.all(to)
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
