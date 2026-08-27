@@ -7,7 +7,6 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +20,11 @@ import java.util.Set;
  *   - issued_quantity = 활성 발급 건수(ISSUED+USED+EXPIRED)
  *
  * EVENT 스코프: 특정 event_id 하나만 검사 (WHERE 절에 event_id 필터 추가)
- * ALL 스코프: 전체 이벤트 대상으로 검사 (필터 없음)
+ * ALL 스코프: 마감된 회차(SOLD_OUT / CLOSED)만 검사
+ *
+ * 마감된 회차는 :to 컷오프 없이 전체 발급 건수와 비교
+ * issued_quantity 는 마감 시점의 최신 확정 수인데 컷오프를 걸면 직전 safety margin 구간의
+ * 발급이 COUNT 에서만 빠져 오탐이 난다. 마감 이후에는 새로 저장되는 건이 없어 안전하다.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,8 +43,8 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 			FROM coupon_event ce
 			LEFT JOIN coupon_issue ci FORCE INDEX (idx_coupon_issue_event_user_status_created)
 				   ON ci.event_id = ce.event_id
-				  AND ci.created_at < :to
 			WHERE ce.event_id IN (:eventIds)
+			  AND ce.status IN ('SOLD_OUT','CLOSED')
 			GROUP BY ce.event_id, ce.total_stock, ce.issued_quantity, ce.remaining_stock
 			HAVING ce.total_stock != actual_active_count + ce.remaining_stock
 				OR ce.issued_quantity != actual_active_count
@@ -79,10 +82,9 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 			}
 			case ALL -> {
 				List<Long> eventIds = scope.getEventIds();
-				LocalDateTime to = scope.getTo();
+				// 마감된 회차만 검사하므로 :to 컷오프를 쓰지 않는다. ALL_SQL 주석 참조
 				MapSqlParameterSource param = new MapSqlParameterSource()
-						.addValue("eventIds", eventIds)
-						.addValue("to", to);
+						.addValue("eventIds", eventIds);
 				violations = jdbcTemplate.queryForList(ALL_SQL, param); // ALL_SQL로 수정
 			}
 			default -> throw new IllegalArgumentException("Unsupported scope type: " + scope.getType());
