@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.persistence.IssueRecord;
 import com.ace.coupon.repository.CouponEventRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.user.entity.User;
@@ -85,6 +87,45 @@ class CouponIssuanceLogServiceTest {
 	}
 
 	@Test
+	@DisplayName("Redis 저장 대기는 처리 중으로 보이고 같은 순번의 DB 확정 행이 생기면 발급 완료가 우선한다")
+	void transitionsProcessingLogToIssuedWhenDatabaseRowExists() {
+		IssueRecord processing = issueRecord(101L, 21);
+		IssueRecord confirmed = issueRecord(102L, 22);
+		CouponIssue confirmedIssue = issue(
+				102L, "김철수", "kim@example.com", "010-9876-5432",
+				22, "2026-08-27T10:00:00", "2026-08-27T10:00:02");
+		User processingUser = User.builder()
+				.id(101L)
+				.name("홍길동")
+				.email("honggildong@example.com")
+				.phone("010-1234-5678")
+				.build();
+		given(couponEventRepository.existsById(EVENT_ID)).willReturn(true);
+		given(couponIssueRepository
+				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
+						EVENT_ID, 20, PageRequest.of(0, 201)))
+				.willReturn(List.of(confirmedIssue));
+		given(pendingLogReader.findRecentAfter(EVENT_ID, 20, 201))
+				.willReturn(List.of(processing, confirmed));
+		given(userRepository.findAllById(Mockito.any()))
+				.willReturn(List.of(processingUser));
+
+		var result = couponIssuanceLogService.findLogs(EVENT_ID, 20, 200);
+
+		assertThat(result.logs()).extracting(log -> log.issueSequence())
+				.containsExactly(21, 22);
+		assertThat(result.logs().getFirst()).satisfies(log -> {
+			assertThat(log.status()).isEqualTo("PROCESSING");
+			assertThat(log.maskedUserName()).isEqualTo("홍*동");
+			assertThat(log.maskedUserEmail()).isEqualTo("hon****@example.com");
+			assertThat(log.maskedUserPhone()).isEqualTo("010-****-5678");
+			assertThat(log.confirmedAt()).isNull();
+		});
+		assertThat(result.logs().getLast().status()).isEqualTo("ISSUED");
+		assertThat(result.logs().getLast().maskedUserName()).isEqualTo("김*수");
+	}
+
+	@Test
 	@DisplayName("요청 크기보다 한 건 더 조회해 다음 페이지 존재 여부를 표시한다")
 	void indicatesMoreLogsWithoutAdvancingPastVisibleItem() {
 		given(couponEventRepository.existsById(EVENT_ID)).willReturn(true);
@@ -138,5 +179,17 @@ class CouponIssuanceLogServiceTest {
 				.issuedAt(LocalDateTime.parse(issuedAt))
 				.createdAt(LocalDateTime.parse(confirmedAt))
 				.build();
+	}
+
+	private IssueRecord issueRecord(long userId, int sequence) {
+		return new IssueRecord(
+				UUID.randomUUID(),
+				EVENT_ID,
+				userId,
+				0,
+				userId - 1,
+				sequence,
+				Instant.parse("2026-08-27T01:00:00Z"),
+				UUID.randomUUID().toString());
 	}
 }
