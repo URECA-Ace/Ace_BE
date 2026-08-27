@@ -95,4 +95,17 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	int openDueEvents(
 			@Param("scheduledStatus") CouponEventStatus scheduledStatus,
 			@Param("openStatus") CouponEventStatus openStatus);
+
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.status = :closedStatus,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.status = :openStatus
+			""")
+	int closeOpenEvent(
+			@Param("eventId") Long eventId,
+			@Param("openStatus") CouponEventStatus openStatus,
+			@Param("closedStatus") CouponEventStatus closedStatus);
 }

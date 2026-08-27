@@ -36,6 +36,9 @@ public enum RedisLuaDiagnosticStage {
 	CONFIRM_REQUEST_WRITE(411, "HSET", "confirm"),
 	CONFIRM_COUNTER_INCREMENT(412, "HINCRBY", "confirm"),
 
+	CLOSE_METADATA_READ(501, "HMGET", "close"),
+	CLOSE_METADATA_WRITE(511, "HSET", "close"),
+
 	UNKNOWN(-1, "UNKNOWN", "unknown");
 
 	private static final RedisLuaDiagnosticStage[] LOOKUP = values();
