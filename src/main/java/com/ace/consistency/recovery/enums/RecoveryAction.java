@@ -29,7 +29,11 @@ public enum RecoveryAction {
 	 * StockConsistencyCheck 전용: 실제 활성 발급 건수가 total_stock을 초과한 진짜 초과발급 상태에서,
 	 * 가장 최근에 발급된 ISSUED 건부터 초과분만큼 CANCELED로 되돌려 슬롯을 반납한다.
 	 */
-	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수");
+	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수"),
+
+	RESTORE_INITIAL_ISSUE_HISTORY("최초 발급 이력 복원"),
+
+	EXPIRE_DELAYED_ISSUE("만료 지연 쿠폰 만료 처리");
 
 	private final String label;
 

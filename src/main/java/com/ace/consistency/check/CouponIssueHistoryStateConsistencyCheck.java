@@ -22,6 +22,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck {
 
+	private static final String RESTORE_INITIAL_ISSUE_HISTORY = "RESTORE_INITIAL_ISSUE_HISTORY";
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPED_ISSUE_CONDITION = """
@@ -97,6 +98,12 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 		for (Map<String, Object> violation : violations) {
 			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
 			sampleRow.remove("total_violation_count");
+			boolean initialHistoryRecoveryCandidate =
+					"NO_HISTORY".equals(sampleRow.get("violation_type"))
+							&& "ISSUED".equals(sampleRow.get("current_status"));
+			sampleRow.put("candidate_recovery_action",
+					initialHistoryRecoveryCandidate ? RESTORE_INITIAL_ISSUE_HISTORY : null);
+			sampleRow.put("manual_review_required", !initialHistoryRecoveryCandidate);
 			sample.add(sampleRow);
 		}
 

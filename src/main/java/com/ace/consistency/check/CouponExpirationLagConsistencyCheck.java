@@ -20,6 +20,7 @@ import java.util.Set;
 @Component
 public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 
+	private static final String EXPIRE_DELAYED_ISSUE = "EXPIRE_DELAYED_ISSUE";
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final long allowedDelayMillis;
 	private final Clock clock;
@@ -157,6 +158,11 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 		for (Map<String, Object> violation : violations) {
 			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
 			sampleRow.remove("total_violation_count");
+			boolean expirationBatchDelay =
+					"EXPIRATION_BATCH_DELAY".equals(sampleRow.get("violation_type"));
+			sampleRow.put("candidate_recovery_action",
+					expirationBatchDelay ? EXPIRE_DELAYED_ISSUE : null);
+			sampleRow.put("manual_review_required", !expirationBatchDelay);
 			sample.add(sampleRow);
 		}
 

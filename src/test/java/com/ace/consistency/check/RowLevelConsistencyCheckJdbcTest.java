@@ -1,6 +1,7 @@
 package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
+import com.ace.consistency.common.DiffDetailConverter;
 import com.ace.consistency.common.Scope;
 import com.ace.coupon.persistence.IssueRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -86,6 +88,9 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
 	}
 
 	@Test
@@ -257,6 +262,9 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("LATEST_STATUS_MISMATCH");
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
 	}
 
 	@Test
@@ -283,6 +291,48 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("NO_HISTORY");
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", "RESTORE_INITIAL_ISSUE_HISTORY")
+				.containsEntry("manual_review_required", false);
+	}
+
+	@Test
+	void 상태_이력이_없는_USED는_초기_발급_이력_복구_후보가_아니다() {
+		insertIssue("USED", LocalDateTime.of(2026, 8, 18, 11, 0), 1L);
+
+		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(firstSample(outcome))
+				.containsEntry("violation_type", "NO_HISTORY")
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
+	}
+
+	@Test
+	void 상태_이력이_없는_EXPIRED는_초기_발급_이력_복구_후보가_아니다() {
+		insertIssue("EXPIRED", null, 1L);
+
+		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(firstSample(outcome))
+				.containsEntry("violation_type", "NO_HISTORY")
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
+	}
+
+	@Test
+	void 상태_이력이_없는_CANCELED는_초기_발급_이력_복구_후보가_아니다() {
+		insertIssue("CANCELED", null, 1L);
+
+		CheckOutcome outcome = new CouponIssueHistoryStateConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(firstSample(outcome))
+				.containsEntry("violation_type", "NO_HISTORY")
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
 	}
 
 	@Test
@@ -334,6 +384,9 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("INVALID_STATUS_TRANSITION");
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
 	}
 
 	@Test
@@ -475,6 +528,9 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("USED_AFTER_EXPIRATION");
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", null)
+				.containsEntry("manual_review_required", true);
 	}
 
 	@Test
@@ -516,6 +572,9 @@ class RowLevelConsistencyCheckJdbcTest {
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
 		assertThat(outcome.getDiffDetail().get("sample").toString())
 				.contains("EXPIRATION_BATCH_DELAY");
+		assertThat(firstSample(outcome))
+				.containsEntry("candidate_recovery_action", "EXPIRE_DELAYED_ISSUE")
+				.containsEntry("manual_review_required", false);
 	}
 
 	@Test
@@ -593,6 +652,26 @@ class RowLevelConsistencyCheckJdbcTest {
 	private CouponExpirationLagConsistencyCheck expirationLagCheck() {
 		return new CouponExpirationLagConsistencyCheck(
 				namedJdbcTemplate, TEST_ALLOWED_EXPIRATION_DELAY_MS, TEST_CLOCK);
+	}
+
+	@Test
+	void 복구_정책_메타정보는_diffDetail_JSON에_null과_boolean을_유지한다() {
+		insertIssue(null, null, 1L);
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		DiffDetailConverter converter = new DiffDetailConverter();
+		String json = converter.convertToDatabaseColumn(outcome.getDiffDetail());
+
+		assertThat(json)
+				.contains("\"candidate_recovery_action\":null")
+				.contains("\"manual_review_required\":true");
+		assertThat(converter.convertToEntityAttribute(json)).containsKey("sample");
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> firstSample(CheckOutcome outcome) {
+		return ((List<Map<String, Object>>) outcome.getDiffDetail().get("sample")).getFirst();
 	}
 
 	private long insertIssue(String status, LocalDateTime usedAt, long eventId) {

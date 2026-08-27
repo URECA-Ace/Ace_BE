@@ -77,6 +77,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 		for (Map<String, Object> violation : violations) {
 			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
 			sampleRow.remove("total_violation_count");
+			sampleRow.put("candidate_recovery_action", null);
+			sampleRow.put("manual_review_required", true);
 			sample.add(sampleRow);
 		}
 

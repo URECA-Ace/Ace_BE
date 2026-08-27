@@ -23,7 +23,8 @@ import com.ace.consistency.recovery.RecoveryResult;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 
-@WebMvcTest(ConsistencyRecoveryController.class)
+@WebMvcTest(value = ConsistencyRecoveryController.class,
+		properties = "consistency.recovery.admin.enabled=true")
 class ConsistencyRecoveryControllerTest {
 
 	@Autowired
