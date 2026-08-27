@@ -31,7 +31,6 @@ import com.ace.coupon.service.ConfirmFailureRetryService.SweepResult;
 class ConfirmFailureRetryServiceTest {
 
 	private static final int BATCH_SIZE = 3;
-	private static final int MAX_PAGES = 2;
 
 	private IssueFailureLogRepository failureLogRepository;
 	private RedisCouponIssueProcessor issueProcessor;
@@ -45,10 +44,9 @@ class ConfirmFailureRetryServiceTest {
 				failureLogRepository,
 				issueProcessor,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
-				BATCH_SIZE,
-				MAX_PAGES);
+				BATCH_SIZE);
 
-		given(failureLogRepository.findRetryTargets(any(), any(), anyLong(), any()))
+		given(failureLogRepository.findRetryTargets(any(), any(), any()))
 				.willReturn(List.of());
 		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of());
 	}
@@ -114,7 +112,8 @@ class ConfirmFailureRetryServiceTest {
 
 		assertThat(failure.isResolved()).isFalse();
 		assertThat(failure.getCompensationResult()).isEqualTo("CALL_FAILED");
-		verify(failureLogRepository, never()).save(any());
+		// 판정 값이 그대로라 다음 주기에 다시 잡힌다
+		assertThat(failure.getCompensationResult()).isEqualTo("CALL_FAILED");
 	}
 
 	@Test
@@ -126,7 +125,8 @@ class ConfirmFailureRetryServiceTest {
 
 		assertThat(service.retry(failure)).isEqualTo(ConfirmFailureRetryResult.RETRY_FAILED);
 
-		verify(failureLogRepository, never()).save(any());
+		assertThat(failure.isResolved()).isFalse();
+		assertThat(failure.getCompensationResult()).isEqualTo("CALL_FAILED");
 	}
 
 	@Test
@@ -180,24 +180,35 @@ class ConfirmFailureRetryServiceTest {
 	}
 
 	@Test
-	@DisplayName("대상이 한 페이지를 넘으면 커서로 다음 페이지까지 훑는다")
-	void sweepsBeyondTheFirstPage() {
-		// 재시도 가능한 건만 남아도 계속 실패하면 앞 페이지가 채워진다
-		List<IssueFailureLog> firstPage = List.of(failure(1L), failure(2L), failure(3L));
-		IssueFailureLog lastOne = failure(4L);
-		given(failureLogRepository.findRetryTargets(
-				any(), any(), Mockito.eq(0L), any()))
-				.willReturn(firstPage);
-		given(failureLogRepository.findRetryTargets(
-				any(), any(), Mockito.eq(3L), any()))
-				.willReturn(List.of(lastOne));
+	@DisplayName("시도한 건은 시각을 남겨 다음 회전에서 뒤로 밀린다")
+	void recordsAttemptSoItRotatesBack() {
+		// 커서를 들고 다니지 않고 마지막 시도 시각으로 회전시킨다
+		// 시도를 남기지 않으면 앞쪽 건만 매 주기 반복된다
+		IssueFailureLog stuck = failure(1L);
+		givenTargets(stuck);
 		given(issueProcessor.confirm(any(), any(), any()))
-				.willReturn(CouponIssueConfirmResult.CONFIRMED_NOW);
+				.willThrow(new RedisConnectionFailureException("down"));
 
-		SweepResult result = service.retryFailedConfirmations();
+		service.retryFailedConfirmations();
 
-		assertThat(result.scanned()).isEqualTo(4);
-		assertThat(lastOne.isResolved()).isTrue();
+		assertThat(stuck.getLastAttemptAt()).isNotNull();
+		assertThat(stuck.getAttemptCount()).isOne();
+		verify(failureLogRepository).save(stuck);
+	}
+
+	@Test
+	@DisplayName("계속 실패해도 시도 횟수가 쌓여 반복이 드러난다")
+	void accumulatesAttemptCount() {
+		IssueFailureLog stuck = failure(1L);
+		givenTargets(stuck);
+		given(issueProcessor.confirm(any(), any(), any()))
+				.willThrow(new RedisConnectionFailureException("down"));
+
+		service.retryFailedConfirmations();
+		service.retryFailedConfirmations();
+		service.retryFailedConfirmations();
+
+		assertThat(stuck.getAttemptCount()).isEqualTo(3);
 	}
 
 	@Test
@@ -224,34 +235,6 @@ class ConfirmFailureRetryServiceTest {
 	}
 
 	@Test
-	@DisplayName("앞쪽이 계속 실패해도 다음 주기에 뒤쪽 건까지 도달한다")
-	void reachesLaterRecordsAcrossSweeps() {
-		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(0L), any()))
-				.willReturn(List.of(failure(1L), failure(2L), failure(3L)));
-		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(3L), any()))
-				.willReturn(List.of(failure(4L), failure(5L), failure(6L)));
-		IssueFailureLog reachable = failure(7L);
-		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(6L), any()))
-				.willReturn(List.of(reachable));
-		// 앞쪽 여섯 건은 계속 실패하고 마지막 건만 성공한다
-		UUID reachableRequestId = UUID.fromString(reachable.getRequestId());
-		given(issueProcessor.confirm(any(), any(), any())).willAnswer(invocation -> {
-			if (reachableRequestId.equals(invocation.getArgument(2))) {
-				return CouponIssueConfirmResult.CONFIRMED_NOW;
-			}
-			throw new RedisConnectionFailureException("down");
-		});
-
-		// 첫 주기는 한도(2페이지)까지만 훑는다
-		service.retryFailedConfirmations();
-		assertThat(reachable.isResolved()).isFalse();
-
-		// 두 번째 주기가 앞 주기 끝에서 이어받아 뒤쪽 건에 도달한다
-		service.retryFailedConfirmations();
-		assertThat(reachable.isResolved()).isTrue();
-	}
-
-	@Test
 	@DisplayName("같은 상태가 이어지면 경보를 다시 남기지 않는다")
 	void doesNotRepeatIdenticalAlert() {
 		// 매번 남기면 주기마다 같은 경보가 쌓인다
@@ -271,7 +254,7 @@ class ConfirmFailureRetryServiceTest {
 	}
 
 	private void givenTargets(IssueFailureLog... failures) {
-		given(failureLogRepository.findRetryTargets(any(), any(), Mockito.eq(0L), any()))
+		given(failureLogRepository.findRetryTargets(any(), any(), any()))
 				.willReturn(List.of(failures));
 	}
 

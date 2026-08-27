@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -43,31 +42,24 @@ public class ConfirmFailureRetryService {
 	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
 	private final AtomicReference<String> lastReport = new AtomicReference<>();
 
-	// 주기 사이에 이어지는 커서
-	// 매번 0 에서 시작하면 앞쪽 batchSize x maxPages 건이 계속 실패할 때
-	// 그 뒤 건은 영원히 도달하지 못한다. 끝까지 가면 처음으로 돌아온다
-	private final AtomicLong sweepCursor = new AtomicLong();
 
 	private final IssueFailureLogRepository failureLogRepository;
 	private final RedisCouponIssueProcessor issueProcessor;
 	private final CouponIssueRedisProperties properties;
 
 	// 한 주기가 훑는 양의 상한
-	// batchSize x maxPages 를 넘으면 다음 주기가 이어받는다
+	// 남은 건은 다음 주기가 이어받는다
 	private final int batchSize;
-	private final int maxPages;
 
 	public ConfirmFailureRetryService(
 			IssueFailureLogRepository failureLogRepository,
 			RedisCouponIssueProcessor issueProcessor,
 			CouponIssueRedisProperties properties,
-			@Value("${coupon.issue.confirm-retry.batch-size:100}") int batchSize,
-			@Value("${coupon.issue.confirm-retry.max-pages:50}") int maxPages) {
+			@Value("${coupon.issue.confirm-retry.batch-size:100}") int batchSize) {
 		this.failureLogRepository = failureLogRepository;
 		this.issueProcessor = issueProcessor;
 		this.properties = properties;
 		this.batchSize = batchSize;
-		this.maxPages = maxPages;
 	}
 
 	public SweepResult retryFailedConfirmations() {
@@ -78,39 +70,24 @@ public class ConfirmFailureRetryService {
 		int notRetryable = 0;
 		int retryFailed = 0;
 
-		long lastSeenId = sweepCursor.get();
-		for (int page = 0; page < maxPages; page++) {
-			List<IssueFailureLog> targets = failureLogRepository.findRetryTargets(
-					IssueFailureStage.CONFIRM,
-					RETRYABLE_RESULTS,
-					lastSeenId,
-					PageRequest.of(0, batchSize));
-			if (targets.isEmpty()) {
-				// 끝까지
-				// 다음 주기는 처음부터
-				lastSeenId = 0L;
-				break;
-			}
+		// 마지막 시도 시각 오름차순으로 한 페이지만 가져온다
+		// 커서를 들고 다니지 않아도 시도한 건은 자연히 뒤로 밀린다
+		List<IssueFailureLog> targets = failureLogRepository.findRetryTargets(
+				IssueFailureStage.CONFIRM,
+				RETRYABLE_RESULTS,
+				PageRequest.of(0, batchSize));
 
-			for (IssueFailureLog failure : targets) {
-				scanned++;
-				switch (retry(failure)) {
-					case RESOLVED -> resolved++;
-					case ALREADY_RESOLVED -> alreadyResolved++;
-					case EXPIRED -> expired++;
-					case NOT_RETRYABLE -> notRetryable++;
-					case RETRY_FAILED -> retryFailed++;
-				}
-			}
-
-			lastSeenId = targets.get(targets.size() - 1).getId();
-			if (targets.size() < batchSize) {
-				lastSeenId = 0L;
-				break;
+		for (IssueFailureLog failure : targets) {
+			scanned++;
+			switch (retry(failure)) {
+				case RESOLVED -> resolved++;
+				case ALREADY_RESOLVED -> alreadyResolved++;
+				case EXPIRED -> expired++;
+				case NOT_RETRYABLE -> notRetryable++;
+				case RETRY_FAILED -> retryFailed++;
 			}
 		}
-		// 한도까지 훑고도 남았으면 이어서 볼 위치를 남긴다
-		sweepCursor.set(lastSeenId);
+
 
 		// 재시도 대상이 없다는 것과 막힌 회차가 없다는 것은 다르다
 		// 되살릴 수 없는 건만 남아 있으면 findRetryTargets 는 비지만 회차는 계속 막혀 있다
@@ -127,35 +104,46 @@ public class ConfirmFailureRetryService {
 
 	// 한 건의 실패가 다음 건을 막지 않도록
 	public ConfirmFailureRetryResult retry(IssueFailureLog failure) {
-		CouponIssueConfirmResult confirmResult;
+		LocalDateTime now = LocalDateTime.now(properties.zoneId());
+		// 성공/실패와 무관하게 시도를 남겨야 다음 회전에서 뒤로 밀린다
+		failure.recordAttempt(now);
+
+		ConfirmFailureRetryResult result;
 		try {
-			confirmResult = issueProcessor.confirm(
+			result = classify(failure, issueProcessor.confirm(
 					failure.getEventId(),
 					failure.getUserId(),
-					UUID.fromString(failure.getRequestId()));
+					UUID.fromString(failure.getRequestId())), now);
 		} catch (RuntimeException exception) {
 			log.warn("확정 재처리 호출에 실패했습니다. failureId={}, requestId={}",
 					failure.getId(), failure.getRequestId(), exception);
-			return ConfirmFailureRetryResult.RETRY_FAILED;
+			result = ConfirmFailureRetryResult.RETRY_FAILED;
 		}
 
+		// 시도 기록이 남았으므로 결과와 무관하게 한 번 저장한다
+		failureLogRepository.save(failure);
+		return result;
+	}
+
+	private ConfirmFailureRetryResult classify(
+			IssueFailureLog failure, CouponIssueConfirmResult confirmResult, LocalDateTime now) {
 		return switch (confirmResult) {
-			case CONFIRMED_NOW -> markResolved(failure, ConfirmFailureRetryResult.RESOLVED);
-			case ALREADY_CONFIRMED -> markResolved(failure, ConfirmFailureRetryResult.ALREADY_RESOLVED);
-			// 요청 레코드가 사라짐
+			case CONFIRMED_NOW -> markResolved(failure, now, ConfirmFailureRetryResult.RESOLVED);
+			case ALREADY_CONFIRMED -> markResolved(
+					failure, now, ConfirmFailureRetryResult.ALREADY_RESOLVED);
+			// 요청 레코드가 사라졌다. 재확인 결과가 곧 만료 증거다
 			case REQUEST_NOT_FOUND -> markUnrecoverable(
 					failure, confirmResult, ConfirmFailureRetryResult.EXPIRED);
 			case NOT_CONFIRMABLE, CORRUPTED_STATE, INVALID_ARGUMENT -> markUnrecoverable(
 					failure, confirmResult, ConfirmFailureRetryResult.NOT_RETRYABLE);
-			// 다음 주기에 다시 시도
+			// 다음 주기에 다시 시도한다. 판정 값을 바꾸지 않아 대상에 그대로 남는다
 			case INTERNAL_WRITE_ERROR -> ConfirmFailureRetryResult.RETRY_FAILED;
 		};
 	}
 
 	private ConfirmFailureRetryResult markResolved(
-			IssueFailureLog failure, ConfirmFailureRetryResult result) {
-		failure.resolve(LocalDateTime.now(properties.zoneId()));
-		failureLogRepository.save(failure);
+			IssueFailureLog failure, LocalDateTime now, ConfirmFailureRetryResult result) {
+		failure.resolve(now);
 		log.info("확정 실패를 회수했습니다. failureId={}, eventId={}, result={}",
 				failure.getId(), failure.getEventId(), result);
 		return result;
@@ -167,7 +155,6 @@ public class ConfirmFailureRetryService {
 			CouponIssueConfirmResult confirmResult,
 			ConfirmFailureRetryResult result) {
 		failure.updateConfirmResult(confirmResult.name());
-		failureLogRepository.save(failure);
 		log.warn("확정 실패를 회수할 수 없습니다. failureId={}, eventId={}, confirmResult={}",
 				failure.getId(), failure.getEventId(), confirmResult);
 		return result;

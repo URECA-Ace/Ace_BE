@@ -16,20 +16,20 @@ public interface IssueFailureLogRepository extends JpaRepository<IssueFailureLog
 
 	List<IssueFailureLog> findAllByRequestId(String requestId);
 
-	// 재처리 대상 - 되살릴 수 있는 실패만 조회
+	// 재처리 대상
+	// 되살릴 수 있는 실패만 조회
+	// 정렬은 마지막 시도 시각 오름차순
 	@Query("""
 			SELECT failure
 			FROM IssueFailureLog failure
 			WHERE failure.failureStage = :stage
 				AND failure.resolvedAt IS NULL
 				AND failure.compensationResult IN :retryableResults
-				AND failure.id > :lastSeenId
-			ORDER BY failure.id
+			ORDER BY failure.lastAttemptAt ASC, failure.id ASC
 			""")
 	List<IssueFailureLog> findRetryTargets(
 			@Param("stage") IssueFailureStage stage,
 			@Param("retryableResults") Collection<String> retryableResults,
-			@Param("lastSeenId") Long lastSeenId,
 			Pageable pageable);
 
 	// 되살릴 수 없어 사람이 봐야 하는 건수

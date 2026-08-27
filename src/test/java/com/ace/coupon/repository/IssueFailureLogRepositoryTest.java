@@ -44,7 +44,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.flush();
 
 		List<Long> found = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, 0L, PageRequest.of(0, 100)));
+				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
 
 		assertThat(found).contains(callFailed.getId(), writeError.getId());
 		assertThat(found).doesNotContain(
@@ -52,18 +52,24 @@ class IssueFailureLogRepositoryTest {
 	}
 
 	@Test
-	@DisplayName("커서보다 뒤에 있는 건만 반환해 다음 페이지로 넘어갈 수 있다")
-	void advancesPastTheCursor() {
+	@DisplayName("한 번도 시도하지 않은 건이 먼저, 그다음 오래 방치된 건이 온다")
+	void ordersByLastAttemptAscending() {
+		// 앞쪽 건이 계속 실패해도 시도 시각이 갱신되며 뒤로 밀려 다른 건이 차례를 얻는다
 		long eventId = uniqueEventId();
-		IssueFailureLog first = persist(eventId, IssueFailureStage.CONFIRM, "CALL_FAILED", null);
-		IssueFailureLog second = persist(eventId, IssueFailureStage.CONFIRM, "CALL_FAILED", null);
+		LocalDateTime now = LocalDateTime.now();
+		IssueFailureLog recentlyTried = persist(eventId, IssueFailureStage.CONFIRM, "CALL_FAILED", null);
+		recentlyTried.recordAttempt(now);
+		IssueFailureLog longAgo = persist(eventId, IssueFailureStage.CONFIRM, "CALL_FAILED", null);
+		longAgo.recordAttempt(now.minusHours(1));
+		IssueFailureLog neverTried = persist(eventId, IssueFailureStage.CONFIRM, "CALL_FAILED", null);
 		entityManager.flush();
+		entityManager.clear();
 
-		List<Long> afterFirst = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, first.getId(), PageRequest.of(0, 100)));
+		List<Long> found = idsOf(repository.findRetryTargets(
+				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
 
-		assertThat(afterFirst).contains(second.getId());
-		assertThat(afterFirst).doesNotContain(first.getId());
+		assertThat(found).containsSubsequence(
+				neverTried.getId(), longAgo.getId(), recentlyTried.getId());
 	}
 
 	@Test
@@ -78,7 +84,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.clear();
 
 		List<Long> found = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, 0L, PageRequest.of(0, 100)));
+				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
 
 		assertThat(found).doesNotContain(failure.getId());
 	}
