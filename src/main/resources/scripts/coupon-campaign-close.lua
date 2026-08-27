@@ -1,5 +1,7 @@
 -- KEYS[1]: campaign metadata HASH
--- return: {code, observedAt, diagnosticStage, diagnosticMessage}
+-- return: {code, closedAt, diagnosticStage, diagnosticMessage}
+-- closedAt: CLOSED 시 Redis 서버가 관측한 마감 시각,
+--           ALREADY_CLOSED 시 metadata에 저장된 기존 마감 시각
 -- code: 0=CLOSED, 1=ALREADY_CLOSED, 2=NOT_INITIALIZED,
 --       3=INVALID_STATE, 4=CORRUPTED_STATE, 5=INTERNAL_WRITE_ERROR
 
@@ -34,8 +36,8 @@ local redisTime = redis.call('TIME')
 local observedAt = tonumber(redisTime[1]) * 1000
         + math.floor(tonumber(redisTime[2]) / 1000)
 
-local function response(code, stage, message)
-    return {code, observedAt, stage or DIAG_NONE, message or ''}
+local function response(code, stage, message, closedAt)
+    return {code, closedAt or observedAt, stage or DIAG_NONE, message or ''}
 end
 
 local metadata = redis.pcall('HMGET', KEYS[1],
@@ -68,7 +70,7 @@ if observedAt <= openAt then
 end
 
 if observedAt >= closeAt then
-    return response(ALREADY_CLOSED)
+    return response(ALREADY_CLOSED, nil, nil, closeAt)
 end
 
 local writeResult = redis.pcall('HSET', KEYS[1], 'closeAt', tostring(observedAt))

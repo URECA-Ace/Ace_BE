@@ -4,5 +4,5 @@ import java.time.Instant;
 
 public record CampaignCloseDecision(
 		CampaignCloseResult result,
-		Instant observedAt) {
+		Instant closedAt) {
 }
