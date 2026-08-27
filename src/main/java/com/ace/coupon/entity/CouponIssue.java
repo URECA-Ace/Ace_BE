@@ -116,6 +116,11 @@ public class CouponIssue {
 		this.canceledAt = canceledAt;
 	}
 
+	public void expire() {
+		validateTransition(CouponIssueStatus.EXPIRED);
+		this.status = CouponIssueStatus.EXPIRED;
+	}
+
 	private void validateTransition(CouponIssueStatus target) {
 		if (!this.status.canTransitTo(target)) {
 			throw new IllegalStateException(

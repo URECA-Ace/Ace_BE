@@ -1,5 +1,7 @@
 package com.ace.coupon.repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -25,10 +27,19 @@ public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> 
 
 	long countByCouponEvent_Id(Long eventId);
 	
-	
 	@Lock(LockModeType.PESSIMISTIC_WRITE) 
-	
 	@Query("SELECT ci FROM CouponIssue ci WHERE ci.id = :issueId")  
-	
 	Optional<CouponIssue> findByIdForUpdate(@Param("issueId") Long issueId);
+
+	@Query("""
+			SELECT ci FROM CouponIssue ci
+			WHERE ci.status = 'ISSUED'
+			  AND ci.validTo < :now
+			  AND ci.id > :lastId
+			ORDER BY ci.id ASC
+			""")
+	List<CouponIssue> findExpiredIssuesChunk(
+			@Param("now") LocalDateTime now,
+			@Param("lastId") Long lastId,
+			Pageable pageable);
 }
