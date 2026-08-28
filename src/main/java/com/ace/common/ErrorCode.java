@@ -67,6 +67,11 @@ public enum ErrorCode {
 	CHECK_POSTPONED(HttpStatus.SERVICE_UNAVAILABLE, "처리 중인 데이터가 있어 정합성 검증을 보류합니다."),
 	CHECK_IMPOSSIBLE(HttpStatus.GONE, "원본 데이터가 유실되어 정합성 검증을 수행할 수 없습니다."),
 
+	// 발급 실패(DLQ) 관제
+	ISSUE_FAILURE_NOT_FOUND(HttpStatus.NOT_FOUND, "발급 실패 기록을 찾을 수 없습니다."),
+	ISSUE_FAILURE_ACTION_NOT_ALLOWED(HttpStatus.CONFLICT, "현재 상태에서 실행할 수 없는 조치입니다."),
+	ISSUE_FAILURE_REASON_REQUIRED(HttpStatus.BAD_REQUEST, "종결하려면 사유가 필요합니다."),
+
 	// 정합성 복구
 	VERIFICATION_RESULT_NOT_FOUND(HttpStatus.NOT_FOUND, "검증 결과를 찾을 수 없습니다."),
 	RECOVERY_NOT_APPLICABLE(HttpStatus.CONFLICT, "위반(FAIL) 상태인 검증 결과만 복구할 수 있습니다."),
