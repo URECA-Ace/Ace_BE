@@ -19,6 +19,7 @@ import com.ace.consistency.repository.VerificationViolationRepository;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.repository.CouponIssueRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class IssueHistoryTimeSyncConsistencyRecoveryPolicy implements Consistenc
 
 	private final EventLogRecoveryExecutor eventRecoveryExecutor;
 	private final VerificationViolationRepository violationRepository;
+	private final CouponIssueRepository couponIssueRepository;
 
 	@Override
 	public String checkName() {
@@ -89,9 +91,11 @@ public class IssueHistoryTimeSyncConsistencyRecoveryPolicy implements Consistenc
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
 		}
 
-		return violations.stream()
+		List<Long> issueIds = violations.stream()
 				.map(VerificationViolationEntity::getTargetId)
 				.distinct()
 				.toList();
+
+		return couponIssueRepository.findEventIdsByIds(issueIds);
 	}
 }

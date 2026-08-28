@@ -44,6 +44,7 @@ public class StateMachineConsistencyRecoveryPolicy implements ConsistencyRecover
 
 	private final EventLogRecoveryExecutor eventRecoveryExecutor;
 	private final VerificationViolationRepository violationRepository;
+	private final com.ace.coupon.repository.CouponIssueRepository couponIssueRepository;
 
 	@Override
 	public String checkName() {
@@ -85,9 +86,11 @@ public class StateMachineConsistencyRecoveryPolicy implements ConsistencyRecover
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
 		}
 
-		return violations.stream()
+		List<Long> issueIds = violations.stream()
 				.map(VerificationViolationEntity::getTargetId)
 				.distinct()
 				.toList();
+
+		return couponIssueRepository.findEventIdsByIds(issueIds);
 	}
 }

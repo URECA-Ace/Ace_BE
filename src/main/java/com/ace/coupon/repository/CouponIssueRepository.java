@@ -43,6 +43,9 @@ public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> 
 	// IssueHistoryTimeSyncConsistencyCheck 복구 대상 선정용: EXPIRED는 "더 늦은 쪽" 비교 대상이 아니라 제외
 	List<CouponIssue> findByCouponEvent_IdAndStatusIn(Long eventId, List<CouponIssueStatus> statuses);
 
+	@Query("SELECT DISTINCT ci.couponEvent.id FROM CouponIssue ci WHERE ci.id IN :issueIds")
+	List<Long> findEventIdsByIds(@Param("issueIds") List<Long> issueIds);
+
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("SELECT ci FROM CouponIssue ci WHERE ci.id = :issueId")  
