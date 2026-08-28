@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Service
@@ -36,7 +37,7 @@ public class CouponStateProcessor {
 
 		String eventUid = idempotencyKey.toString();
 		ZoneId zoneId = properties.zoneId();
-		LocalDateTime now = LocalDateTime.now(zoneId);
+		LocalDateTime now = LocalDateTime.now(zoneId).truncatedTo(ChronoUnit.MICROS);
 
 		CouponStateIdempotency idempotency = CouponStateIdempotency.builder()
 				.eventUid(eventUid)
