@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
@@ -37,12 +39,15 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.user.entity.User;
+import com.ace.user.repository.UserRepository;
 
 class CouponIssueServiceImplTest {
 
 	private RedisCouponIssueProcessor processor;
 	private CouponEventRepository couponEventRepository;
 	private IssuePersistenceCoordinator coordinator;
+	private UserRepository userRepository;
 	private CouponIssueService service;
 
 	@BeforeEach
@@ -54,12 +59,15 @@ class CouponIssueServiceImplTest {
 		processor = Mockito.mock(RedisCouponIssueProcessor.class);
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		coordinator = Mockito.mock(IssuePersistenceCoordinator.class);
+		userRepository = Mockito.mock(UserRepository.class);
 		return new CouponIssueServiceImpl(
 				processor,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
 				couponEventRepository,
 				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
-				coordinator);
+				coordinator,
+				userRepository,
+				new SimpleMeterRegistry());
 	}
 
 	@Test
@@ -129,11 +137,21 @@ class CouponIssueServiceImplTest {
 		Instant decidedAt = Instant.parse("2026-08-14T06:00:00Z");
 		given(processor.findRequest(1L, requestId)).willReturn(new CouponIssueRequestState(
 				requestId, 1L, 2L, IssueRequestStatus.ACCEPTED, 7L, 93L, decidedAt));
+		given(userRepository.findById(2L)).willReturn(java.util.Optional.of(
+				User.builder()
+						.id(2L)
+						.name("홍길동")
+						.email("honggildong@example.com")
+						.phone("010-1234-5678")
+						.build()));
 
 		CouponIssueStatusResponse response = service.findStatus(1L, requestId);
 
 		assertThat(response.status()).isEqualTo(IssueRequestStatus.ACCEPTED);
 		assertThat(response.decidedAt().toInstant()).isEqualTo(decidedAt);
+		assertThat(response.maskedUserName()).isEqualTo("홍*동");
+		assertThat(response.maskedUserEmail()).isEqualTo("hon****@example.com");
+		assertThat(response.maskedUserPhone()).isEqualTo("010-****-5678");
 	}
 
 	@Test

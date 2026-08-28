@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.coupon.dto.response.CouponEventSummaryResponse;
+import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.repository.CouponEventRepository;
 
@@ -30,10 +31,13 @@ public class CouponEventQueryService {
 
 	@Transactional(readOnly = true)
 	public List<CouponEventSummaryResponse> findRecentEvents(CouponEventStatus status, int size) {
-		PageRequest pageRequest = PageRequest.of(0, Math.max(1, Math.min(size, MAX_SIZE)));
-		var events = status == null
+		int requestedSize = Math.max(1, Math.min(size, MAX_SIZE));
+		PageRequest pageRequest = PageRequest.of(0, requestedSize);
+
+		List<CouponEvent> events = status == null
 				? couponEventRepository.findRecentWithCoupon(pageRequest)
 				: couponEventRepository.findRecentWithCouponByStatus(status, pageRequest);
+
 		return events.stream()
 				.map(event -> CouponEventSummaryResponse.from(event, clock.getZone()))
 				.toList();

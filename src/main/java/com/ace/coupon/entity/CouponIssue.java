@@ -28,7 +28,9 @@ import java.time.LocalDateTime;
 		name = "coupon_issue",
 		indexes = {
 				@Index(name = "idx_coupon_issue_event_user_status_created",
-						columnList = "event_id, user_id, status, created_at")
+						columnList = "event_id, user_id, status, created_at"),
+				@Index(name = "idx_coupon_issue_status_valid_to_id",
+						columnList = "status, valid_to, issue_id")
 		},
 		uniqueConstraints = {
 				@UniqueConstraint(
@@ -114,6 +116,11 @@ public class CouponIssue {
 		this.status = CouponIssueStatus.ISSUED;
 		this.usedAt = null;
 		this.canceledAt = canceledAt;
+	}
+
+	public void expire(LocalDateTime expiredAt) {
+		validateTransition(CouponIssueStatus.EXPIRED);
+		this.status = CouponIssueStatus.EXPIRED;
 	}
 
 	/**

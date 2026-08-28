@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,8 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
 			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+			assertThat(outcome.getViolations()).singleElement()
+					.satisfies(violation -> assertThat(violation.getTargetType()).isEqualTo(ViolationTargetType.ISSUE));
 		}
 	}
 
@@ -67,6 +70,45 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 		for (Scope scope : createTestScopes(eventId)) {
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
+	}
+
+	@Test
+	@DisplayName("MANUAL_EXPIRED 수동 만료는 validTo 이전이어도 시간 정합성 검증을 통과한다")
+	void passWhenManuallyExpiredBeforeValidTo() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
+		jdbcTemplate.update("""
+				UPDATE coupon_issue
+				SET status = 'EXPIRED', valid_to = '2024-01-08 10:00:00'
+				WHERE issue_id = :issueId
+				""", new MapSqlParameterSource("issueId", issueId));
+		insertDummyHistory(
+				issueId, "ISSUED", "EXPIRED", "MANUAL_EXPIRED", "2024-01-02 10:00:00");
+
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isTrue();
+		}
+	}
+
+	@Test
+	@DisplayName("자연 만료 이력이 validTo 이전이면 기존 시간 정합성 위반을 유지한다")
+	void failWhenScheduledExpirationOccursBeforeValidTo() {
+		long eventId = generateUniqueId();
+		long issueId = insertDummyIssue(eventId, "2024-01-01 10:00:00");
+		jdbcTemplate.update("""
+				UPDATE coupon_issue
+				SET status = 'EXPIRED', valid_to = '2024-01-08 10:00:00'
+				WHERE issue_id = :issueId
+				""", new MapSqlParameterSource("issueId", issueId));
+		insertDummyHistory(
+				issueId, "ISSUED", "EXPIRED", "EXPIRED_BY_SCHEDULE", "2024-01-02 10:00:00");
+
+		for (Scope scope : createTestScopes(eventId)) {
+			CheckOutcome outcome = check.check(scope);
+			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
+			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
 		}
 	}
 
@@ -88,14 +130,22 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 	}
 
 	private void insertDummyHistory(long issueId, String fromStatus, String toStatus, String occurredAt) {
+		insertDummyHistory(issueId, fromStatus, toStatus, null, occurredAt);
+	}
+
+	private void insertDummyHistory(
+			long issueId, String fromStatus, String toStatus, String reason, String occurredAt) {
 		String sql = """
-                INSERT INTO coupon_history (issue_id, from_status, to_status, occurred_at, recorded_at)
-                VALUES (:issueId, :fromStatus, :toStatus, :occurredAt, NOW())
+				INSERT INTO coupon_history (
+					issue_id, from_status, to_status, reason, occurred_at, recorded_at
+				)
+				VALUES (:issueId, :fromStatus, :toStatus, :reason, :occurredAt, NOW())
                 """;
 		MapSqlParameterSource params = new MapSqlParameterSource()
 				.addValue("issueId", issueId)
 				.addValue("fromStatus", fromStatus)
 				.addValue("toStatus", toStatus)
+				.addValue("reason", reason)
 				.addValue("occurredAt", occurredAt);
 		jdbcTemplate.update(sql, params);
 	}

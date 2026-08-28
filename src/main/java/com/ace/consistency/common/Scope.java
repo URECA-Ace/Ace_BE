@@ -28,10 +28,14 @@ import java.util.Objects;
 @Getter
 public final class Scope {
 
+	@Getter
+	@AllArgsConstructor
 	public enum ScopeType {
-		EVENT,
-		AS_OF_RANGE,
-		ALL
+		EVENT("특정 이벤트"),
+		AS_OF_RANGE("기간 범위"),
+		ALL("전체 데이터");
+
+		private final String label;
 	}
 
 	private final ScopeType type;

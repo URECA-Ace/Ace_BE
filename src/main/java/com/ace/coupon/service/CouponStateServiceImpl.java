@@ -9,9 +9,12 @@ import org.springframework.stereotype.Service;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.coupon.dto.response.CouponIssueLookupResponse;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
+import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.entity.CouponStateIdempotency;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -26,6 +29,14 @@ public class CouponStateServiceImpl implements CouponStateService {
 
 	private final CouponStateProcessor processor;
 	private final CouponStateIdempotencyRepository idempotencyRepository;
+	private final CouponIssueRepository couponIssueRepository;
+
+	@Override
+	public CouponIssueLookupResponse findIssue(Long eventId, Long userId) {
+		CouponIssue issue = couponIssueRepository.findByCouponEvent_IdAndUser_Id(eventId, userId)
+				.orElseThrow(() -> new CouponException(ErrorCode.ISSUE_NOT_FOUND));
+		return new CouponIssueLookupResponse(issue.getId(), eventId, userId);
+	}
 
 	@Override
 	public CouponStateChangeResponse use(Long issueId, Long userId, UUID idempotencyKey, String reason) {
@@ -35,6 +46,11 @@ public class CouponStateServiceImpl implements CouponStateService {
 	@Override
 	public CouponStateChangeResponse cancel(Long issueId, Long userId, UUID idempotencyKey, String reason) {
 		return executeWithIdempotency(issueId, userId, idempotencyKey, CouponIssueStatus.ISSUED, reason);
+	}
+
+	@Override
+	public CouponStateChangeResponse expire(Long issueId, Long userId, UUID idempotencyKey, String reason) {
+		return executeWithIdempotency(issueId, userId, idempotencyKey, CouponIssueStatus.EXPIRED, reason);
 	}
 
 	private CouponStateChangeResponse executeWithIdempotency(

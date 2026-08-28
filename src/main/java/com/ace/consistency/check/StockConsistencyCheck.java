@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -29,6 +30,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class StockConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "재고 정합성 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -92,21 +97,27 @@ public class StockConsistencyCheck implements ConsistencyCheck {
 			return CheckOutcome.pass();
 		}
 
-		return CheckOutcome.fail(violations.size(), buildDiffDetail(violations));
+		return CheckOutcome.fail(violations.size(), buildDiffDetail(violations), buildViolations(violations));
 	}
 
 	private Map<String, Object> buildDiffDetail(List<Map<String, Object>> violations) {
 		Map<String, Object> diff = new LinkedHashMap<>();
 		diff.put("violationCount", violations.size());
-		diff.put("sample", violations.stream()
-				.map(row -> Map.of(
-						"eventId", row.get("event_id"),
-						"totalStock", row.get("total_stock"),
-						"issuedQuantity", row.get("issued_quantity"),
-						"remainingStock", row.get("remaining_stock"),
-						"actualActiveCount", row.get("actual_active_count")
-				))
-				.toList());
 		return diff;
+	}
+
+	private List<Violation> buildViolations(List<Map<String, Object>> violations) {
+		return violations.stream()
+				.map(row -> new Violation(
+						ViolationTargetType.EVENT,
+						((Number) row.get("event_id")).longValue(),
+						Map.of(
+								"eventId", row.get("event_id"),
+								"totalStock", row.get("total_stock"),
+								"issuedQuantity", row.get("issued_quantity"),
+								"remainingStock", row.get("remaining_stock"),
+								"actualActiveCount", row.get("actual_active_count")
+						)))
+				.toList();
 	}
 }

@@ -25,10 +25,16 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
 		name = "coupon_event",
-		indexes = @Index(
-				name = "idx_coupon_event_status_open_at",
-				columnList = "status, open_at"
-		),
+		indexes = {
+				@Index(
+						name = "idx_coupon_event_status_open_at",
+						columnList = "status, open_at"
+				),
+				@Index(
+						name = "idx_coupon_event_status_close_at",
+						columnList = "status, close_at"
+				)
+		},
 		uniqueConstraints = @UniqueConstraint(
 				name = "uk_coupon_event_coupon_round",
 				columnNames = {"coupon_id", "round"}

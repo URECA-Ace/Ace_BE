@@ -12,8 +12,8 @@ import com.ace.consistency.recovery.enums.RecoveryAction;
  * ConsistencyRecoveryDispatcher에 의해 선택되어 recover()가 호출된다.
  *
  * recover()는 내부에서 발생하는 예외를 직접 잡아서 RecoveryOutcome.failure()로 변환해야 한다.
- * Dispatcher가 이 호출과 RecoveryResult 저장을 하나의 트랜잭션으로 묶기 때문에, recover()가
- * 예외를 던진 채로 빠져나가면 트랜잭션 전체가 롤백되어 실패 이력조차 남길 수 없게 된다.
+ * Dispatcher는 정책이 반환한 각 outcome의 이력을 RecoveryResultRecorder의 별도 REQUIRES_NEW
+ * 트랜잭션으로 저장한 뒤, 자신의 트랜잭션에서 재검증과 recoveryStatus 갱신을 수행한다.
  *
  * Dispatcher는 target에서 복구 대상(이벤트 하나, 이벤트 여러 개, 개별 발급 건 등)을 판단하지
  * 않는다. 체크마다 위반 단위가 다르므로(예: StockConsistencyCheck는 이벤트 단위, 다른 체크는

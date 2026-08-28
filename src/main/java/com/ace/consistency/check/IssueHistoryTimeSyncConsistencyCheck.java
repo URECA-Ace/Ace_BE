@@ -2,11 +2,13 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,11 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "발급·이력 시간 동기화 검사";
+	}
+	private static final String MANUAL_EXPIRED_REASON = "MANUAL_EXPIRED";
 
 	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간 .env로 일괄 관리예정 !!!!!
 	private static final int MAX_BATCH_LAG_SECONDS = 86400; 
@@ -50,7 +57,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final String ALL_JOIN_CLAUSE = """
             JOIN (
-                SELECT issue_id, from_status, to_status, occurred_at,
+                SELECT issue_id, from_status, to_status, reason, occurred_at,
                        ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
@@ -59,7 +66,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final String EVENT_JOIN_CLAUSE = """
             JOIN LATERAL (
-                SELECT from_status, to_status, occurred_at
+                SELECT from_status, to_status, reason, occurred_at
                 FROM coupon_history ch
                 WHERE ch.issue_id = ci.issue_id
                 ORDER BY occurred_at DESC, history_id DESC
@@ -99,8 +106,9 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                   )
                   OR
                   (
-                      -- [배치 처리] EXPIRED는 스케줄러 지연(Lag)을 고려하여 별도 검증
+                      -- [배치 처리] 자연 만료 EXPIRED만 스케줄러 지연(Lag)을 검증
                       ci.status = 'EXPIRED' AND
+                      (latest_history.reason IS NULL OR latest_history.reason <> :manualExpiredReason) AND
                       (
                           -- 유효기간 전에 미리 만료시킨 경우 (치명적 버그)
                           latest_history.occurred_at < ci.valid_to
@@ -124,7 +132,8 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope)
-				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS);
+				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS)
+				.addValue("manualExpiredReason", MANUAL_EXPIRED_REASON);
 
 		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(sql, params);
@@ -134,18 +143,17 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 		}
 
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new java.util.ArrayList<>(violations.size());
+		List<Violation> violationList = new ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			sample.add(sampleRow);
+			Map<String, Object> detail = new LinkedHashMap<>(violation);
+			detail.remove("total_violation_count");
+			violationList.add(new Violation(ViolationTargetType.ISSUE, ((Number) violation.get("issue_id")).longValue(), detail));
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("sample", sample);
 		diff.put("reason", "연동 도메인 시간 동기화 위반: coupon_issue와 coupon_history 간의 상태 변경 시간이 1초 이상 불일치합니다. (트랜잭션 원자성 의심)");
 
-		return CheckOutcome.fail(violationCount, diff);
+		return CheckOutcome.fail(violationCount, diff, violationList);
 	}
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {

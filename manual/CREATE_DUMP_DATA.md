@@ -6,7 +6,7 @@ tar 파일로 공유합니다. 아래 순서대로 실행하면 본인 로컬에
 Windows(CMD/PowerShell), Mac, Linux 상관없이 **아래 명령어를 그대로 복사해서 쓰면 됩니다.**
 모든 작업이 Docker 컨테이너 내부에서 실행되기 때문에 OS별로 명령어가 달라지지 않습니다.
 
-redis, kafka는 이 작업과 무관하며 전혀 영향받지 않습니다. mysql만 초기화/복원됩니다.
+redis는 이 작업과 무관하며 전혀 영향받지 않습니다. mysql만 초기화/복원됩니다.
 
 ---
 
@@ -48,7 +48,7 @@ docker compose restart mysql
 
 | 명령어 | 하는 일 |
 |---|---|
-| `stop mysql` | mysql 컨테이너만 정지 (redis, kafka는 안 건드림) |
+| `stop mysql` | mysql 컨테이너만 정지 (redis는 안 건드림) |
 | `rm -f mysql` | mysql 컨테이너 삭제 |
 | `volume rm ace_mysql-data` | 기존 mysql 데이터 볼륨 완전 삭제 (깨끗한 상태로 시작하기 위함) |
 | `up -d mysql` | 빈 볼륨으로 mysql을 한 번 기동 (내부 초기 구조 생성) |
