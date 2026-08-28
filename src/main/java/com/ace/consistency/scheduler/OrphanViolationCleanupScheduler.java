@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 /**
  * ALL 스코프 배치 Step이 CheckResultAccumulatorWriter로 verification_violation 행을
- * stepExecutionId로 임시 태깅해둔 뒤, ConsistencyStepCompletionListener(afterStep)까지
+ * JobInstance/Step 조합으로 임시 태깅해둔 뒤, ConsistencyStepCompletionListener(afterStep)까지
  * 도달하지 못하고 비정상 종료되면(예: 프로세스 강제 종료) 그 행들이 verification_result와
  * 연결되지도, 삭제되지도 못한 채 고아로 남을 수 있다. 이 스케줄러는 그런 고아 행을 주기적으로
  * 정리하는 안전망이다.

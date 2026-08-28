@@ -18,8 +18,8 @@ import org.springframework.batch.infrastructure.item.ItemWriter;
  * Step이 끝날 때까지 누적하는 {@link ItemWriter}. 실패 건수(violationCount)는 재시작을 위해
  * {@link ExecutionContext}에 저장하고, 위반 건은 각각 {@link VerificationViolationEntity}로 즉시
  * 저장한다(청크마다 커밋). 이 시점에는 아직 verification_result가 만들어지지 않았으므로
- * stepExecutionId로 임시 태깅해두고, Step 종료 후 {@link ConsistencyStepCompletionListener}가
- * 실제 verification_result와 연결(성공 시)하거나 일괄 삭제(실패 시)한다.
+ * 재시작 전후에도 유지되는 JobInstance/Step 조합으로 임시 태깅해두고, Step이 최종 완료되면
+ * {@link ConsistencyStepCompletionListener}가 실제 verification_result와 연결한다.
  *
  * {@link ItemStream}을 구현해 violationCount를 {@link ExecutionContext}에 저장하므로,
  * Step이 재시작되어도 이전에 처리한 페이지들의 집계가 유지된다.
@@ -32,13 +32,15 @@ public class CheckResultAccumulatorWriter
 
     private final VerificationViolationRepository violationRepository;
 
-    @Getter
-    private int violationCount;
-    private Long stepExecutionId;
+	@Getter
+	private int violationCount;
+	private Long jobInstanceId;
+	private String stepName;
 
     @Override
-    public void beforeStep(StepExecution stepExecution) {
-        this.stepExecutionId = stepExecution.getId();
+	public void beforeStep(StepExecution stepExecution) {
+		this.jobInstanceId = stepExecution.getJobExecution().getJobInstance().getInstanceId();
+		this.stepName = stepExecution.getStepName();
     }
 
     @Override
@@ -56,7 +58,7 @@ public class CheckResultAccumulatorWriter
             if (!outcome.getViolations().isEmpty()) {
                 violationRepository.saveAll(
                         outcome.getViolations().stream()
-                                .map(violation -> VerificationViolationEntity.forStep(stepExecutionId, violation))
+								.map(violation -> VerificationViolationEntity.forBatchStep(jobInstanceId, stepName, violation))
                                 .toList()
                 );
             }

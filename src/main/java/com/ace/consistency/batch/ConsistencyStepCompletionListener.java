@@ -6,6 +6,7 @@ import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.common.VerificationResultPersister;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.listener.StepExecutionListener;
@@ -24,6 +25,7 @@ import java.util.Map;
  * Step 단위로 결과를 저장하므로, 뒤 Step이 실패해도 앞서 완료된 Check들의 결과는 남는다.
  */
 @RequiredArgsConstructor
+@Slf4j
 public class ConsistencyStepCompletionListener implements StepExecutionListener {
 
     private final ConsistencyCheck check;
@@ -34,17 +36,32 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
 
     @Override
     public ExitStatus afterStep(StepExecution stepExecution) {
-        LocalDateTime executedAt = stepExecution.getStartTime();
-        long durationMillis = Duration.between(executedAt, LocalDateTime.now()).toMillis();
+        try {
+            LocalDateTime executedAt = stepExecution.getStartTime();
+            long durationMillis = Duration.between(executedAt, LocalDateTime.now()).toMillis();
 
-        VerificationResult result = buildResult(stepExecution, executedAt, durationMillis);
-        boolean stepFailed = stepExecution.getStatus() == BatchStatus.FAILED;
+            VerificationResult result = buildResult(stepExecution, executedAt, durationMillis);
+            boolean stepFailed = stepExecution.getStatus() == BatchStatus.FAILED;
 
-        // 결과 저장과, writer가 청크마다 stepExecutionId로 임시 태깅해둔 위반 행의 연결(성공)/
-        // 일괄 삭제(실패)를 하나의 트랜잭션으로 묶어, 그 사이 장애로 위반 행이 고아로 남는 것을 막는다.
-        resultPersister.saveStepResultAndLinkViolations(result, stepExecution.getId(), stepFailed);
+            // 완료 Step은 재시작 전후에 누적된 위반 행을 결과에 연결한다. 실패 Step의 행은
+            // ExecutionContext와 함께 재시작에 사용해야 하므로 cleanup 유예 시간 동안 보존한다.
+            //
+            // afterStep()에서 발생한 예외는 Spring Batch가 로그만 남기고 삼키므로, 이 메서드
+            // 전체에서 발생하는 런타임 예외를 잡아 Step을 직접 FAILED로 변경해야 한다.
+            resultPersister.saveStepResult(
+                    result,
+                    stepExecution.getJobExecution().getJobInstance().getInstanceId(),
+                    stepExecution.getStepName(),
+                    stepFailed);
 
-        return stepExecution.getExitStatus();
+            return stepExecution.getExitStatus();
+        } catch (RuntimeException ex) {
+            log.error("Failed to complete consistency Step. jobExecutionId={}, stepExecutionId={}, stepName={}",
+                    stepExecution.getJobExecution().getId(), stepExecution.getId(), stepExecution.getStepName(), ex);
+            stepExecution.addFailureException(ex);
+            stepExecution.upgradeStatus(BatchStatus.FAILED);
+            return ExitStatus.FAILED.addExitDescription(ex);
+        }
     }
 
     private VerificationResult buildResult(StepExecution stepExecution, LocalDateTime executedAt, long durationMillis) {
@@ -60,7 +77,7 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
         }
 
         // 위반 행 자체는 writer가 청크마다 이미 verification_violation에 직접 저장해뒀으므로
-        // (afterStep에서 stepExecutionId로 연결), 여기서는 violations를 다시 채우지 않는다.
+        // (afterStep에서 batch owner로 연결), 여기서는 violations를 다시 채우지 않는다.
         Map<String, Object> diffDetail = Map.of("violationCount", writer.getViolationCount());
         return VerificationResult.fail(check.getName(), triggerType, scope,
                 writer.getViolationCount(), diffDetail, List.of(), executedAt, durationMillis);

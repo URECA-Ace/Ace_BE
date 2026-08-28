@@ -24,20 +24,19 @@ public interface VerificationViolationRepository extends JpaRepository<Verificat
 	/** 화면 표시용으로 최근 N건만 필요할 때 사용한다. */
 	List<VerificationViolationEntity> findByVerificationResultIdOrderByIdDesc(Long verificationResultId, Pageable pageable);
 
-	/** ALL 스코프 배치 Step 성공 시, stepExecutionId로 태깅해둔 행들을 실제 verification_result에 일괄 연결한다. */
+	/** ALL 스코프 배치 Step 성공 시, 재시작 전후에 누적된 행 전체를 실제 결과에 연결한다. */
 	@Modifying
 	@Query("""
 			UPDATE VerificationViolationEntity v
-			SET v.verificationResultId = :verificationResultId, v.stepExecutionId = null
-			WHERE v.stepExecutionId = :stepExecutionId
+			SET v.verificationResultId = :verificationResultId,
+				v.batchJobInstanceId = null,
+				v.batchStepName = null
+			WHERE v.batchJobInstanceId = :jobInstanceId
+			  AND v.batchStepName = :stepName
 			""")
-	int linkToResult(@Param("stepExecutionId") Long stepExecutionId,
+	int linkToResult(@Param("jobInstanceId") Long jobInstanceId,
+					 @Param("stepName") String stepName,
 					  @Param("verificationResultId") Long verificationResultId);
-
-	/** ALL 스코프 배치 Step 실패 시, stepExecutionId로 태깅해둔 행들을 일괄 삭제한다. */
-	@Modifying
-	@Query("DELETE FROM VerificationViolationEntity v WHERE v.stepExecutionId = :stepExecutionId")
-	int deleteByStepExecutionId(@Param("stepExecutionId") Long stepExecutionId);
 
 	/**
 	 * 연결도 삭제도 되지 못한 채 남은 고아 행을 정리한다 (Step 종료 리스너가 실행되지 못한
@@ -58,11 +57,15 @@ public interface VerificationViolationRepository extends JpaRepository<Verificat
 	@Transactional
 	@Modifying
 	@Query(value = """
-			DELETE FROM verification_violation v
+			DELETE v FROM verification_violation v
 			WHERE v.verification_result_id IS NULL
 			  AND NOT EXISTS (
-			      SELECT 1 FROM BATCH_STEP_EXECUTION se
-			      WHERE se.STEP_EXECUTION_ID = v.step_execution_id
+			      SELECT 1
+			      FROM BATCH_STEP_EXECUTION se
+			      JOIN BATCH_JOB_EXECUTION je
+			        ON je.JOB_EXECUTION_ID = se.JOB_EXECUTION_ID
+			      WHERE je.JOB_INSTANCE_ID = v.batch_job_instance_id
+			        AND se.STEP_NAME = v.batch_step_name
 			        AND se.LAST_UPDATED >= :threshold
 			  )
 			""", nativeQuery = true)
