@@ -8,6 +8,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.common.ErrorCode;
@@ -74,7 +75,7 @@ public class ConsistencyRecoveryDispatcher {
 	 * 복구해야 하는지는 체크마다 다르므로, Dispatcher는 그 판단을 정책에 완전히 위임한다.
 	 * 정책이 반환한 RecoveryOutcome 리스트를 그대로 순회하며 각각 이력을 저장하고 재검증한다.
 	 */
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public List<RecoveryResult> recover(Long verificationResultId, RecoveryAction action) {
 		VerificationResultEntity target = verificationResultRepository.findById(verificationResultId)
 				.orElseThrow(() -> new ConsistencyCheckException(ErrorCode.VERIFICATION_RESULT_NOT_FOUND));
