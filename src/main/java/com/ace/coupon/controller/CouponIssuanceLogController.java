@@ -33,7 +33,7 @@ public class CouponIssuanceLogController {
 			Long eventId,
 			@RequestParam(name = "afterSequence", defaultValue = "0")
 			@Min(value = 0, message = "afterSequence는 0 이상이어야 합니다.")
-			int afterSequence,
+			long afterSequence,
 			@RequestParam(name = "size", defaultValue = "200")
 			@Min(value = 1, message = "size는 1 이상이어야 합니다.")
 			@Max(value = 500, message = "size는 500 이하여야 합니다.")

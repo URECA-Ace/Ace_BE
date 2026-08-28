@@ -31,8 +31,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CouponIssuanceLogService {
 
-	private static final int MAX_SIZE = 500;
-
 	private final CouponEventRepository couponEventRepository;
 	private final CouponIssueRepository couponIssueRepository;
 	private final RedisPendingIssuanceLogReader pendingLogReader;
@@ -40,38 +38,42 @@ public class CouponIssuanceLogService {
 	private final Clock clock;
 
 	@Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
-	public CouponIssuanceLogResponse findLogs(Long eventId, int afterSequence, int size) {
-		if (!couponEventRepository.existsById(eventId)) {
-			throw new CouponException(ErrorCode.EVENT_NOT_FOUND);
-		}
-
-		int requestedSize = Math.max(1, Math.min(size, MAX_SIZE));
+	public CouponIssuanceLogResponse findLogs(Long eventId, long afterSequence, int size) {
+		int requestedSize = size;
+		int databaseCursor = afterSequence >= Integer.MAX_VALUE
+				? Integer.MAX_VALUE
+				: (int) afterSequence;
 		// Redis를 먼저 읽어 릴레이가 DB 커밋 후 Stream을 정리하는 경계에서도 로그가 사라지지 않게 한다.
 		List<IssueRecord> processingRecords = pendingLogReader
-				.findRecentAfter(eventId, afterSequence, requestedSize + 1);
+				.findAfter(eventId, afterSequence, requestedSize + 1);
 		List<CouponIssue> queried = couponIssueRepository
 				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
 						eventId,
-						afterSequence,
+						databaseCursor,
 						PageRequest.of(0, requestedSize + 1));
+		if (processingRecords.isEmpty()
+				&& queried.isEmpty()
+				&& !couponEventRepository.existsById(eventId)) {
+			throw new CouponException(ErrorCode.EVENT_NOT_FOUND);
+		}
 		Map<Long, User> usersById = findUsers(processingRecords);
 
-		TreeMap<Integer, CouponIssuanceLogItemResponse> mergedBySequence = new TreeMap<>();
+		TreeMap<Long, CouponIssuanceLogItemResponse> mergedBySequence = new TreeMap<>();
 		processingRecords.forEach(record -> mergedBySequence.put(
-				Math.toIntExact(record.issueSequence()),
+				record.issueSequence(),
 				CouponIssuanceLogItemResponse.processing(
 						record, usersById.get(record.userId()), clock.getZone())));
 		// 같은 발급 순번이 DB에 존재하면 실제 확정 상태가 PROCESSING보다 우선한다.
 		queried.forEach(issue -> mergedBySequence.put(
-				issue.getIssueSequence(),
+				issue.getIssueSequence().longValue(),
 				CouponIssuanceLogItemResponse.from(issue, clock.getZone())));
 
 		List<CouponIssuanceLogItemResponse> merged = new ArrayList<>(mergedBySequence.values());
-		boolean hasMore = merged.size() > requestedSize || queried.size() > requestedSize;
+		boolean hasMore = merged.size() > requestedSize;
 		List<CouponIssuanceLogItemResponse> logs = merged.size() > requestedSize
 				? merged.subList(0, requestedSize)
 				: merged;
-		int nextSequence = logs.isEmpty()
+		long nextSequence = logs.isEmpty()
 				? afterSequence
 				: logs.getLast().issueSequence();
 

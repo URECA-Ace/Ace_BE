@@ -5,6 +5,6 @@ import java.util.List;
 public record CouponIssuanceLogResponse(
 		Long eventId,
 		List<CouponIssuanceLogItemResponse> logs,
-		Integer nextSequence,
+		Long nextSequence,
 		boolean hasMore) {
 }

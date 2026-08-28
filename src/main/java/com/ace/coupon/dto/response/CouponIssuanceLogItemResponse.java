@@ -13,10 +13,10 @@ public record CouponIssuanceLogItemResponse(
 		String maskedUserName,
 		String maskedUserEmail,
 		String maskedUserPhone,
-		Integer issueSequence,
+		Long issueSequence,
 		String status,
 		OffsetDateTime issuedAt,
-		OffsetDateTime confirmedAt) {
+		OffsetDateTime persistedAt) {
 
 	public static CouponIssuanceLogItemResponse from(CouponIssue issue, ZoneId zoneId) {
 		return new CouponIssuanceLogItemResponse(
@@ -24,7 +24,7 @@ public record CouponIssuanceLogItemResponse(
 				MaskingUtil.maskName(issue.getUser().getName()),
 				MaskingUtil.maskEmail(issue.getUser().getEmail()),
 				MaskingUtil.maskPhone(issue.getUser().getPhone()),
-				issue.getIssueSequence(),
+				issue.getIssueSequence().longValue(),
 				issue.getStatus().name(),
 				issue.getIssuedAt().atZone(zoneId).toOffsetDateTime(),
 				issue.getCreatedAt().atZone(zoneId).toOffsetDateTime());
@@ -39,7 +39,7 @@ public record CouponIssuanceLogItemResponse(
 				user == null ? null : MaskingUtil.maskName(user.getName()),
 				user == null ? null : MaskingUtil.maskEmail(user.getEmail()),
 				user == null ? null : MaskingUtil.maskPhone(user.getPhone()),
-				Math.toIntExact(record.issueSequence()),
+				record.issueSequence(),
 				"PROCESSING",
 				record.decidedAt().atZone(zoneId).toOffsetDateTime(),
 				null);

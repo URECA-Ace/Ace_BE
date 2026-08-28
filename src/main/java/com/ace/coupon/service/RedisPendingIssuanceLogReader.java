@@ -1,5 +1,6 @@
 package com.ace.coupon.service;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -24,20 +25,35 @@ public class RedisPendingIssuanceLogReader {
 
 	private final StringRedisTemplate redisTemplate;
 
-	public List<IssueRecord> findRecentAfter(long eventId, int afterSequence, int size) {
+	public List<IssueRecord> findAfter(long eventId, long afterSequence, int size) {
 		String streamKey = CouponRedisKeys.campaign(eventId).issueStream();
 		try {
-			List<MapRecord<String, String, String>> entries = redisTemplate
-					.<String, String>opsForStream()
-					.reverseRange(streamKey, Range.<String>unbounded(), Limit.limit().count(size));
-			if (entries == null || entries.isEmpty()) {
-				return List.of();
+			List<IssueRecord> records = new ArrayList<>(size);
+			Range<String> range = Range.unbounded();
+
+			while (records.size() < size) {
+				List<MapRecord<String, String, String>> entries = redisTemplate
+						.<String, String>opsForStream()
+						.range(streamKey, range, Limit.limit().count(size));
+				if (entries == null || entries.isEmpty()) {
+					break;
+				}
+
+				entries.stream()
+						.map(entry -> parse(entry, eventId))
+						.flatMap(Optional::stream)
+						.filter(record -> record.issueSequence() > afterSequence)
+						.limit(size - records.size())
+						.forEach(records::add);
+
+				if (entries.size() < size || records.size() >= size) {
+					break;
+				}
+				String lastEntryId = entries.getLast().getId().getValue();
+				range = Range.rightUnbounded(Range.Bound.exclusive(lastEntryId));
 			}
 
-			return entries.stream()
-					.map(entry -> parse(entry, eventId))
-					.flatMap(Optional::stream)
-					.filter(record -> record.issueSequence() > afterSequence)
+			return records.stream()
 					.sorted(Comparator.comparingLong(IssueRecord::issueSequence))
 					.toList();
 		} catch (DataAccessException exception) {
