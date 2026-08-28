@@ -22,6 +22,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class CouponStateProcessor {
+	private static final String MANUAL_EXPIRED_REASON = "MANUAL_EXPIRED";
 
 	private final CouponIssueRepository couponIssueRepository;
 	private final CouponHistoryRepository couponHistoryRepository;
@@ -58,13 +59,12 @@ public class CouponStateProcessor {
 		CouponIssueStatus previousStatus = issue.getStatus();
 		applyStateTransition(issue, targetStatus, now);
 
-		String defaultReason = (targetStatus == CouponIssueStatus.ISSUED) ? "USE_CANCELED" : (targetStatus == CouponIssueStatus.EXPIRED ? "MANUAL_EXPIRED" : "USED");
 		CouponHistory history = CouponHistory.builder()
 				.couponIssue(issue)
 				.fromStatus(previousStatus)
 				.toStatus(targetStatus)
 				.actor("USER_" + userId)
-				.reason(reason != null ? reason : defaultReason)
+				.reason(resolveHistoryReason(targetStatus, reason))
 				.occurredAt(now)
 				.recordedAt(now)
 				.eventUid(eventUid)
@@ -81,6 +81,16 @@ public class CouponStateProcessor {
 				previousStatus,
 				targetStatus,
 				now);
+	}
+
+	private String resolveHistoryReason(CouponIssueStatus targetStatus, String requestedReason) {
+		if (targetStatus == CouponIssueStatus.EXPIRED) {
+			return MANUAL_EXPIRED_REASON;
+		}
+		if (requestedReason != null) {
+			return requestedReason;
+		}
+		return targetStatus == CouponIssueStatus.ISSUED ? "USE_CANCELED" : "USED";
 	}
 
 	private void validateValidityPeriod(CouponIssue issue, CouponIssueStatus targetStatus, LocalDateTime now) {
