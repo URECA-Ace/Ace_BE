@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.common.util.MaskingUtil;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
 import com.ace.coupon.dto.response.CouponIssueStatusResponse;
 import com.ace.coupon.persistence.CouponIssuePersistenceProperties;
@@ -19,9 +20,13 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.user.entity.User;
+import com.ace.user.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CouponIssueServiceImpl implements CouponIssueService {
@@ -31,6 +36,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 	private final CouponEventRepository couponEventRepository;
 	private final CouponIssuePersistenceProperties persistenceProperties;
 	private final IssuePersistenceCoordinator persistenceCoordinator;
+	private final UserRepository userRepository;
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
@@ -124,6 +130,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 		if (state == null) {
 			throw new CouponException(ErrorCode.ISSUE_NOT_FOUND);
 		}
+		User user = findUserForMonitoring(state.userId());
 
 		return new CouponIssueStatusResponse(
 				state.requestId(),
@@ -132,6 +139,19 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 				state.issueSequence(),
 				state.remainingStock(),
 				state.status(),
-				OffsetDateTime.ofInstant(state.decidedAt(), properties.zoneId()));
+				OffsetDateTime.ofInstant(state.decidedAt(), properties.zoneId()),
+				user == null ? null : MaskingUtil.maskName(user.getName()),
+				user == null ? null : MaskingUtil.maskEmail(user.getEmail()),
+				user == null ? null : MaskingUtil.maskPhone(user.getPhone()));
+	}
+
+	private User findUserForMonitoring(long userId) {
+		try {
+			return userRepository.findById(userId).orElse(null);
+		} catch (DataAccessException exception) {
+			// 사용자 정보 부가 조회 장애가 Redis 기반 발급 상태 조회까지 막지 않게 한다.
+			log.warn("발급 상태 사용자 정보 조회 실패: userId={}", userId, exception);
+			return null;
+		}
 	}
 }
