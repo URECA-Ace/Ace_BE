@@ -17,11 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class CouponStateProcessor {
+	private static final String MANUAL_EXPIRED_REASON = "MANUAL_EXPIRED";
 
 	private final CouponIssueRepository couponIssueRepository;
 	private final CouponHistoryRepository couponHistoryRepository;
@@ -35,7 +37,7 @@ public class CouponStateProcessor {
 
 		String eventUid = idempotencyKey.toString();
 		ZoneId zoneId = properties.zoneId();
-		LocalDateTime now = LocalDateTime.now(zoneId);
+		LocalDateTime now = LocalDateTime.now(zoneId).truncatedTo(ChronoUnit.MICROS);
 
 		CouponStateIdempotency idempotency = CouponStateIdempotency.builder()
 				.eventUid(eventUid)
@@ -58,13 +60,12 @@ public class CouponStateProcessor {
 		CouponIssueStatus previousStatus = issue.getStatus();
 		applyStateTransition(issue, targetStatus, now);
 
-		String defaultReason = (targetStatus == CouponIssueStatus.ISSUED) ? "USE_CANCELED" : "USED";
 		CouponHistory history = CouponHistory.builder()
 				.couponIssue(issue)
 				.fromStatus(previousStatus)
 				.toStatus(targetStatus)
 				.actor("USER_" + userId)
-				.reason(reason != null ? reason : defaultReason)
+				.reason(resolveHistoryReason(targetStatus, reason))
 				.occurredAt(now)
 				.recordedAt(now)
 				.eventUid(eventUid)
@@ -81,6 +82,16 @@ public class CouponStateProcessor {
 				previousStatus,
 				targetStatus,
 				now);
+	}
+
+	private String resolveHistoryReason(CouponIssueStatus targetStatus, String requestedReason) {
+		if (targetStatus == CouponIssueStatus.EXPIRED) {
+			return MANUAL_EXPIRED_REASON;
+		}
+		if (requestedReason != null) {
+			return requestedReason;
+		}
+		return targetStatus == CouponIssueStatus.ISSUED ? "USE_CANCELED" : "USED";
 	}
 
 	private void validateValidityPeriod(CouponIssue issue, CouponIssueStatus targetStatus, LocalDateTime now) {
@@ -104,6 +115,8 @@ public class CouponStateProcessor {
 				issue.use(now);
 			} else if (targetStatus == CouponIssueStatus.ISSUED) {
 				issue.cancel(now);
+			} else if (targetStatus == CouponIssueStatus.EXPIRED) {
+				issue.expire(now);
 			}
 		} catch (IllegalStateException e) {
 			if (targetStatus == CouponIssueStatus.USED && issue.getStatus() == CouponIssueStatus.USED) {
@@ -111,6 +124,9 @@ public class CouponStateProcessor {
 			}
 			if (targetStatus == CouponIssueStatus.ISSUED && issue.getStatus() == CouponIssueStatus.ISSUED) {
 				throw new CouponException(ErrorCode.NOT_YET_USED);
+			}
+			if (targetStatus == CouponIssueStatus.EXPIRED && issue.getStatus() == CouponIssueStatus.EXPIRED) {
+				throw new CouponException(ErrorCode.ALREADY_EXPIRED);
 			}
 			throw new CouponException(ErrorCode.INVALID_STATE_TRANSITION);
 		}

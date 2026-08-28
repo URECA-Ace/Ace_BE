@@ -149,6 +149,34 @@ class CouponStateServiceIntegrationTest extends ConsistencyCheckIntegrationTestB
     }
 
     @Test
+    @DisplayName("수동 조기 만료와 동일 키 재시도는 EXPIRED 이력 1건만 기록한다")
+    void manualExpire_beforeValidTo_isIdempotent() {
+        UUID key = UUID.randomUUID();
+
+        CouponStateChangeResponse first =
+                couponStateService.expire(testIssueId, testUserId, key, "운영자 요청");
+        CouponStateChangeResponse retry =
+                couponStateService.expire(testIssueId, testUserId, key, "재시도");
+
+        assertThat(first.currentStatus()).isEqualTo(CouponIssueStatus.EXPIRED);
+        assertThat(retry).isEqualTo(first);
+
+        transactionTemplate.executeWithoutResult(status -> {
+            CouponIssue expired = couponIssueRepository.findById(testIssueId).orElseThrow();
+            assertThat(expired.getStatus()).isEqualTo(CouponIssueStatus.EXPIRED);
+            assertThat(expired.getValidTo()).isAfter(LocalDateTime.now());
+            assertThat(couponHistoryRepository
+                    .findAllByCouponIssue_IdOrderByOccurredAtAsc(testIssueId))
+                    .singleElement()
+                    .satisfies(history -> {
+                        assertThat(history.getFromStatus()).isEqualTo(CouponIssueStatus.ISSUED);
+                        assertThat(history.getToStatus()).isEqualTo(CouponIssueStatus.EXPIRED);
+                        assertThat(history.getReason()).isEqualTo("MANUAL_EXPIRED");
+                    });
+        });
+    }
+
+    @Test
     @DisplayName("만료된 쿠폰 취소 시 ALREADY_EXPIRED 예외 발생")
     void cancelExpiredCoupon_throwsAlreadyExpired() {
         Long expiredIssueId = transactionTemplate.execute(status -> {

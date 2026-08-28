@@ -10,6 +10,7 @@ public interface CouponStateService {
 	
 	CouponStateChangeResponse use(Long issuedId, Long userId, UUID idempotencyKey, String reason); 
 	CouponStateChangeResponse cancel(Long issuedId , Long userId, UUID idempotencyKey, String reason);
+	CouponStateChangeResponse expire(Long issuedId, Long userId, UUID idempotencyKey, String reason);
 	CouponIssueLookupResponse findIssue(Long eventId, Long userId);
 }
 
