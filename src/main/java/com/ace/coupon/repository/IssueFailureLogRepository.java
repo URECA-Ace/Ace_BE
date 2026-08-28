@@ -34,26 +34,33 @@ public interface IssueFailureLogRepository extends JpaRepository<IssueFailureLog
 			Pageable pageable);
 
 	// 되살릴 수 없어 사람이 봐야 하는 건수
+	// settledResults 를 빼는 이유: 보상이나 확정에 성공해도 resolvedAt 이 안 찍히는 기록이 있다
+	// 그대로 세면 이미 복구된 건이 영구히 회수 불가로 잡힌다
 	@Query("""
 			SELECT COUNT(failure)
 			FROM IssueFailureLog failure
 			WHERE failure.failureStage IN :stages
 				AND failure.resolvedAt IS NULL
 				AND failure.compensationResult NOT IN :retryableResults
+				AND failure.compensationResult NOT IN :settledResults
 			""")
 	long countUnrecoverable(
 			@Param("stages") Collection<IssueFailureStage> stages,
-			@Param("retryableResults") Collection<String> retryableResults);
+			@Param("retryableResults") Collection<String> retryableResults,
+			@Param("settledResults") Collection<String> settledResults);
 
 	// 미해소 실패가 남아 있는 회차
+	// 재고가 돌아왔거나 확정이 끝난 값은 회차를 막지 않으므로 뺀다
 	@Query("""
 			SELECT DISTINCT failure.eventId
 			FROM IssueFailureLog failure
 			WHERE failure.failureStage IN :stages
 				AND failure.resolvedAt IS NULL
+				AND failure.compensationResult NOT IN :settledResults
 			ORDER BY failure.eventId
 			""")
 	List<Long> findBlockedEventIds(
 			@Param("stages") Collection<IssueFailureStage> stages,
+			@Param("settledResults") Collection<String> settledResults,
 			Pageable pageable);
 }

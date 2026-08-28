@@ -27,6 +27,7 @@ import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceProbe;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
+import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.IssueFailureLogRepository;
@@ -95,21 +96,97 @@ class CompensationFailureRetryServiceTest {
 	}
 
 	@Test
-	@DisplayName("이미 저장된 건은 되돌리지 않는다. 되돌리면 초과 발급이 된다")
-	void neverCompensatesPersistedIssue() {
+	@DisplayName("이미 저장된 건은 되돌리지 않고 확정을 마저 올려 해소한다")
+	void confirmsPersistedIssueInsteadOfCompensating() {
 		IssueFailureLog failure = failure(IssuePersistenceCoordinator.CALL_FAILED);
 		given(persistenceProbe.probe(EVENT_ID, USER_ID, REQUEST_ID, 12L))
 				.willReturn(IssuePersistenceProbe.Result.PERSISTED);
+		given(issueProcessor.confirm(EVENT_ID, USER_ID, UUID.fromString(REQUEST_ID)))
+				.willReturn(CouponIssueConfirmResult.CONFIRMED_NOW);
 
 		CompensationFailureRetryResult result = service.retry(failure);
 
 		assertThat(result).isEqualTo(CompensationFailureRetryResult.SKIPPED_PERSISTED);
 		// 보상 Lua 를 부르면 MySQL 에 행이 있는 채로 재고가 복구돼 초과 발급이 된다
 		verify(issueProcessor, never()).compensate(anyLong(), anyLong(), any());
-		// 해소는 아니지만 판정 값이 바뀌어 재처리 대상에서 빠진다
-		assertThat(failure.isResolved()).isFalse();
+		// 저장만 되고 확정이 안 된 상태로 두면 pending 이 안 줄어 회차가 안 닫힌다
+		assertThat(result.isRecovered()).isTrue();
+		assertThat(failure.isResolved()).isTrue();
 		assertThat(failure.getCompensationResult())
-				.isEqualTo(IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED);
+				.isEqualTo(CouponIssueConfirmResult.CONFIRMED_NOW.name());
+	}
+
+	@Test
+	@DisplayName("이미 확정된 저장 건도 해소로 표시한다")
+	void treatsAlreadyConfirmedPersistedIssueAsRecovered() {
+		IssueFailureLog failure = failure(IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED);
+		given(persistenceProbe.probe(EVENT_ID, USER_ID, REQUEST_ID, 12L))
+				.willReturn(IssuePersistenceProbe.Result.PERSISTED);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.ALREADY_CONFIRMED);
+
+		CompensationFailureRetryResult result = service.retry(failure);
+
+		assertThat(result.isRecovered()).isTrue();
+		assertThat(failure.isResolved()).isTrue();
+	}
+
+	@Test
+	@DisplayName("확정도 되살릴 수 없으면 사람 확인 대상으로 남긴다")
+	void marksPersistedIssueUnrecoverableWhenConfirmFails() {
+		IssueFailureLog failure = failure(IssuePersistenceCoordinator.CALL_FAILED);
+		given(persistenceProbe.probe(EVENT_ID, USER_ID, REQUEST_ID, 12L))
+				.willReturn(IssuePersistenceProbe.Result.PERSISTED);
+		given(issueProcessor.confirm(anyLong(), anyLong(), any()))
+				.willReturn(CouponIssueConfirmResult.REQUEST_NOT_FOUND);
+
+		CompensationFailureRetryResult result = service.retry(failure);
+
+		assertThat(result).isEqualTo(CompensationFailureRetryResult.EXPIRED);
+		assertThat(result.needsAttention()).isTrue();
+		assertThat(failure.isResolved()).isFalse();
+	}
+
+	@Test
+	@DisplayName("SKIPPED_PERSISTED 로 처음 기록된 건도 재처리 대상에 포함된다")
+	void retryTargetsIncludeSkippedPersisted() {
+		given(failureLogRepository.findRetryTargets(any(), any(), any())).willReturn(List.of());
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(0L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of());
+
+		service.retryFailedCompensations();
+
+		// 이 값이 빠져 있으면 저장은 됐는데 확정 못 한 건을 아무도 재처리하지 않는다
+		verify(failureLogRepository).findRetryTargets(
+				any(),
+				argThat(results ->
+						results.contains(IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED)),
+				any());
+	}
+
+	@Test
+	@DisplayName("이미 보상된 건은 회수 불가 집계와 막힌 회차에서 제외한다")
+	void excludesSettledResultsFromAlarm() {
+		given(failureLogRepository.findRetryTargets(any(), any(), any())).willReturn(List.of());
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(0L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of());
+
+		service.retryFailedCompensations();
+
+		// 보상에 성공해도 resolvedAt 이 안 찍히는 기록이 있어
+		// 그대로 세면 복구된 건이 영구히 경보에 남는다
+		verify(failureLogRepository).countUnrecoverable(
+				any(),
+				any(),
+				argThat(settled ->
+						settled.contains(CouponIssueCompensationResult.COMPENSATED.name())
+								&& settled.contains(
+										CouponIssueCompensationResult.ALREADY_COMPENSATED.name())));
+		verify(failureLogRepository).findBlockedEventIds(
+				any(),
+				argThat(settled ->
+						settled.contains(CouponIssueCompensationResult.COMPENSATED.name())),
+				any());
 	}
 
 	@Test
@@ -180,8 +257,8 @@ class CompensationFailureRetryServiceTest {
 	@DisplayName("CONFIRM 이 아닌 세 단계를 재처리 대상으로 조회한다")
 	void sweepsCompensationStagesOnly() {
 		given(failureLogRepository.findRetryTargets(any(), any(), any())).willReturn(List.of());
-		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(0L);
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of());
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(0L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of());
 
 		CompensationFailureRetryService.SweepResult result = service.retryFailedCompensations();
 
@@ -200,8 +277,8 @@ class CompensationFailureRetryServiceTest {
 	@DisplayName("되살릴 수 없는 건만 남아도 막힌 회차를 보고한다")
 	void reportsBlockedEventsEvenWhenNothingIsRetryable() {
 		given(failureLogRepository.findRetryTargets(any(), any(), any())).willReturn(List.of());
-		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(2L);
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(EVENT_ID));
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(2L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of(EVENT_ID));
 
 		CompensationFailureRetryService.SweepResult result = service.retryFailedCompensations();
 

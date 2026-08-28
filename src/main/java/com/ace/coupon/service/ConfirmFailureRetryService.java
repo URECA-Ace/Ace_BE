@@ -38,6 +38,13 @@ public class ConfirmFailureRetryService {
 	// 보상 실패(COMPENSATE 및 그 짝인 DB_INSERT / RELAY)는 CompensationFailureRetryService 가 맡는다
 	private static final Set<IssueFailureStage> STAGES = Set.of(IssueFailureStage.CONFIRM);
 
+	// 확정이 끝나 회차를 막지 않는 값
+	// 지금은 확정 성공 시 기록을 남기지 않아 실제로 저장되지 않지만
+	// 기록 규칙이 바뀌어도 해소된 건이 경보에 섞이지 않도록 방어
+	private static final Set<String> SETTLED_RESULTS = Set.of(
+			CouponIssueConfirmResult.CONFIRMED_NOW.name(),
+			CouponIssueConfirmResult.ALREADY_CONFIRMED.name());
+
 	// 재확인해 볼 값
 	private static final Set<String> RETRYABLE_RESULTS = Set.of(
 			IssuePersistenceCoordinator.CALL_FAILED,
@@ -98,9 +105,9 @@ public class ConfirmFailureRetryService {
 		// 그 상태를 비어 있다고 보고하면 막힌 회차가 은폐된다
 		SweepResult result = new SweepResult(
 				scanned, resolved, alreadyResolved, expired, notRetryable, retryFailed,
-				failureLogRepository.countUnrecoverable(STAGES, RETRYABLE_RESULTS),
+				failureLogRepository.countUnrecoverable(STAGES, RETRYABLE_RESULTS, SETTLED_RESULTS),
 				failureLogRepository.findBlockedEventIds(
-						STAGES, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
+						STAGES, SETTLED_RESULTS, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
 		warnWhenUnrecovered(result);
 		return result;
 	}

@@ -15,6 +15,7 @@ import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceProbe;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
+import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.IssueFailureLogRepository;
@@ -45,11 +46,22 @@ public class CompensationFailureRetryService {
 			IssueFailureStage.DB_INSERT,
 			IssueFailureStage.RELAY);
 
-	// 재고가 아직 묶여 있을 수 있어 다시 시도해 볼 값
+	// 재고가 묶였거나 확정이 안 됐을 수 있어 다시 시도해 볼 값
+	// SKIPPED_PERSISTED 는 저장은 됐는데 확정을 못 한 건이라 확정 재시도 대상이다
 	private static final Set<String> RETRYABLE_RESULTS = Set.of(
 			IssuePersistenceCoordinator.CALL_FAILED,
 			IssuePersistenceCoordinator.COMPENSATION_SKIPPED_UNVERIFIED,
+			IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED,
 			CouponIssueCompensationResult.INTERNAL_WRITE_ERROR.name());
+
+	// 재고가 이미 돌아왔거나 확정이 끝나 회차를 막지 않는 값
+	// IssuePersistenceCoordinator 는 보상에 성공해도 resolvedAt 을 찍지 않고 기록만 남긴다
+	// 이 값을 경보에서 빼지 않으면 복구된 건이 영구히 막힌 회차로 보고된다
+	private static final Set<String> SETTLED_RESULTS = Set.of(
+			CouponIssueCompensationResult.COMPENSATED.name(),
+			CouponIssueCompensationResult.ALREADY_COMPENSATED.name(),
+			CouponIssueConfirmResult.CONFIRMED_NOW.name(),
+			CouponIssueConfirmResult.ALREADY_CONFIRMED.name());
 
 	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
 	private final AtomicReference<String> lastReport = new AtomicReference<>();
@@ -108,9 +120,9 @@ public class CompensationFailureRetryService {
 		// 되살릴 수 없는 건만 남아 있으면 findRetryTargets 는 비지만 회차는 계속 막혀 있다
 		SweepResult result = new SweepResult(
 				scanned, resolved, alreadyResolved, skippedPersisted, expired, notRetryable, retryFailed,
-				failureLogRepository.countUnrecoverable(STAGES, RETRYABLE_RESULTS),
+				failureLogRepository.countUnrecoverable(STAGES, RETRYABLE_RESULTS, SETTLED_RESULTS),
 				failureLogRepository.findBlockedEventIds(
-						STAGES, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
+						STAGES, SETTLED_RESULTS, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
 		warnWhenUnrecovered(result);
 		return result;
 	}
@@ -148,12 +160,9 @@ public class CompensationFailureRetryService {
 
 		switch (probed) {
 			case PERSISTED -> {
-				// 저장이 확인
-				// 되돌리면 초과 발급이므로 재처리 대상에서 뺀다
-				return markUnrecoverable(
-						failure,
-						IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED,
-						CompensationFailureRetryResult.SKIPPED_PERSISTED);
+				// 저장이 확인됐으니 되돌리면 초과 발급. 대신 확정을 마저 올린다
+				// 저장은 됐는데 확정만 못 한 상태라 그대로 두면 pending 이 안 줄어 회차가 안 닫힌다
+				return confirmInstead(failure, now);
 			}
 			case UNVERIFIED -> {
 				// 판정 값을 바꾸지 않아 다음 주기에 다시 잡힌다
@@ -169,6 +178,33 @@ public class CompensationFailureRetryService {
 			}
 		}
 		throw new IllegalStateException("처리되지 않은 저장 판별 결과입니다: " + probed);
+	}
+
+	// 보상 대신 확정으로 해소한다
+	// 확정 Lua 는 CAS 안에서 카운터를 올려 멱등이라 재호출해도 확정 수가 부풀지 않는다
+	private CompensationFailureRetryResult confirmInstead(
+			IssueFailureLog failure, LocalDateTime now) {
+		CouponIssueConfirmResult result = issueProcessor.confirm(
+				failure.getEventId(),
+				failure.getUserId(),
+				UUID.fromString(failure.getRequestId()));
+
+		return switch (result) {
+			case CONFIRMED_NOW, ALREADY_CONFIRMED -> {
+				failure.updateConfirmResult(result.name());
+				failure.resolve(now);
+				log.info("저장된 건을 확정해 해소했습니다. failureId={}, eventId={}, confirmResult={}",
+						failure.getId(), failure.getEventId(), result);
+				yield CompensationFailureRetryResult.SKIPPED_PERSISTED;
+			}
+			// 요청 레코드가 사라져 확정 수를 올릴 수단이 없다
+			case REQUEST_NOT_FOUND -> markUnrecoverable(
+					failure, result.name(), CompensationFailureRetryResult.EXPIRED);
+			case NOT_CONFIRMABLE, CORRUPTED_STATE, INVALID_ARGUMENT -> markUnrecoverable(
+					failure, result.name(), CompensationFailureRetryResult.NOT_RETRYABLE);
+			// 판정 값을 바꾸지 않아 다음 주기에 다시 잡힌다
+			case INTERNAL_WRITE_ERROR -> CompensationFailureRetryResult.RETRY_FAILED;
+		};
 	}
 
 	private CompensationFailureRetryResult classify(
@@ -249,7 +285,7 @@ public class CompensationFailureRetryService {
 
 		// 재고가 실제로 돌아온 건수
 		public int recovered() {
-			return resolved + alreadyResolved;
+			return resolved + alreadyResolved + skippedPersisted;
 		}
 
 		public boolean hasUnrecovered() {
