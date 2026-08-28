@@ -1,6 +1,6 @@
 # 로컬 개발 환경 (Docker Compose)
 
-팀원 전원이 동일한 버전의 MySQL / Redis / Kafka 위에서 개발하기 위한 문서입니다.
+팀원 전원이 동일한 버전의 MySQL / Redis 위에서 개발하기 위한 문서입니다.
 애플리케이션(Spring Boot)은 컨테이너로 띄우지 않고, **인프라만 컨테이너로 띄운 뒤 IDE에서 실행**하는 구성입니다.
 애플리케이션은 모두 만들어진 후, 3개의 인스턴스를 도커로 띄울 예정입니다.
 
@@ -10,9 +10,8 @@
 | --- | --- | --- | --- | --- |
 | MySQL | `mysql:8.4` | `ace-mysql` | **3307** | utf8mb4, 타임존 `Asia/Seoul` |
 | Redis | `redis:8.2` | `ace-redis` | 6379 | AOF 활성화 |
-| Kafka | `apache/kafka:4.3.1` | `ace-kafka` | 9092 | KRaft 단일 노드 |
 
-세 서비스는 `ace-net` 브리지 네트워크로 묶여 있고, 데이터는 명명된 볼륨(`ace_mysql-data`, `ace_redis-data`, `ace_kafka-data`)에 저장되므로 컨테이너를 지워도 유지됩니다.
+두 서비스는 `ace-net` 브리지 네트워크로 묶여 있고, 데이터는 명명된 볼륨(`ace_mysql-data`, `ace_redis-data`)에 저장되므로 컨테이너를 지워도 유지됩니다.
 
 ## 사전 준비
 
@@ -20,7 +19,7 @@
   ```
   failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
   ```
-- 3307 / 6379 / 9092 포트가 비어 있어야 합니다.
+- 3307 / 6379 포트가 비어 있어야 합니다.
 
 > **MySQL 포트가 3307인 이유**
 > Workbench와 함께 설치되는 로컬 MySQL 서버가 3306을 쓰고 있는 경우가 많아, 충돌을 피하려고 호스트 포트를 3307로 잡았습니다.
@@ -60,7 +59,7 @@ no configuration file provided: not found
 # 1. 기동 (최초 실행 시 이미지 다운로드로 몇 분 걸립니다)
 docker compose up -d
 
-# 2. 상태 확인 - 세 서비스 모두 STATUS 가 (healthy) 여야 정상
+# 2. 상태 확인 - 두 서비스 모두 STATUS 가 (healthy) 여야 정상
 docker compose ps
 ```
 
@@ -71,7 +70,6 @@ docker compose ps
 ```bash
 docker compose exec mysql mysql -uroot -p1234 -e "select version()"
 docker compose exec redis redis-cli ping
-docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
 ## 접속 정보
@@ -82,7 +80,6 @@ docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server loca
 | MySQL 계정 | `root` / `1234` |
 | MySQL 데이터베이스 | `ace` |
 | Redis | `localhost:6379` (비밀번호 없음) |
-| Kafka | `localhost:9092` |
 
 `src/main/resources/application.properties`에서 사용할 값입니다. (이 파일은 `.gitignore` 대상이라 각자 로컬에서 관리합니다.)
 
@@ -93,12 +90,7 @@ spring.datasource.password=1234
 
 spring.data.redis.host=localhost
 spring.data.redis.port=6379
-
-spring.kafka.bootstrap-servers=localhost:9092
 ```
-
-> Kafka는 컨테이너 내부용(`kafka:19092`)과 호스트용(`localhost:9092`) 리스너가 분리되어 있습니다.
-> IDE에서 Spring을 실행할 때는 항상 `localhost:9092`를 사용하세요.
 
 ### MySQL Workbench 연결
 
@@ -140,11 +132,6 @@ spring.jpa.properties.hibernate.format_sql=true
 # --- Redis ---
 spring.data.redis.host=localhost
 spring.data.redis.port=6379
-
-# --- Kafka ---
-spring.kafka.bootstrap-servers=localhost:9092
-spring.kafka.consumer.group-id=ace-group
-spring.kafka.consumer.auto-offset-reset=earliest
 ```
 
 컨테이너가 떠 있는 상태에서 애플리케이션을 실행하면 별도 코드 없이 연결됩니다. 연결에 실패하면 기동 로그에 바로 에러가 찍힙니다.
@@ -207,62 +194,13 @@ docker compose exec redis redis-cli get 원하는키
 docker compose exec redis redis-cli ttl 원하는키    # 남은 만료 시간(초)
 ```
 
-### 4. Kafka
-
-발행은 `KafkaTemplate`, 구독은 `@KafkaListener`를 씁니다. 토픽은 `auto.create.topics.enable=true` 설정이라 처음 발행할 때 자동으로 만들어집니다.
-
-```java
-@Service
-@RequiredArgsConstructor
-public class EventProducer {
-
-    private final KafkaTemplate<String, String> kafkaTemplate;
-
-    public void send(String message) {
-        kafkaTemplate.send("ace-event", message);
-    }
-}
-
-@Slf4j
-@Component
-public class EventConsumer {
-
-    @KafkaListener(topics = "ace-event")
-    public void consume(String message) {
-        log.info("수신: {}", message);
-    }
-}
-```
-
-터미널에서 직접 확인할 수도 있습니다.
-
-```bash
-# 토픽 목록
-docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-# 메시지 실시간 구독 (애플리케이션이 발행하는 걸 눈으로 확인. Ctrl+C 로 종료)
-docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 --topic ace-event --from-beginning
-
-# 터미널에서 직접 메시지 발행 (한 줄 입력할 때마다 전송)
-docker compose exec -it kafka /opt/kafka/bin/kafka-console-producer.sh \
-  --bootstrap-server localhost:9092 --topic ace-event
-```
-
-> **Git Bash 사용자 주의**
-> Git Bash에서 위 Kafka 명령을 실행하면 `/opt/...` 경로를 Windows 경로로 바꿔버려서 아래 에러가 납니다.
-> ```
-> stat C:/Program Files/Git/opt/kafka/bin/kafka-topics.sh: no such file or directory
-> ```
-> 명령 앞에 `MSYS_NO_PATHCONV=1`을 붙이거나, PowerShell에서 실행하세요.
-
 ## 자주 쓰는 명령어
 
 ```bash
 docker compose up -d              # 기동
 docker compose stop               # 중지 (컨테이너·데이터 유지)
-docker compose start              # 중지한 것 다시 시작
-docker compose restart kafka      # 특정 서비스만 재시작
+docker compose start               # 중지한 것 다시 시작
+docker compose restart mysql       # 특정 서비스만 재시작
 docker compose down               # 컨테이너 삭제 (볼륨 데이터는 유지)
 docker compose down -v            # 컨테이너 + 볼륨(데이터) 전부 삭제
 
@@ -276,7 +214,6 @@ docker compose pull               # 이미지 태그 갱신분 받아오기
 ```bash
 docker compose exec mysql mysql -uroot -p1234 ace   # MySQL 콘솔
 docker compose exec redis redis-cli                 # Redis CLI
-docker compose exec kafka bash                      # Kafka (CLI 도구는 /opt/kafka/bin)
 ```
 
 ## 데이터 저장 (명명된 볼륨)
@@ -287,7 +224,6 @@ docker compose exec kafka bash                      # Kafka (CLI 도구는 /opt/
 volumes:
   mysql-data:
   redis-data:
-  kafka-data:
 ```
 
 **이건 미완성이 아니라 정상입니다.** 값이 비어 있다는 건 "기본 옵션으로 Docker가 알아서 만들어 달라"는 뜻이며, 직접 채워 넣을 내용은 없습니다. 신경 쓰지 않아도 됩니다.
@@ -299,7 +235,6 @@ volumes:
 ```bash
 docker volume ls
 # DRIVER    VOLUME NAME
-# local     ace_kafka-data
 # local     ace_mysql-data
 # local     ace_redis-data
 ```
@@ -312,7 +247,6 @@ docker volume ls
 | --- | --- | --- |
 | `mysql-data` | `/var/lib/mysql` | 데이터베이스 파일 (테이블, 레코드) |
 | `redis-data` | `/data` | AOF/RDB 스냅샷 |
-| `kafka-data` | `/var/lib/kafka/data` | 토픽 로그, 클러스터 메타데이터 |
 
 즉 JPA가 테이블을 만들거나 데이터를 INSERT하는 순간 `mysql-data`에 쌓입니다. 아직 아무것도 저장한 게 없다면 MySQL 시스템 테이블과 빈 `ace` 데이터베이스만 들어 있는 상태입니다.
 
@@ -374,10 +308,9 @@ docker compose up -d
 MYSQL_PORT=13307
 MYSQL_ROOT_PASSWORD=mypassword
 REDIS_PORT=16379
-KAFKA_PORT=19092
 ```
 
-사용 가능한 변수: `MYSQL_PORT`, `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `REDIS_PORT`, `KAFKA_PORT`, `KAFKA_CLUSTER_ID`
+사용 가능한 변수: `MYSQL_PORT`, `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `REDIS_PORT`
 
 포트를 바꿨다면 `application.properties`도 같이 맞춰야 합니다.
 
@@ -396,15 +329,6 @@ netstat -ano | findstr :3307
 **MySQL이 healthy가 안 됨**
 `docker compose logs mysql`로 확인합니다. 이전에 다른 비밀번호로 초기화된 볼륨이 남아 있으면 새 비밀번호가 적용되지 않습니다. 이때는 `docker compose down -v` 후 재기동하세요.
 
-**Kafka가 계속 재시작됨**
-클러스터 메타데이터가 꼬인 경우가 대부분입니다. 로컬 개발용이므로 볼륨을 초기화하는 게 가장 빠릅니다.
-
-```bash
-docker compose rm -sf kafka
-docker volume rm ace_kafka-data
-docker compose up -d kafka
-```
-
 **Spring에서 DB 연결이 안 됨**
 `docker compose ps`로 `(healthy)` 여부를 먼저 확인하세요. 컨테이너가 뜬 직후에는 MySQL이 아직 초기화 중이라 연결이 거부될 수 있습니다.
 
@@ -414,5 +338,4 @@ docker compose up -d kafka
 ## 참고
 
 - 버전을 올릴 때는 `docker-compose.yml`의 이미지 태그를 수정하고 팀에 공유합니다. 팀원은 `docker compose pull && docker compose up -d`로 반영합니다.
-- Kafka 컨테이너는 `user: root`로 실행됩니다. 명명된 볼륨이 root 소유로 생성되는데 이미지 기본 사용자(`appuser`)에게 쓰기 권한이 없기 때문이며, 로컬 개발 전용 설정입니다.
 - 이 구성은 로컬 개발 전용입니다. 비밀번호가 평문으로 들어 있으므로 운영 환경에 그대로 사용하지 마세요.
