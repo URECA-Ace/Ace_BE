@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 
@@ -18,19 +19,23 @@ import org.mockito.Mockito;
 
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponIssueRepository;
 
 class CouponExpirationServiceTest {
 
 	private CouponIssueRepository couponIssueRepository;
 	private CouponExpirationProcessor processor;
+	private CouponIssueRedisProperties properties;
 	private CouponExpirationService service;
 
 	@BeforeEach
 	void setUp() {
 		couponIssueRepository = Mockito.mock(CouponIssueRepository.class);
 		processor = Mockito.mock(CouponExpirationProcessor.class);
-		service = new CouponExpirationServiceImpl(couponIssueRepository, processor);
+		properties = Mockito.mock(CouponIssueRedisProperties.class);
+		given(properties.zoneId()).willReturn(ZoneId.of("Asia/Seoul"));
+		service = new CouponExpirationServiceImpl(couponIssueRepository, processor, properties);
 	}
 
 	@Test

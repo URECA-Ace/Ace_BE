@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -49,4 +50,13 @@ public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> 
 			@Param("now") LocalDateTime now,
 			@Param("lastId") Long lastId,
 			Pageable pageable);
+
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponIssue ci
+			SET ci.status = 'EXPIRED'
+			WHERE ci.id IN :ids
+			  AND ci.status = 'ISSUED'
+			""")
+	int bulkExpire(@Param("ids") List<Long> ids);
 }

@@ -17,6 +17,7 @@ import com.ace.common.ApiResponse;
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.request.CouponStateChangeRequest;
+import com.ace.coupon.dto.response.CouponIssueLookupResponse;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.service.CouponStateService;
 
@@ -33,7 +34,7 @@ public class CouponStateController {
 	private final CouponStateService couponStateService;
 
 	@GetMapping("/issues/lookup")
-	public ResponseEntity<ApiResponse<Long>> findIssueId(
+	public ResponseEntity<ApiResponse<CouponIssueLookupResponse>> findIssue(
 			@RequestParam(name = "eventId")
 			@Positive(message = "eventId는 0보다 커야 합니다.")
 			Long eventId,
@@ -42,8 +43,8 @@ public class CouponStateController {
 			@Positive(message = "userId는 0보다 커야 합니다.")
 			Long userId) {
 
-		Long issueId = couponStateService.findIssueId(eventId, userId);
-		return ResponseEntity.ok(ApiResponse.success(issueId));
+		CouponIssueLookupResponse response = couponStateService.findIssue(eventId, userId);
+		return ResponseEntity.ok(ApiResponse.success(response));
 	}
 
 	@PatchMapping("/{issueId}/use")

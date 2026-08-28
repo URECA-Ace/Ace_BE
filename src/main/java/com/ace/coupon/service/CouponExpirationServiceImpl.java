@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import com.ace.coupon.entity.CouponIssue;
+import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponIssueRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -20,15 +21,17 @@ public class CouponExpirationServiceImpl implements CouponExpirationService {
 
 	private final CouponIssueRepository couponIssueRepository;
 	private final CouponExpirationProcessor processor;
+	private final CouponIssueRedisProperties properties;
 
 	@Override
 	public int expireDueCoupons(int chunkSize) {
-		LocalDateTime now = LocalDateTime.now();
+		LocalDateTime now = LocalDateTime.now(properties.zoneId());
 		Long lastId = 0L;
 		int totalExpiredCount = 0;
 		Pageable pageable = PageRequest.of(0, chunkSize);
+		int pageCount = 0;
 
-		while (true) {
+		while (pageCount < 50) {
 			List<CouponIssue> chunk = couponIssueRepository
 					.findExpiredIssuesChunk(now, lastId, pageable);
 
@@ -43,6 +46,11 @@ public class CouponExpirationServiceImpl implements CouponExpirationService {
 			if (chunk.size() < chunkSize) {
 				break;
 			}
+			pageCount++;
+		}
+
+		if (pageCount >= 50) {
+			log.warn("최대 페이지 상한에 도달했습니다.");
 		}
 
 		return totalExpiredCount;

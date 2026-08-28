@@ -17,7 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 		prefix = "coupon.expiration.scheduler",
 		name = "enabled",
 		havingValue = "true",
-		matchIfMissing = true)
+		matchIfMissing = false)
 public class CouponExpirationScheduler {
 
 	private final CouponExpirationService couponExpirationService;

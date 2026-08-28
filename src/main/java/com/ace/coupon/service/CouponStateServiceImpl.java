@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.coupon.dto.response.CouponIssueLookupResponse;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.entity.CouponStateIdempotency;
@@ -31,10 +32,10 @@ public class CouponStateServiceImpl implements CouponStateService {
 	private final CouponIssueRepository couponIssueRepository;
 
 	@Override
-	public Long findIssueId(Long eventId, Long userId) {
-		return couponIssueRepository.findByCouponEvent_IdAndUser_Id(eventId, userId)
-				.map(CouponIssue::getId)
-				.orElse(null);
+	public CouponIssueLookupResponse findIssue(Long eventId, Long userId) {
+		CouponIssue issue = couponIssueRepository.findByCouponEvent_IdAndUser_Id(eventId, userId)
+				.orElseThrow(() -> new CouponException(ErrorCode.ISSUE_NOT_FOUND));
+		return new CouponIssueLookupResponse(issue.getId(), eventId, userId);
 	}
 
 	@Override
