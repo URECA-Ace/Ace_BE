@@ -48,6 +48,11 @@ public class CouponStateServiceImpl implements CouponStateService {
 		return executeWithIdempotency(issueId, userId, idempotencyKey, CouponIssueStatus.ISSUED, reason);
 	}
 
+	@Override
+	public CouponStateChangeResponse expire(Long issueId, Long userId, UUID idempotencyKey, String reason) {
+		return executeWithIdempotency(issueId, userId, idempotencyKey, CouponIssueStatus.EXPIRED, reason);
+	}
+
 	private CouponStateChangeResponse executeWithIdempotency(
 			Long issueId, Long userId, UUID idempotencyKey,
 			CouponIssueStatus targetStatus, String reason) {

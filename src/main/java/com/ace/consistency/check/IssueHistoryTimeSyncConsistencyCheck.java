@@ -23,6 +23,7 @@ import java.util.Set;
  */
 @Component
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
+	private static final String MANUAL_EXPIRED_REASON = "MANUAL_EXPIRED";
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -60,7 +61,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final String ALL_JOIN_CLAUSE = """
             JOIN (
-                SELECT issue_id, from_status, to_status, occurred_at,
+                SELECT issue_id, from_status, to_status, reason, occurred_at,
                        ROW_NUMBER() OVER(PARTITION BY issue_id ORDER BY occurred_at DESC, history_id DESC) as rn
                 FROM coupon_history
             ) latest_history ON ci.issue_id = latest_history.issue_id AND latest_history.rn = 1
@@ -69,7 +70,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final String EVENT_JOIN_CLAUSE = """
             JOIN LATERAL (
-                SELECT from_status, to_status, occurred_at
+                SELECT from_status, to_status, reason, occurred_at
                 FROM coupon_history ch
                 WHERE ch.issue_id = ci.issue_id
                 ORDER BY occurred_at DESC, history_id DESC
@@ -109,8 +110,9 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                   )
                   OR
                   (
-                      -- [배치 처리] EXPIRED는 스케줄러 지연(Lag)을 고려하여 별도 검증
+                      -- [배치 처리] 자연 만료 EXPIRED만 스케줄러 지연(Lag)을 검증
                       ci.status = 'EXPIRED' AND
+                      (latest_history.reason IS NULL OR latest_history.reason <> :manualExpiredReason) AND
                       (
                           -- 유효기간 전에 미리 만료시킨 경우 (치명적 버그)
                           latest_history.occurred_at < ci.valid_to
@@ -134,7 +136,8 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope)
-				.addValue("maxBatchLagSeconds", maxBatchLagSeconds);
+				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS)
+				.addValue("manualExpiredReason", MANUAL_EXPIRED_REASON);
 
 		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(sql, params);
