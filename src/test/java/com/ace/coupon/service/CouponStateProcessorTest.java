@@ -26,6 +26,8 @@ import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 import com.ace.user.entity.User;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class CouponStateProcessorTest {
 
 	private CouponIssueRepository couponIssueRepository;
@@ -41,7 +43,8 @@ class CouponStateProcessorTest {
 		CouponIssueRedisProperties properties = mock(CouponIssueRedisProperties.class);
 		given(properties.zoneId()).willReturn(ZoneId.of("Asia/Seoul"));
 		processor = new CouponStateProcessor(
-				couponIssueRepository, couponHistoryRepository, idempotencyRepository, properties);
+				couponIssueRepository, couponHistoryRepository, idempotencyRepository, properties,
+				new SimpleMeterRegistry());
 	}
 
 	@Test
