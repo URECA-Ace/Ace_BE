@@ -16,14 +16,15 @@ class CouponIssuePersistencePropertiesTest {
 		CouponIssuePersistenceProperties properties =
 				new CouponIssuePersistenceProperties(null, null, null, null, null, null, null);
 
-		assertThat(properties.mode()).isEqualTo(PersistenceMode.SYNC);
+		assertThat(properties.mode()).isEqualTo(PersistenceMode.RELAY);
 		assertThat(properties.consumerGroup()).isEqualTo("issue-persist");
 		assertThat(properties.batchSize()).isEqualTo(100);
-		assertThat(properties.blockTimeout()).isEqualTo(Duration.ofSeconds(2));
+		// spring.data.redis.timeout(2s) 보다 짧아야 커맨드 타임아웃이 안 난다
+		assertThat(properties.blockTimeout()).isEqualTo(Duration.ofSeconds(1));
 		assertThat(properties.claimMinIdle()).isEqualTo(Duration.ofSeconds(30));
 		assertThat(properties.maxDeliveryAttempts()).isEqualTo(3);
 		assertThat(properties.refreshInterval()).isEqualTo(Duration.ofSeconds(10));
-		assertThat(properties.relay()).isFalse();
+		assertThat(properties.relay()).isTrue();
 	}
 
 	@Test
