@@ -39,7 +39,13 @@ public enum RecoveryAction {
 	/**
 	 * IssueHistoryTimeSyncConsistencyCheck 전용: 시간 불일치를 히스토리 기준으로 동기화한다.
 	 */
-	SYNC_TIME_TO_HISTORY("시간 동기화");
+	SYNC_TIME_TO_HISTORY("시간 동기화"),
+
+	/** CouponIssueHistoryStateConsistencyCheck 전용: 누락된 최초 ISSUED 이력을 복원한다. */
+	RESTORE_INITIAL_ISSUE_HISTORY("최초 발급 이력 복원"),
+
+	/** CouponExpirationLagConsistencyCheck 전용: 지연된 만료 처리를 수행한다. */
+	EXPIRE_DELAYED_ISSUE("지연 만료 처리");
 
 	private final String label;
 

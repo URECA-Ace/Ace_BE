@@ -32,10 +32,10 @@ import lombok.extern.slf4j.Slf4j;
  * ALL 스코프 target은 여러 이벤트를 한 번에 복구하는데, 이 클래스의 recoverEvent()를
  * REQUIRES_NEW로 별도 물리 트랜잭션에서 실행해 이벤트마다 독립된 커밋/롤백 경계를 만든다.
  * 그래야 이벤트 A가 REQUIRES_NEW 없이 정책(Policy)과 같은 트랜잭션에 있었다면, 이벤트 B에서
- * catch 블록이 setRollbackOnly()를 호출했을 때 이미 커밋 대기 중이던 A/C의 변경과
- * Dispatcher가 쌓아둔 RecoveryResult 이력까지 전부 롤백 대상이 되어버린다(주석상 의도한
- * "이벤트 단위 부분 성공"과 반대로 동작). 이벤트마다 물리 트랜잭션을 분리하면 이벤트 B의
- * setRollbackOnly()가 이벤트 B 자신의 트랜잭션만 롤백시키므로 A/C의 커밋과 무관해진다.
+ * catch 블록이 setRollbackOnly()를 호출했을 때 A/C의 변경까지 함께 롤백될 수 있다.
+ * 이벤트마다 물리 트랜잭션을 분리하면 이벤트 B의 setRollbackOnly()가 이벤트 B 자신의
+ * 트랜잭션만 롤백시키므로 A/C의 커밋과 무관해진다. RecoveryResult 이력은
+ * RecoveryResultRecorder의 별도 REQUIRES_NEW 트랜잭션에서 저장된다.
  */
 @Component
 @RequiredArgsConstructor
