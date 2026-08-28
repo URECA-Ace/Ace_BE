@@ -71,4 +71,16 @@ class CouponStateControllerTest {
                 .content(body))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    @DisplayName("수동 만료 요청이 정상 처리되면 200 OK를 반환한다")
+    void expire_success_returns200() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("userId", 1L, "reason", "MANUAL_EXPIRED"));
+
+        mockMvc.perform(patch("/api/v1/coupons/1/expire")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+                .andExpect(status().isOk());
+    }
 }

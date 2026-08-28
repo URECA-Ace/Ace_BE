@@ -58,7 +58,7 @@ public class CouponStateProcessor {
 		CouponIssueStatus previousStatus = issue.getStatus();
 		applyStateTransition(issue, targetStatus, now);
 
-		String defaultReason = (targetStatus == CouponIssueStatus.ISSUED) ? "USE_CANCELED" : "USED";
+		String defaultReason = (targetStatus == CouponIssueStatus.ISSUED) ? "USE_CANCELED" : (targetStatus == CouponIssueStatus.EXPIRED ? "MANUAL_EXPIRED" : "USED");
 		CouponHistory history = CouponHistory.builder()
 				.couponIssue(issue)
 				.fromStatus(previousStatus)
@@ -104,6 +104,8 @@ public class CouponStateProcessor {
 				issue.use(now);
 			} else if (targetStatus == CouponIssueStatus.ISSUED) {
 				issue.cancel(now);
+			} else if (targetStatus == CouponIssueStatus.EXPIRED) {
+				issue.expire(now);
 			}
 		} catch (IllegalStateException e) {
 			if (targetStatus == CouponIssueStatus.USED && issue.getStatus() == CouponIssueStatus.USED) {
@@ -111,6 +113,9 @@ public class CouponStateProcessor {
 			}
 			if (targetStatus == CouponIssueStatus.ISSUED && issue.getStatus() == CouponIssueStatus.ISSUED) {
 				throw new CouponException(ErrorCode.NOT_YET_USED);
+			}
+			if (targetStatus == CouponIssueStatus.EXPIRED && issue.getStatus() == CouponIssueStatus.EXPIRED) {
+				throw new CouponException(ErrorCode.ALREADY_EXPIRED);
 			}
 			throw new CouponException(ErrorCode.INVALID_STATE_TRANSITION);
 		}
