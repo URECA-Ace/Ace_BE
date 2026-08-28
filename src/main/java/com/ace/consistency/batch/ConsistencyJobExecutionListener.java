@@ -2,6 +2,7 @@ package com.ace.consistency.batch;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.TriggerType;
+import com.ace.event.consistency.ConsistencyBatchCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
@@ -10,6 +11,7 @@ import org.springframework.batch.core.listener.JobExecutionListener;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -43,6 +45,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
     private final List<ConsistencyCheck> checks;
     private final LocalDateTime scopeTo;
     private final TriggerType triggerType;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public void beforeJob(JobExecution jobExecution) {
@@ -60,6 +63,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
         if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
             log.info("Consistency verification batch completed. jobExecutionId={}, stepCount={}",
                     jobExecution.getId(), jobExecution.getStepExecutions().size());
+            publishBatchCompletedEvent(jobExecution);
             return;
         }
 
@@ -73,6 +77,15 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
 
         failureLogRepository.save(BatchFailureLogEntity.from(jobExecution));
 
-        // TODO: 알림 이벤트 등록 (notify 도메인 머지 후 반영)
+        publishBatchCompletedEvent(jobExecution);
+    }
+
+    private void publishBatchCompletedEvent(JobExecution jobExecution) {
+        eventPublisher.publishEvent(ConsistencyBatchCompletedEvent.builder()
+                .jobExecutionId(jobExecution.getId())
+                .status(jobExecution.getStatus().name())
+                .stepCount(jobExecution.getStepExecutions().size())
+                .completedAt(LocalDateTime.now())
+                .build());
     }
 }

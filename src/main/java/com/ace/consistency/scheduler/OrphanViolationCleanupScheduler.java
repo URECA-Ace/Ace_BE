@@ -1,14 +1,18 @@
 package com.ace.consistency.scheduler;
 
 import com.ace.consistency.repository.VerificationViolationRepository;
+import com.ace.event.scheduler.SchedulerCompletedEvent;
+import com.ace.event.scheduler.SchedulerStartedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * ALL 스코프 배치 Step이 CheckResultAccumulatorWriter로 verification_violation 행을
@@ -34,6 +38,9 @@ import java.time.LocalDateTime;
 public class OrphanViolationCleanupScheduler {
 
 	private final VerificationViolationRepository violationRepository;
+	private final ApplicationEventPublisher eventPublisher;
+
+	private static final String SCHEDULER_NAME = "ORPHAN_VIOLATION_CLEANUP";
 
 	@Value("${consistency.violation-cleanup.orphan-threshold-minutes}")
 	private long orphanThresholdMinutes;
@@ -42,10 +49,21 @@ public class OrphanViolationCleanupScheduler {
 			initialDelayString = "${consistency.violation-cleanup.fixed-delay-ms}",
 			fixedDelayString = "${consistency.violation-cleanup.fixed-delay-ms}")
 	public void run() {
+		eventPublisher.publishEvent(SchedulerStartedEvent.builder()
+				.schedulerName(SCHEDULER_NAME)
+				.startedAt(LocalDateTime.now())
+				.build());
+
 		LocalDateTime threshold = LocalDateTime.now().minusMinutes(orphanThresholdMinutes);
 		int deleted = violationRepository.deleteOrphansStaleSince(threshold);
 		if (deleted > 0) {
 			log.warn("verification_violation 고아 행 {}건을 정리했습니다. threshold={}", deleted, threshold);
 		}
+
+		eventPublisher.publishEvent(SchedulerCompletedEvent.builder()
+				.schedulerName(SCHEDULER_NAME)
+				.result(Map.of("deletedCount", deleted))
+				.completedAt(LocalDateTime.now())
+				.build());
 	}
 }

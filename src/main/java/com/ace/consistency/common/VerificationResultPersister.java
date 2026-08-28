@@ -4,6 +4,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
 import com.ace.common.transaction.AfterCommitExecutor;
+import com.ace.event.consistency.ConsistencyStepCompletedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import com.ace.consistency.repository.VerificationViolationRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,6 @@ public class VerificationResultPersister {
 
 	private final VerificationResultRepository resultRepository;
 	private final VerificationViolationRepository violationRepository;
-	//todo: notify 도메인 머지 후 주석해제
 	private final ApplicationEventPublisher eventPublisher;
 	private final MeterRegistry meterRegistry;
 
@@ -110,6 +110,14 @@ public class VerificationResultPersister {
 		}
 
 		AfterCommitExecutor.execute(() -> recordMetric(result));
+
+		eventPublisher.publishEvent(ConsistencyStepCompletedEvent.builder()
+				.checkName(result.getCheckName())
+				.triggerType(result.getTriggerType().name())
+				.status(result.getStatus().name())
+				.violationCount(result.getViolationCount())
+				.completedAt(LocalDateTime.now())
+				.build());
 
 		return saved;
 	}

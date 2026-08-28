@@ -21,6 +21,7 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.event.coupon.CouponIssueFailedEvent;
 import com.ace.user.entity.User;
 import com.ace.user.repository.UserRepository;
 
@@ -40,6 +41,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 	private final IssuePersistenceCoordinator persistenceCoordinator;
 	private final UserRepository userRepository;
 	private final MeterRegistry meterRegistry;
+	private final CouponIssueFailureAggregator failureAggregator;
 
 	// Grafana 범례에 ErrorCode 이름 대신 한글로 표시하기 위한 라벨. Ace_FE의 발급 판정 실패 사유 토글과 문구를 맞춘다.
 	private static final Map<String, String> ISSUE_REASON_LABELS = Map.of(
@@ -52,6 +54,16 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 			"ISSUE_TEMPORARILY_UNAVAILABLE", "일시 불가",
 			"EVENT_NOT_FOUND", "캠페인 없음"
 	);
+
+	// CouponIssueFailedEvent.FailReason은 프론트 알림에 노출할 대표 사유만 좁게 들고 있어서,
+	// 거기 없는 ErrorCode(EVENT_CLOSED, ISSUE_PERSIST_FAILED 등)는 UNKNOWN으로 묶는다.
+	private static CouponIssueFailedEvent.FailReason toFailReason(String reason) {
+		try {
+			return CouponIssueFailedEvent.FailReason.valueOf(reason);
+		} catch (IllegalArgumentException exception) {
+			return CouponIssueFailedEvent.FailReason.UNKNOWN;
+		}
+	}
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
@@ -70,6 +82,7 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 					"result_label", "실패",
 					"reason", reason,
 					"reason_label", ISSUE_REASON_LABELS.getOrDefault(reason, reason)).increment();
+			failureAggregator.record(eventId, toFailReason(reason));
 			throw exception;
 		}
 	}

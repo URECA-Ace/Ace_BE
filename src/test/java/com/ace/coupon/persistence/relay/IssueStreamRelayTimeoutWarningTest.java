@@ -21,6 +21,8 @@ import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceService;
 import com.ace.coupon.persistence.PersistenceMode;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -97,6 +99,7 @@ class IssueStreamRelayTimeoutWarningTest {
 				mock(IssuePersistenceCoordinator.class),
 				mock(RelayTargetProvider.class),
 				new CouponIssuePersistenceProperties(
-						PersistenceMode.RELAY, null, null, blockTimeout, null, null, null));
+						PersistenceMode.RELAY, null, null, blockTimeout, null, null, null),
+				new SimpleMeterRegistry());
 	}
 }
