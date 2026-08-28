@@ -94,13 +94,32 @@ public class EventLogRecoveryExecutor {
 				continue;
 			}
 
-			CouponIssueStatus revertTo = chain.get(index - 1).getToStatus();
+			List<CouponHistory> validChain = chain.subList(0, index);
+			CouponIssueStatus revertTo = validChain.getLast().getToStatus();
+			LocalDateTime revertUsedAt = null;
+			LocalDateTime revertCanceledAt = null;
+
+			for (CouponHistory h : validChain) {
+				if (h.getToStatus() == CouponIssueStatus.USED) {
+					revertUsedAt = h.getOccurredAt();
+					revertCanceledAt = null;
+				} else if (h.getToStatus() == CouponIssueStatus.ISSUED && h.getFromStatus() == CouponIssueStatus.USED) {
+					revertUsedAt = null;
+					revertCanceledAt = h.getOccurredAt();
+				} else if (h.getToStatus() == CouponIssueStatus.CANCELED) {
+					revertCanceledAt = h.getOccurredAt();
+				} else if (h.getToStatus() == CouponIssueStatus.ISSUED && h.getFromStatus() == null) {
+					revertUsedAt = null;
+					revertCanceledAt = null;
+				}
+			}
+
 			List<Long> deleteIds = tail.stream().map(CouponHistory::getId).toList();
 			couponHistoryRepository.deleteAllByIdInBatch(deleteIds);
 
 			CouponIssue lockedIssue = couponIssueRepository.findByIdForUpdate(issueId)
 					.orElseThrow(() -> new IllegalStateException("존재하지 않는 발급 건입니다. issueId=" + issueId));
-			lockedIssue.restoreStatus(revertTo);
+			lockedIssue.restoreStatus(revertTo, revertUsedAt, revertCanceledAt);
 
 			recoveredIssueIds.add(issueId);
 		}

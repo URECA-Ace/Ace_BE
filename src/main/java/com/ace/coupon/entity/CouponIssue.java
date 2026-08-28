@@ -146,8 +146,10 @@ public class CouponIssue {
 	 * 반드시 일치하는지 호출부가 직접 보장해야 한다 — 어긋나면 CouponIssueHistoryStateConsistencyCheck가
 	 * 위반으로 잡아내긴 하지만, 그건 사후 배치 탐지일 뿐 이 메서드 자체가 막아주는 게 아니다.
 	 */
-	public void restoreStatus(CouponIssueStatus target) {
+	public void restoreStatus(CouponIssueStatus target, LocalDateTime usedAt, LocalDateTime canceledAt) {
 		this.status = target;
+		this.usedAt = usedAt;
+		this.canceledAt = canceledAt;
 	}
 
 	/**
