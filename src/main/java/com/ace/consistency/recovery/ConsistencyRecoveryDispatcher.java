@@ -1,6 +1,5 @@
 package com.ace.consistency.recovery;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +7,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.common.ErrorCode;
@@ -21,7 +21,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.policy.ConsistencyRecoveryPolicy;
-import com.ace.consistency.recovery.repository.RecoveryResultRepository;
+import com.ace.consistency.recovery.service.RecoveryResultRecorder;
 import com.ace.consistency.repository.VerificationResultRepository;
 
 import jakarta.annotation.PostConstruct;
@@ -39,7 +39,7 @@ import lombok.RequiredArgsConstructor;
 public class ConsistencyRecoveryDispatcher {
 
 	private final VerificationResultRepository verificationResultRepository;
-	private final RecoveryResultRepository recoveryResultRepository;
+	private final RecoveryResultRecorder recoveryResultRecorder;
 	private final ConsistencyVerificationRunner verificationRunner;
 	private final List<ConsistencyRecoveryPolicy> recoveryPolicies;
 	private final List<ConsistencyCheck> checks;
@@ -74,7 +74,7 @@ public class ConsistencyRecoveryDispatcher {
 	 * 복구해야 하는지는 체크마다 다르므로, Dispatcher는 그 판단을 정책에 완전히 위임한다.
 	 * 정책이 반환한 RecoveryOutcome 리스트를 그대로 순회하며 각각 이력을 저장하고 재검증한다.
 	 */
-	@Transactional
+	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public List<RecoveryResult> recover(Long verificationResultId, RecoveryAction action) {
 		VerificationResultEntity target = verificationResultRepository.findById(verificationResultId)
 				.orElseThrow(() -> new ConsistencyCheckException(ErrorCode.VERIFICATION_RESULT_NOT_FOUND));
@@ -89,8 +89,7 @@ public class ConsistencyRecoveryDispatcher {
 		List<RecoveryResult> results = new ArrayList<>();
 		boolean allRecovered = true;
 		for (RecoveryOutcome outcome : outcomes) {
-			RecoveryResult saved = recoveryResultRepository.save(
-					RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
+			RecoveryResult saved = recoveryResultRecorder.record(verificationResultId, outcome);
 			results.add(saved);
 
 			if (outcome.getStatus() == RecoveryResultStatus.FAIL) {

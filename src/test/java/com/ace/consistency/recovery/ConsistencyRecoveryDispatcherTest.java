@@ -31,7 +31,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.policy.ConsistencyRecoveryPolicy;
-import com.ace.consistency.recovery.repository.RecoveryResultRepository;
+import com.ace.consistency.recovery.service.RecoveryResultRecorder;
 import com.ace.consistency.repository.VerificationResultRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,7 +43,7 @@ class ConsistencyRecoveryDispatcherTest {
 	private VerificationResultRepository verificationResultRepository;
 
 	@Mock
-	private RecoveryResultRepository recoveryResultRepository;
+	private RecoveryResultRecorder recoveryResultRecorder;
 
 	@Mock
 	private ConsistencyVerificationRunner verificationRunner;
@@ -61,14 +61,15 @@ class ConsistencyRecoveryDispatcherTest {
 		given(check.getName()).willReturn(CHECK_NAME);
 
 		dispatcher = new ConsistencyRecoveryDispatcher(
-				verificationResultRepository, recoveryResultRepository, verificationRunner,
+				verificationResultRepository, recoveryResultRecorder, verificationRunner,
 				List.of(policy), List.of(check));
 		dispatcher.index();
 	}
 
 	private void stubSaveReturnsInput() {
-		given(recoveryResultRepository.save(any()))
-				.willAnswer(invocation -> invocation.getArgument(0));
+		given(recoveryResultRecorder.record(any(Long.class), any(RecoveryOutcome.class)))
+				.willAnswer(invocation -> RecoveryResult.from(
+						invocation.getArgument(0), invocation.getArgument(1), LocalDateTime.now()));
 	}
 
 	private VerificationResultEntity failResult() {
@@ -238,7 +239,7 @@ class ConsistencyRecoveryDispatcherTest {
 	@Test
 	void checkName에_해당하는_복구_정책이_없으면_예외를_던진다() {
 		ConsistencyRecoveryDispatcher noPolicyDispatcher = new ConsistencyRecoveryDispatcher(
-				verificationResultRepository, recoveryResultRepository, verificationRunner, List.of(), List.of(check));
+				verificationResultRepository, recoveryResultRecorder, verificationRunner, List.of(), List.of(check));
 		noPolicyDispatcher.index();
 
 		VerificationResultEntity target = failResult();
@@ -264,7 +265,7 @@ class ConsistencyRecoveryDispatcherTest {
 	@Test
 	void 복구_정책이_없는_체크는_예외_대신_빈_목록을_반환한다() {
 		ConsistencyRecoveryDispatcher noPolicyDispatcher = new ConsistencyRecoveryDispatcher(
-				verificationResultRepository, recoveryResultRepository, verificationRunner, List.of(), List.of(check));
+				verificationResultRepository, recoveryResultRecorder, verificationRunner, List.of(), List.of(check));
 		noPolicyDispatcher.index();
 
 		VerificationResultEntity target = failResult();
