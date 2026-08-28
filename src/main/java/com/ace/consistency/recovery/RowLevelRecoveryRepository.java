@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * Row-level 복구에 필요한 최신 coupon_issue 상태와 이력 조작을 담당한다.
- * 복구 Executor가 매번 대상 행을 SELECT FOR UPDATE로 잠근 뒤 조건을 재검증하도록
+ * 복구 Executor가 매번 대상 행을 SELECT FOR UPDATE NOWAIT로 잠근 뒤 조건을 재검증하도록
  * 하여, 검증 결과 생성 이후 상태가 바뀐 경우 안전하게 복구를 거부할 수 있다.
  */
 @Repository
@@ -27,7 +27,7 @@ public class RowLevelRecoveryRepository {
 				       issued_at, valid_from, valid_to, used_at, canceled_at, created_at
 				FROM coupon_issue
 				WHERE issue_id = :issueId
-				FOR UPDATE
+				FOR UPDATE NOWAIT
 				""";
 		return jdbcTemplate.query(sql, new MapSqlParameterSource("issueId", issueId), rs ->
 				rs.next() ? Optional.of(new IssueSnapshot(

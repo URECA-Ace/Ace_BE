@@ -2,10 +2,14 @@ package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +57,7 @@ class RowLevelRecoveryExecutorIntegrationTest {
 	}
 
 	@Autowired JdbcTemplate jdbcTemplate;
+	@Autowired DataSource dataSource;
 	@Autowired CouponIssueHistoryStateRecoveryExecutor historyExecutor;
 	@Autowired CouponExpirationLagRecoveryExecutor expirationExecutor;
 	@Autowired ConsistencyRecoveryDispatcher dispatcher;
@@ -200,6 +205,24 @@ class RowLevelRecoveryExecutorIntegrationTest {
 
 		assertThat(status(issueId)).isEqualTo("ISSUED");
 		assertThat(historyCount(issueId)).isZero();
+	}
+
+	@Test
+	void 잠긴_issue는_NOWAIT로_즉시_복구실패한다() throws Exception {
+		try (Connection lockConnection = dataSource.getConnection();
+				PreparedStatement statement = lockConnection.prepareStatement(
+						"SELECT issue_id FROM coupon_issue WHERE issue_id=? FOR UPDATE")) {
+			lockConnection.setAutoCommit(false);
+			statement.setLong(1, issueId);
+			statement.executeQuery().close();
+
+			RecoveryOutcome outcome = historyExecutor.recoverIssue(
+					target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId), issueId);
+
+			assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+			assertThat(historyCount(issueId)).isZero();
+			lockConnection.rollback();
+		}
 	}
 
 	private VerificationResultEntity target(String checkName, String violationType, long targetIssueId) {
