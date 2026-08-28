@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
@@ -69,11 +70,13 @@ class CouponEventCloseServiceTest {
 		given(campaignRedisCloser.close(51L))
 				.willReturn(new CampaignCloseDecision(CampaignCloseResult.CLOSED, CLOSED_AT));
 		given(lifecycleService.closeIfDrained(51L)).willReturn(CloseAttempt.CLOSED);
+		given(couponEventRepository.advanceCloseAt(anyLong(), any(), any())).willReturn(1);
 
 		var response = service.close(51L);
 
 		assertThat(response.status()).isEqualTo(CouponEventStatus.CLOSED);
 		assertThat(response.drained()).isTrue();
+		assertThat(response.closeAtAdvanced()).isTrue();
 		assertThat(response.closedAt().toInstant()).isEqualTo(CLOSED_AT);
 		verify(campaignRedisCloser).close(51L);
 		// 상태는 Drain 을 확인하는 경로로만 바뀐다. 마감 시각만 당긴다
@@ -98,6 +101,42 @@ class CouponEventCloseServiceTest {
 		assertThat(response.status()).isEqualTo(CouponEventStatus.OPEN);
 		assertThat(response.drained()).isFalse();
 		assertThat(response.closedAt().toInstant()).isEqualTo(CLOSED_AT);
+	}
+
+	@Test
+	@DisplayName("DB 마감 시각이 0행이면 요청은 성공시키되 closeAtAdvanced 로 드러낸다")
+	void reportsWhenCloseAtWasNotAdvanced() {
+		// 이미 마감 시각이 지난 회차 -> advanceCloseAt 의 closeAt > :closeAt 이 거짓이라 0행
+		given(couponEventRepository.findById(51L))
+				.willReturn(Optional.of(event(CouponEventStatus.OPEN)));
+		given(campaignRedisCloser.close(51L))
+				.willReturn(new CampaignCloseDecision(CampaignCloseResult.CLOSED, CLOSED_AT));
+		given(couponEventRepository.advanceCloseAt(anyLong(), any(), any())).willReturn(0);
+		given(lifecycleService.closeIfDrained(51L)).willReturn(CloseAttempt.WAITING_FOR_DRAIN);
+
+		var response = service.close(51L);
+
+		// 발급은 이미 막혔고 원래 closeAt 이 되면 sweep 이 회수하므로 실패는 아니다
+		assertThat(response.closeAtAdvanced()).isFalse();
+		assertThat(response.closedAt().toInstant()).isEqualTo(CLOSED_AT);
+	}
+
+	@Test
+	@DisplayName("DB 마감 시각 갱신이 실패하면 재시도 가능 오류로 바꿔 던진다")
+	void wrapsFailureWhenCloseAtUpdateThrows() {
+		given(couponEventRepository.findById(51L))
+				.willReturn(Optional.of(event(CouponEventStatus.OPEN)));
+		given(campaignRedisCloser.close(51L))
+				.willReturn(new CampaignCloseDecision(CampaignCloseResult.CLOSED, CLOSED_AT));
+		given(couponEventRepository.advanceCloseAt(anyLong(), any(), any()))
+				.willThrow(new DataAccessResourceFailureException("db down"));
+
+		// Redis 만 닫힌 채 남는다
+		assertThatThrownBy(() -> service.close(51L))
+				.isInstanceOfSatisfying(CouponException.class,
+						exception -> assertThat(exception.getErrorCode())
+								.isEqualTo(ErrorCode.CAMPAIGN_CLOSE_TEMPORARILY_UNAVAILABLE));
+		verify(lifecycleService, never()).closeIfDrained(anyLong());
 	}
 
 	@Test

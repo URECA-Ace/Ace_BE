@@ -34,6 +34,8 @@ public class CouponEventAggregateSnapshotService {
 	// 아직 발급 중인 회차의 집계 컬럼을 한 번씩 갱신
 	// 마감 시각이 지난 회차는 대상이 아님
 	// 페이지를 커서로 끝까지 넘긴다. 첫 페이지만 보면 앞의 회차가 계속 대상으로 남을 때 뒤쪽 회차가 영원히 갱신되지 않는다
+	// SOLD_OUT 을 빼는 건 누락이 아니다
+	// allocated 가 totalStock - remainingStock 인 파생값이라 SOLD_OUT 이후에는 집계가 변할 원인이 없다
 	public SweepResult snapshotActiveEvents() {
 		int applied = 0;
 		int alreadyApplied = 0;

@@ -12,6 +12,9 @@ public record CouponIssueStatusResponse(
 		Long issueSequence,
 		Long remainingStock,
 		IssueRequestStatus status,
-		OffsetDateTime decidedAt
+		OffsetDateTime decidedAt,
+		String maskedUserName,
+		String maskedUserEmail,
+		String maskedUserPhone
 )  
 {}
