@@ -106,7 +106,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 
 		assertDoesNotThrow(() -> {
 			var results = runner.run(checks, Scope.ofEvent(existingEventId), TriggerType.ON_DEMAND);
-			assertEquals(1, results.size());
+			assertEquals(checks.size(), results.size());
 		});
 	}
 

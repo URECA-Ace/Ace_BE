@@ -55,7 +55,7 @@ class StateMachineConsistencyRecoveryPolicyTest {
 	private VerificationResultEntity failResultFor(Long eventId) {
 		return VerificationResultEntity.from(VerificationResult.fail(
 				"StateMachineConsistencyCheck", TriggerType.ON_DEMAND, Scope.ofEvent(eventId),
-				1, Map.of(), LocalDateTime.now(), 10L));
+				1, Map.of(), List.of(), LocalDateTime.now(), 10L));
 	}
 
 	@Test
@@ -75,7 +75,7 @@ class StateMachineConsistencyRecoveryPolicyTest {
 	void ALL_스코프_target이면_verification_violation에_있는_targetId마다_executor를_호출한다() {
 		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
 				"StateMachineConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
-				2, Map.of(), LocalDateTime.now(), 10L));
+				2, Map.of(), List.of(), LocalDateTime.now(), 10L));
 		given(violationRepository.findByVerificationResultId(any()))
 				.willReturn(List.of(violationFor(1L), violationFor(2L)));
 
@@ -109,7 +109,7 @@ class StateMachineConsistencyRecoveryPolicyTest {
 	void ALL_스코프_target인데_verification_violation이_없으면_예외를_던진다() {
 		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
 				"StateMachineConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
-				0, Map.of(), LocalDateTime.now(), 10L));
+				0, Map.of(), List.of(), LocalDateTime.now(), 10L));
 		given(violationRepository.findByVerificationResultId(any())).willReturn(List.of());
 
 		assertThatThrownBy(() -> policy.recover(target, RecoveryAction.RESTORE_STATE_MACHINE))
