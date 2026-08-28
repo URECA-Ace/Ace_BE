@@ -112,13 +112,26 @@ public class CouponIssue {
 	public void cancel(LocalDateTime canceledAt) {
 		validateTransition(CouponIssueStatus.ISSUED);
 		this.status = CouponIssueStatus.ISSUED;
-		this.usedAt = null; 
+		this.usedAt = null;
 		this.canceledAt = canceledAt;
 	}
 
 	public void expire() {
 		validateTransition(CouponIssueStatus.EXPIRED);
 		this.status = CouponIssueStatus.EXPIRED;
+	}
+
+	/**
+	 * 재고 초과발급 복구 전용 전이. 일반 사용자 API가 쓰는 {@link CouponIssueStatus#allowedTransitions()}
+	 * 상태머신과는 무관하게, ISSUED 상태의 건만 CANCELED로 되돌린다(슬롯 반납).
+	 */
+	public void revoke(LocalDateTime revokedAt) {
+		if (this.status != CouponIssueStatus.ISSUED) {
+			throw new IllegalStateException(
+					String.format("상태 전이 불가: %s -> %s", this.status, CouponIssueStatus.CANCELED));
+		}
+		this.status = CouponIssueStatus.CANCELED;
+		this.canceledAt = revokedAt;
 	}
 
 	private void validateTransition(CouponIssueStatus target) {

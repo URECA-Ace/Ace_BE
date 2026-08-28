@@ -18,7 +18,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPE_CONDITION = """
@@ -35,17 +34,18 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				OR (ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
 					'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
+				OR ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED','CANCELED')
 				OR ci.issued_at IS NULL OR ci.valid_from IS NULL OR ci.valid_to IS NULL OR ci.created_at IS NULL
 				OR ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to OR ci.created_at < ci.issued_at
-				OR (ci.status IN ('ISSUED','EXPIRED') AND ci.used_at IS NOT NULL)
+				OR (ci.status IN ('ISSUED','EXPIRED','CANCELED') AND ci.used_at IS NOT NULL)
 				OR (ci.status = 'USED' AND (ci.used_at IS NULL OR ci.used_at < ci.valid_from))
+				OR (ci.status = 'CANCELED' AND ci.canceled_at IS NULL)
 			)
 			""";
 
 	private static final String VIOLATION_SQL = """
 			SELECT ci.issue_id, ci.event_id, ci.user_id, ci.status,
-			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at,
+			       ci.issued_at, ci.valid_from, ci.valid_to, ci.used_at, ci.canceled_at,
 			       COUNT(*) OVER() AS total_violation_count,
 			       CASE
 			         WHEN ci.user_id IS NULL THEN 'MISSING_USER_ID'
@@ -56,19 +56,19 @@ public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
 				         WHEN ci.message_id IS NOT NULL AND ci.message_id NOT REGEXP
 				              '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 				              THEN 'INVALID_MESSAGE_ID_FORMAT'
-			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED')
+			         WHEN ci.status IS NULL OR ci.status NOT IN ('ISSUED','USED','EXPIRED','CANCELED')
 			              THEN 'INVALID_STATUS'
 			         WHEN ci.issued_at IS NULL OR ci.valid_from IS NULL
 			              OR ci.valid_to IS NULL OR ci.created_at IS NULL THEN 'MISSING_TIMESTAMP'
 			         WHEN ci.issued_at > ci.valid_from OR ci.valid_from >= ci.valid_to
 			              OR ci.created_at < ci.issued_at THEN 'INVALID_TIMESTAMP_ORDER'
+			         WHEN ci.status = 'CANCELED' AND ci.canceled_at IS NULL THEN 'MISSING_CANCELED_AT'
 			         ELSE 'INVALID_STATUS_FIELDS'
 			       END AS violation_type
 			FROM coupon_issue ci
 			WHERE %s AND %s
 			ORDER BY ci.issue_id
-			LIMIT %d
-			""".formatted(SCOPE_CONDITION, BASE_CONDITION, SAMPLE_LIMIT);
+			""".formatted(SCOPE_CONDITION, BASE_CONDITION);
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {

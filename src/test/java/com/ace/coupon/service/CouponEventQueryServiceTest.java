@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
@@ -31,7 +32,7 @@ class CouponEventQueryServiceTest {
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		couponEventQueryService = new CouponEventQueryService(
 				couponEventRepository,
-				Clock.fixed(Instant.parse("2026-08-25T00:00:00Z"), ZoneId.of("Asia/Seoul")));
+				Clock.fixed(Instant.parse("2026-08-25T02:00:00Z"), ZoneId.of("Asia/Seoul")));
 	}
 
 	@Test
@@ -84,5 +85,43 @@ class CouponEventQueryServiceTest {
 		assertThat(result).isEmpty();
 		verify(couponEventRepository).findRecentWithCouponByStatus(
 				CouponEventStatus.OPEN, PageRequest.of(0, 10));
+	}
+
+	@Test
+	@DisplayName("마감 시각이 지났어도 Drain 전이면 DB에 확정된 OPEN 상태를 반환한다")
+	void returnsStoredOpenStatusUntilDrainIsCompleted() {
+		Coupon coupon = Coupon.builder()
+				.id(8L)
+				.couponName("예약 마감 조회 쿠폰")
+				.type("DATA_UNLIMITED")
+				.value(0L)
+				.validHours(24)
+				.createdAt(LocalDateTime.of(2026, 8, 25, 8, 0))
+				.build();
+		CouponEvent expiredOpenEvent = CouponEvent.builder()
+				.id(52L)
+				.coupon(coupon)
+				.round(1)
+				.totalStock(10_000)
+				.remainingStock(10_000)
+				.issuedQuantity(0)
+				.perUserLimit(1)
+				.status(CouponEventStatus.OPEN)
+				.openAt(LocalDateTime.of(2026, 8, 25, 9, 0))
+				.closeAt(LocalDateTime.of(2026, 8, 25, 10, 0))
+				.createdAt(LocalDateTime.of(2026, 8, 25, 8, 30))
+				.updatedAt(LocalDateTime.of(2026, 8, 25, 9, 0, 1))
+				.build();
+		given(couponEventRepository.findRecentWithCouponByStatus(
+				CouponEventStatus.OPEN, PageRequest.of(0, 10)))
+				.willReturn(List.of(expiredOpenEvent));
+
+		var result = couponEventQueryService.findRecentEvents(CouponEventStatus.OPEN, 10);
+
+		assertThat(result).singleElement().satisfies(response -> {
+			assertThat(response.status()).isEqualTo(CouponEventStatus.OPEN);
+			assertThat(response.statusChangedAt())
+					.isEqualTo(OffsetDateTime.parse("2026-08-25T09:00:01+09:00"));
+		});
 	}
 }

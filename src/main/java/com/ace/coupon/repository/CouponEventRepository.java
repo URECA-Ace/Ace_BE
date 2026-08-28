@@ -4,12 +4,15 @@ import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.enums.CampaignRedisInitializationStatus;
 import com.ace.coupon.enums.CouponEventStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,6 +39,10 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 
 	@Query("select e from CouponEvent e join fetch e.coupon where e.id = :eventId")
 	Optional<CouponEvent> findWithCouponById(@Param("eventId") Long eventId);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select event from CouponEvent event where event.id = :eventId")
+	Optional<CouponEvent> findByIdForUpdate(@Param("eventId") Long eventId);
 
 	@Query("""
 			select event
@@ -96,6 +103,31 @@ public interface CouponEventRepository extends JpaRepository<CouponEvent, Long> 
 	int openDueEvents(
 			@Param("scheduledStatus") CouponEventStatus scheduledStatus,
 			@Param("openStatus") CouponEventStatus openStatus);
+
+	/**
+	 * 수동 마감 요청을 받은 회차의 마감 시각을 현재로 당긴다.
+	 *
+	 * <p>상태는 여기서 바꾸지 않는다. {@code CLOSED} 는 검증팀의 Drain 조건이라
+	 * 파이프라인이 비었는지 확인한 뒤 {@link #markClosed} 로만 전환해야 한다.
+	 * 마감 시각만 당겨 두면 이후 sweep 이 이 회차를 마감 대상으로 집어 간다.
+	 *
+	 * <p>이미 마감 시각이 지난 회차는 갱신하지 않는다. 되돌리는 방향으로 시각이
+	 * 움직이면 Redis 가 이미 차단한 시점과 어긋난다.
+	 */
+	@Transactional
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+			UPDATE CouponEvent event
+			SET event.closeAt = :closeAt,
+				event.updatedAt = CURRENT_TIMESTAMP
+			WHERE event.id = :eventId
+				AND event.status IN :statuses
+				AND event.closeAt > :closeAt
+			""")
+	int advanceCloseAt(
+			@Param("eventId") Long eventId,
+			@Param("statuses") List<CouponEventStatus> statuses,
+			@Param("closeAt") LocalDateTime closeAt);
 
 	// 주기 집계 스냅샷 대상 회차
 	// 마감 시각이 지난 회차는 제외

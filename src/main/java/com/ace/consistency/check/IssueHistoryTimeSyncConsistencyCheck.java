@@ -23,7 +23,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
-	private static final int SAMPLE_LIMIT = 20;
 	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간 .env로 일괄 관리예정 !!!!!
 	private static final int MAX_BATCH_LAG_SECONDS = 86400; 
 
@@ -112,8 +111,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
                   )
               )
             ORDER BY ci.issue_id
-            LIMIT %d
-            """.formatted(SAMPLE_LIMIT);
+            """;
 
 	private static final String ALL_SQL = SELECT_CLAUSE + ALL_JOIN_CLAUSE + FILTER_CLAUSE;
 	private static final String EVENT_SQL = SELECT_CLAUSE + EVENT_JOIN_CLAUSE + FILTER_CLAUSE;
