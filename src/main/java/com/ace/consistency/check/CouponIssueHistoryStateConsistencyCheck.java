@@ -22,6 +22,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "발급·이력 상태 동기화 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 

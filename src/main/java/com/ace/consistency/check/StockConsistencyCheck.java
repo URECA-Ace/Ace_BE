@@ -30,6 +30,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class StockConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "재고 정합성 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 

@@ -67,9 +67,10 @@ class ConsistencyRecoveryDispatcherTest {
 	}
 
 	private void stubSaveReturnsInput() {
-		given(recoveryResultRecorder.record(any(Long.class), any(RecoveryOutcome.class)))
+		given(recoveryResultRecorder.record(any(Long.class), any(String.class), any(RecoveryAction.class), any(RecoveryOutcome.class)))
 				.willAnswer(invocation -> RecoveryResult.from(
-						invocation.getArgument(0), invocation.getArgument(1), LocalDateTime.now()));
+						invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+						invocation.getArgument(3), LocalDateTime.now()));
 	}
 
 	private VerificationResultEntity failResult() {
@@ -97,6 +98,8 @@ class ConsistencyRecoveryDispatcherTest {
 		RecoveryResult result = results.get(0);
 		assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(result.getVerificationResultId()).isEqualTo(1L);
+		assertThat(result.getCheckName()).isEqualTo(CHECK_NAME);
+		assertThat(result.getAction()).isEqualTo(RecoveryAction.DEFAULT);
 		assertThat(result.getDetail()).containsEntry("issue_id", 4);
 		assertThat(result.getMessage()).isEqualTo("복구완료");
 		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERED);

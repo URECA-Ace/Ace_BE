@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.ace.consistency.common.DiffDetailConverter;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
+import com.ace.consistency.recovery.enums.RecoveryAction;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -41,6 +42,14 @@ public class RecoveryResult {
 	@Column(nullable = false)
 	private Long verificationResultId;
 
+	/** 이력 화면이 원본 검증 결과와 추가 조인 없이 검사명을 표시할 수 있도록 저장하는 스냅샷. */
+	@Column(length = 100)
+	private String checkName;
+
+	@Enumerated(EnumType.STRING)
+	@Column(length = 50)
+	private RecoveryAction action;
+
 	/** 복구 정책이 실제로 수정한 대상들. 예: {"issue_id": 4, "history_id": 3}. 체크마다 자유 형식. */
 	@Convert(converter = DiffDetailConverter.class)
 	@Column(columnDefinition = "JSON")
@@ -58,9 +67,12 @@ public class RecoveryResult {
 	private LocalDateTime createdAt;
 
 	@Builder
-	private RecoveryResult(Long verificationResultId, Map<String, Object> detail, String message,
+	private RecoveryResult(Long verificationResultId, String checkName, RecoveryAction action,
+						 Map<String, Object> detail, String message,
 							RecoveryResultStatus status, LocalDateTime createdAt) {
 		this.verificationResultId = verificationResultId;
+		this.checkName = checkName;
+		this.action = action;
 		this.detail = detail;
 		this.message = message;
 		this.status = status;
@@ -68,8 +80,15 @@ public class RecoveryResult {
 	}
 
 	public static RecoveryResult from(Long verificationResultId, RecoveryOutcome outcome, LocalDateTime createdAt) {
+		return from(verificationResultId, null, null, outcome, createdAt);
+	}
+
+	public static RecoveryResult from(Long verificationResultId, String checkName, RecoveryAction action,
+			RecoveryOutcome outcome, LocalDateTime createdAt) {
 		return RecoveryResult.builder()
 				.verificationResultId(verificationResultId)
+				.checkName(checkName)
+				.action(action)
 				.detail(outcome.getDetail())
 				.message(outcome.getMessage())
 				.status(outcome.getStatus())

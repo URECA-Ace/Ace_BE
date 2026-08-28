@@ -20,6 +20,10 @@ import java.util.Set;
 /** 만료 배치의 허용 지연을 넘긴 ISSUED 행과 valid_to 이후 사용된 행을 검사한다. */
 @Component
 public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "쿠폰 만료 지연 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private final long allowedDelayMillis;

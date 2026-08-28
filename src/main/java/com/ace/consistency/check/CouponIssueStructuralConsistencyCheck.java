@@ -18,6 +18,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class CouponIssueStructuralConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "쿠폰 발급 구조 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
