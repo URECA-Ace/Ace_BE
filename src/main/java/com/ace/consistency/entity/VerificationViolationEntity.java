@@ -28,7 +28,11 @@ import java.util.Map;
 @Table(name = "verification_violation", indexes = {
 		@Index(name = "idx_vv_verification_result_id", columnList = "verificationResultId"),
 		@Index(name = "idx_vv_batch_owner", columnList = "batchJobInstanceId,batchStepName")
-})
+}, check = @CheckConstraint(name = "chk_vv_owner", constraint = """
+		(verification_result_id IS NOT NULL AND batch_job_instance_id IS NULL AND batch_step_name IS NULL)
+		OR
+		(verification_result_id IS NULL AND batch_job_instance_id IS NOT NULL AND batch_step_name IS NOT NULL)
+		"""))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED) // JPA 스펙상 기본 생성자 필요, 외부에서 직접 생성은 막음
 public class VerificationViolationEntity {
@@ -38,8 +42,14 @@ public class VerificationViolationEntity {
 	private Long id;
 
 	/** ALL 스코프 배치에서 Step이 끝나 verification_result와 연결되기 전까지는 null. */
-	@Column
+	@Column(name = "verification_result_id")
 	private Long verificationResultId;
+
+	/** FK 제약 생성을 위한 읽기 전용 연관관계. 저장 로직은 verificationResultId를 직접 사용한다. */
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "verification_result_id", insertable = false, updatable = false,
+			foreignKey = @ForeignKey(name = "fk_vv_verification_result"))
+	private VerificationResultEntity verificationResult;
 
 	/** ALL 스코프 배치의 재시작 전후에 유지되는 임시 소유자. 최종 결과 연결 후에는 null. */
 	@Column
