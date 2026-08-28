@@ -2,6 +2,7 @@ package com.ace.coupon.persistence.relay;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,6 +23,7 @@ import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -30,6 +32,7 @@ import org.springframework.stereotype.Component;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponRedisKeys;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import com.ace.coupon.persistence.CouponIssuePersistenceProperties;
 import com.ace.coupon.persistence.IssuePersistenceCoordinator;
@@ -75,6 +78,30 @@ public class IssueStreamRelay implements SmartLifecycle {
 		this.coordinator = coordinator;
 		this.targetProvider = targetProvider;
 		this.properties = properties;
+	}
+
+	// block-timeout 은 Lettuce 커맨드 타임아웃보다 짧아야 한다
+	// 같거나 길면 Stream 이 빌 때마다 XREADGROUP BLOCK 이 커맨드 타임아웃을 내고
+	// 이미 전달된 엔트리가 pending 에 남아 claim-min-idle 만큼 저장이 밀린다
+	// 두 값의 설정 위치가 달라 코드로 막지 않고 기동 때 경고만 남긴다
+	@PostConstruct
+	void warnIfBlockTimeoutNotShorterThanCommandTimeout() {
+		commandTimeout()
+				.filter(commandTimeout -> properties.blockTimeout().compareTo(commandTimeout) >= 0)
+				.ifPresent(commandTimeout -> log.warn(
+						"coupon.issue.persistence.block-timeout 이 Redis 커맨드 타임아웃보다 짧지 않습니다. "
+								+ "Stream 이 빌 때마다 조회가 타임아웃되고 저장이 claim-min-idle 만큼 밀립니다. "
+								+ "blockTimeout={}, commandTimeout={}",
+						properties.blockTimeout(), commandTimeout));
+	}
+
+	// 프로퍼티가 아니라 실제로 적용된 값을 본다
+	// Lettuce 가 아니면 판단할 수 없으므로 경고하지 않는다
+	private Optional<Duration> commandTimeout() {
+		return Optional.ofNullable(redisTemplate.getConnectionFactory())
+				.filter(LettuceConnectionFactory.class::isInstance)
+				.map(LettuceConnectionFactory.class::cast)
+				.map(factory -> factory.getClientConfiguration().getCommandTimeout());
 	}
 
 	// 인스턴스가 2대라 컨슈머 이름이 겹치면 서로의 pending 을 가져간다
