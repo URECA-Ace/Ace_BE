@@ -94,8 +94,8 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (check, status) (rate(consistency_verification_total[$__rate_interval]))",
-          "legendFormat": "{{check}} - {{status}}"
+          "expr": "sum by (check, status, scope) (rate(consistency_verification_total[$__rate_interval]))",
+          "legendFormat": "{{check}} - {{status}} ({{scope}})"
         }
       ]
     },

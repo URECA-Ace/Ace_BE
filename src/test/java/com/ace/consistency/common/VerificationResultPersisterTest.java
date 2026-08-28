@@ -4,6 +4,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
 import com.ace.consistency.repository.VerificationViolationRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,7 +35,7 @@ class VerificationResultPersisterTest {
 
 	@BeforeEach
 	void setUp() {
-		persister = new VerificationResultPersister(resultRepository, violationRepository, eventPublisher);
+		persister = new VerificationResultPersister(resultRepository, violationRepository, eventPublisher, new SimpleMeterRegistry());
 	}
 
 	@Test

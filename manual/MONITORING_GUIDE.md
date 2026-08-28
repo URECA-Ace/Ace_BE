@@ -39,7 +39,7 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 |---|---|---|---|
 | `coupon.issue` | `coupon_issue_total` | `result`(success/fail), `reason`(실패 시 `ErrorCode`) | 쿠폰 발급 요청의 성공/실패 |
 | `coupon.state.change` | `coupon_state_change_total` | `result`, `from`, `to`, `reason`(실패 시) | 쿠폰 상태 변경(`ISSUED`→`USED` 등) 성공/실패 |
-| `consistency.verification` | `consistency_verification_total` | `check`(체크 이름), `status`(`PASS`/`FAIL`/`ERROR`) | 정합성 검증 결과 (수동/스케줄/재검증/배치 모든 트리거 공통) |
+| `consistency.verification` | `consistency_verification_total` | `check`(체크 이름), `status`(`PASS`/`FAIL`/`ERROR`), `scope`(`EVENT`/`AS_OF_RANGE`/`ALL`) | 정합성 검증 결과 (수동/스케줄/재검증/배치 모든 트리거 공통) |
 | `coupon.issue.relay` | `coupon_issue_relay_total` | `result`, `reason`(실패 시) | **RELAY 모드 전환 대비.** Redis Stream 릴레이의 비동기 저장·확정 최종 결과. 현재 배포 모드는 `SYNC`라 데이터가 찍히지 않으며, `coupon.issue.persistence.mode=RELAY`로 전환한 뒤부터 값이 쌓입니다. |
 
 > `coupon.issue`의 `success`는 SYNC 모드 기준 "요청 판정 + DB 저장까지" 성공을 의미합니다. RELAY 모드로 전환하면 `coupon.issue`의 `success`는 "요청 판정"만 반영하고, 실제 비동기 저장의 최종 성공/실패는 `coupon.issue.relay`로 따로 봐야 합니다.
@@ -59,7 +59,7 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 | 쿠폰 발급 실패 사유별 | 실패를 `reason`(ErrorCode)별로 분리 |
 | 쿠폰 상태 변경 현황 (전이별) | `coupon_state_change_total` 성공 건을 `from`→`to`별로 분리 |
 | 쿠폰 상태 변경 실패 사유별 | 실패를 `reason`별로 분리 |
-| 정합성 검증 현황 (체크/상태) | `consistency_verification_total`을 `check`, `status`별로 분리 |
+| 정합성 검증 현황 (체크/상태) | `consistency_verification_total`을 `check`, `status`, `scope`별로 분리 |
 | RELAY 비동기 저장 결과 | `coupon_issue_relay_total` — RELAY 모드 전환 후에만 값이 생김 |
 
 각 패널은 `$__rate_interval`을 사용하므로, 대시보드 상단 Time range를 좁히면(예: Last 5 minutes) 초 단위에 가깝게, 넓히면(예: Last 6 hours) 분 단위에 가깝게 자동으로 조정됩니다. 특정 단위로 고정하고 싶다면 패널 편집 -> Query options -> **Min interval**에 `5s` 또는 `1m`처럼 직접 입력하면 됩니다. (Prometheus의 `scrape_interval`이 5s이므로 그보다 더 잘게는 의미가 없습니다)

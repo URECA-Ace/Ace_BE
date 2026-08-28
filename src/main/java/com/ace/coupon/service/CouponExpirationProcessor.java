@@ -13,6 +13,7 @@ import com.ace.coupon.enums.CouponIssueStatus;
 import com.ace.coupon.repository.CouponHistoryRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,6 +24,7 @@ public class CouponExpirationProcessor {
 
 	private final CouponHistoryRepository couponHistoryRepository;
 	private final CouponIssueRepository couponIssueRepository;
+	private final MeterRegistry meterRegistry;
 
 	@Transactional
 	public int processChunk(List<CouponIssue> targets, LocalDateTime now) {
@@ -32,6 +34,11 @@ public class CouponExpirationProcessor {
 
 		List<Long> ids = targets.stream().map(CouponIssue::getId).toList();
 		int actualExpired = couponIssueRepository.bulkExpire(ids);
+
+		meterRegistry.counter("coupon.state.change",
+				"result", "success",
+				"from", CouponIssueStatus.ISSUED.name(),
+				"to", CouponIssueStatus.EXPIRED.name()).increment(actualExpired);
 
 		List<CouponHistory> histories = new ArrayList<>(targets.size());
 

@@ -34,7 +34,8 @@ public class VerificationResultPersister {
 
 		results.forEach(result -> meterRegistry.counter("consistency.verification",
 				"check", result.getCheckName(),
-				"status", result.getStatus().name()).increment());
+				"status", result.getStatus().name(),
+				"scope", result.getScope().getType().name()).increment());
 
 		//todo: notify 도메인 머지 후 주석해제
 		/*
@@ -68,6 +69,11 @@ public class VerificationResultPersister {
 	public VerificationResultEntity saveStepResult(VerificationResult result, Long jobInstanceId,
 												 String stepName, boolean stepIncomplete) {
 		VerificationResultEntity saved = saveResultsAndViolations(List.of(result)).getFirst();
+
+		meterRegistry.counter("consistency.verification",
+				"check", result.getCheckName(),
+				"status", result.getStatus().name(),
+				"scope", result.getScope().getType().name()).increment();
 
 		// 실패한 Step의 reader 위치와 violationCount는 재시작 시 복원된다. 같은 이유로
 		// 이미 커밋된 위반 행도 유지하고, 최종 완료된 Step에서만 결과에 연결한다.
