@@ -14,7 +14,7 @@
     "refresh_intervals": ["1s", "5s", "10s", "30s", "1m", "5m", "15m"]
   },
   "schemaVersion": 39,
-  "version": 7,
+  "version": 11,
   "templating": {
     "list": [
       {
@@ -68,6 +68,45 @@
         "hide": 0
       },
       {
+        "name": "reason_issue",
+        "type": "query",
+        "label": "발급 판정 실패 사유",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(coupon_issue_total{result=\"fail\"}, reason)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "reason_relay",
+        "type": "query",
+        "label": "비동기 저장 실패 사유",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(coupon_issue_relay_total{result=\"fail\"}, reason)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "reason_state",
+        "type": "query",
+        "label": "상태 변경 실패 사유",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(coupon_state_change_total{result=\"fail\"}, reason)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "sort": 1,
+        "hide": 0
+      },
+      {
         "name": "check",
         "type": "query",
         "label": "검증 항목",
@@ -112,48 +151,48 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "쿠폰 발급 현황 (접수/저장 · 성공/실패)",
+      "title": "쿠폰 발급 현황 (발급 판정/비동기 저장 확정 · 성공/실패)",
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result) (increase(coupon_issue_total{result=~\"$result_issue\"}[$interval]))",
-          "legendFormat": "접수 - {{result}}"
+          "expr": "sum by (result_label) (coupon_issue_total{result=~\"$result_issue\", result_label=~\".+\"})",
+          "legendFormat": "발급 판정 - {{result_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result) (increase(coupon_issue_relay_total{result=~\"$result_relay\"}[$interval]))",
-          "legendFormat": "저장(RELAY) - {{result}}"
+          "expr": "sum by (result_label) (coupon_issue_relay_total{result=~\"$result_relay\", result_label=~\".+\"})",
+          "legendFormat": "비동기 저장 확정 - {{result_label}}"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "쿠폰 발급 실패 사유별 (접수/저장)",
+      "title": "쿠폰 발급 실패 사유별 (발급 판정/비동기 저장)",
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason) (increase(coupon_issue_total{result=\"fail\"}[$interval]))",
-          "legendFormat": "접수 실패 - {{reason}}"
+          "expr": "sum by (reason_label) (coupon_issue_total{result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"})",
+          "legendFormat": "발급 판정 실패 - {{reason_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason) (increase(coupon_issue_relay_total{result=\"fail\"}[$interval]))",
-          "legendFormat": "저장 실패 - {{reason}}"
+          "expr": "sum by (reason_label) (coupon_issue_relay_total{result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"})",
+          "legendFormat": "비동기 저장 실패 - {{reason_label}}"
         }
       ]
     },
@@ -163,14 +202,14 @@
       "title": "쿠폰 상태 변경 현황 (전이별)",
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (from, to) (increase(coupon_state_change_total{result=\"success\"}[$interval]))",
-          "legendFormat": "{{from}} -> {{to}}"
+          "expr": "sum by (from_label, to_label) (coupon_state_change_total{result=\"success\", from_label=~\".+\", to_label=~\".+\"})",
+          "legendFormat": "{{from_label}} -> {{to_label}}"
         }
       ]
     },
@@ -180,14 +219,14 @@
       "title": "쿠폰 상태 변경 실패 사유별",
       "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason) (increase(coupon_state_change_total{result=\"fail\"}[$interval]))",
-          "legendFormat": "{{reason}}"
+          "expr": "sum by (reason_label) (coupon_state_change_total{result=\"fail\", reason=~\"$reason_state\", reason_label=~\".+\"})",
+          "legendFormat": "{{reason_label}}"
         }
       ]
     },
@@ -197,14 +236,14 @@
       "title": "정합성 검증 현황 (체크/상태/대상)",
       "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (check, status, scope) (increase(consistency_verification_total{check=~\"$check\", status=~\"$status\", scope=~\"$scope\"}[$interval]))",
-          "legendFormat": "{{check}} - {{status}} ({{scope}})"
+          "expr": "sum by (check_label, status_label, scope_label) (consistency_verification_total{check=~\"$check\", status=~\"$status\", scope=~\"$scope\", check_label=~\".+\"})",
+          "legendFormat": "{{check_label}} - {{status_label}} ({{scope_label}})"
         }
       ]
     }

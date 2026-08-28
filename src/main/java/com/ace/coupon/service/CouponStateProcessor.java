@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -30,6 +31,24 @@ public class CouponStateProcessor {
 	private final CouponIssueRedisProperties properties;
 	private final MeterRegistry meterRegistry;
 
+	// Grafana 범례에 enum/ErrorCode 이름 대신 한글로 표시하기 위한 라벨. Ace_FE 쪽 상태/사유 토글과 문구를 맞춘다.
+	private static final Map<CouponIssueStatus, String> STATE_LABELS = Map.of(
+			CouponIssueStatus.ISSUED, "발급 완료",
+			CouponIssueStatus.USED, "사용 완료",
+			CouponIssueStatus.EXPIRED, "기간 만료",
+			CouponIssueStatus.CANCELED, "취소"
+	);
+
+	private static final Map<String, String> STATE_CHANGE_REASON_LABELS = Map.of(
+			"ISSUE_NOT_FOUND", "발급 내역 없음",
+			"INVALID_REQUEST", "잘못된 요청",
+			"EVENT_NOT_OPEN", "오픈 전",
+			"ALREADY_EXPIRED", "만료됨",
+			"ALREADY_USED", "이미 사용",
+			"NOT_YET_USED", "미사용",
+			"INVALID_STATE_TRANSITION", "상태 전이 불가"
+	);
+
 	@Transactional
 	public CouponStateChangeResponse processStateChange(
 			Long issueId, Long userId, UUID idempotencyKey,
@@ -39,14 +58,21 @@ public class CouponStateProcessor {
 					doProcessStateChange(issueId, userId, idempotencyKey, targetStatus, reason);
 			meterRegistry.counter("coupon.state.change",
 					"result", "success",
+					"result_label", "성공",
 					"from", response.previousStatus().name(),
-					"to", response.currentStatus().name()).increment();
+					"from_label", STATE_LABELS.get(response.previousStatus()),
+					"to", response.currentStatus().name(),
+					"to_label", STATE_LABELS.get(response.currentStatus())).increment();
 			return response;
 		} catch (CouponException exception) {
+			String reasonCode = exception.getErrorCode().name();
 			meterRegistry.counter("coupon.state.change",
 					"result", "fail",
+					"result_label", "실패",
 					"to", targetStatus.name(),
-					"reason", exception.getErrorCode().name()).increment();
+					"to_label", STATE_LABELS.get(targetStatus),
+					"reason", reasonCode,
+					"reason_label", STATE_CHANGE_REASON_LABELS.getOrDefault(reasonCode, reasonCode)).increment();
 			throw exception;
 		}
 	}

@@ -37,12 +37,16 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 
 | Micrometer 이름 | Prometheus 이름 | 태그 | 설명 |
 |---|---|---|---|
-| `coupon.issue` | `coupon_issue_total` | `result`(success/fail), `reason`(실패 시 `ErrorCode`) | 쿠폰 발급 요청의 성공/실패 |
-| `coupon.state.change` | `coupon_state_change_total` | `result`, `from`, `to`, `reason`(실패 시) | 쿠폰 상태 변경(`ISSUED`→`USED` 등) 성공/실패 |
-| `consistency.verification` | `consistency_verification_total` | `check`(체크 이름), `status`(`PASS`/`FAIL`/`ERROR`), `scope`(`EVENT`/`AS_OF_RANGE`/`ALL`) | 정합성 검증 결과 (수동/스케줄/재검증/배치 모든 트리거 공통) |
-| `coupon.issue.relay` | `coupon_issue_relay_total` | `result`, `reason`(실패 시) | **RELAY 모드 전환 대비.** Redis Stream 릴레이의 비동기 저장·확정 최종 결과. 현재 배포 모드는 `SYNC`라 데이터가 찍히지 않으며, `coupon.issue.persistence.mode=RELAY`로 전환한 뒤부터 값이 쌓입니다. |
+| `coupon.issue` | `coupon_issue_total` | `result`(success/fail) + `result_label`(한글), `reason`(실패 시 `ErrorCode`) + `reason_label`(한글) | 쿠폰 발급 요청의 성공/실패 |
+| `coupon.state.change` | `coupon_state_change_total` | `result` + `result_label`, `from`/`to`(`CouponIssueStatus`) + `from_label`/`to_label`, `reason`(실패 시) + `reason_label` | 쿠폰 상태 변경(`ISSUED`→`USED` 등) 성공/실패 |
+| `consistency.verification` | `consistency_verification_total` | `check`(체크 이름), `check_label`(체크 이름의 한글 표시명), `status`(`PASS`/`FAIL`/`ERROR`), `status_label`(상태의 한글 표시명), `scope`(`EVENT`/`AS_OF_RANGE`/`ALL`), `scope_label`(대상의 한글 표시명) | 정합성 검증 결과 (수동/스케줄/재검증/배치 모든 트리거 공통). `check`/`status`/`scope`는 필터링(변수)에, `_label` 태그는 Grafana 범례 표시에 씁니다 |
+| `coupon.issue.relay` | `coupon_issue_relay_total` | `result` + `result_label`, `reason`(실패 시) + `reason_label` | **RELAY 모드 전환 대비.** Redis Stream 릴레이의 비동기 저장·확정 최종 결과. 현재 배포 모드는 `SYNC`라 데이터가 찍히지 않으며, `coupon.issue.persistence.mode=RELAY`로 전환한 뒤부터 값이 쌓입니다. |
 
 > `coupon.issue`의 `success`는 SYNC 모드 기준 "요청 판정 + DB 저장까지" 성공을 의미합니다. RELAY 모드로 전환하면 `coupon.issue`의 `success`는 "요청 판정"만 반영하고, 실제 비동기 저장의 최종 성공/실패는 `coupon.issue.relay`로 따로 봐야 합니다.
+
+> `check_label`/`status_label`/`scope_label`은 `check`/`status`/`scope`의 클래스명·enum명을 그대로 범례에 쓰면 알아보기 어려워서, `VerificationResultPersister`가 계측 시점에 미리 정의된 한글 표시명 맵(`CHECK_LABELS`/`STATUS_LABELS`/`SCOPE_LABELS`)을 조회해 별도 태그로 함께 심어둔 것입니다. `ConsistencyCheck` 구현체를 새로 추가했는데 `CHECK_LABELS`에 매핑을 안 넣으면 `check_label`이 클래스명 그대로(영문) 나오니, 체크를 추가할 때 같이 등록해야 합니다.
+
+> 같은 이유로 `result_label`/`reason_label`/`from_label`/`to_label`도 `CouponIssueServiceImpl`, `IssueStreamRelay`, `CouponStateProcessor`가 계측 시점에 정의된 한글 표시명 맵(예: `ISSUE_REASON_LABELS`, `STATE_LABELS`, `STATE_CHANGE_REASON_LABELS`)을 조회해 원본 태그(`result`/`reason`/`from`/`to`)와 별도로 함께 심어둔 것입니다. 새로운 `ErrorCode`/`CouponIssueStatus` 값을 발급/상태변경 실패 경로에 추가하면 해당 맵에도 한글 라벨을 같이 등록해야, 범례가 영문 코드 그대로 노출되는 걸 막을 수 있습니다. 이 라벨들은 전부 Ace_FE의 필터 토글 문구(예: `ISSUE_REASON_OPTIONS`, `STATE_CHANGE_REASON_OPTIONS`)와 동일하게 맞춰뒀습니다.
 
 ## 5. Grafana 대시보드 확인
 데이터소스와 대시보드는 `docker/grafana/provisioning/`, `docker/grafana/dashboards/`를 통해 **자동으로 설정**되므로 수동으로 만들 필요가 없습니다.
@@ -55,28 +59,36 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 
 | 패널 | 내용 |
 |---|---|
-| 쿠폰 발급 현황 (접수/저장 · 성공/실패) | `coupon_issue_total`(Redis 접수 결과)과 `coupon_issue_relay_total`(RELAY 모드의 MySQL 저장 확정 결과)을 한 그래프에 "접수"/"저장(RELAY)" 두 개의 라인으로 같이 표시. 동기든 비동기든 둘 다 쿠폰 발급이라 한 패널로 묶었지만, 같은 발급 건에 대해 두 지표가 순서대로 각각 한 번씩 찍히므로(RELAY 모드 한정) **두 값을 더하면 이중집계**가 됩니다 — 그래서 sum하지 않고 별도 라인으로만 분리해서 보여줍니다. 상단 `result_issue`(접수)/`result_relay`(저장) 변수로 각각 골라볼 수 있음 |
-| 쿠폰 발급 실패 사유별 (접수/저장) | 위와 같은 이유로 `coupon_issue_total{result="fail"}`과 `coupon_issue_relay_total{result="fail"}`을 `reason`별로 분리해 한 패널에 같이 표시 |
-| 쿠폰 상태 변경 현황 (전이별) | `coupon_state_change_total` 성공 건을 `from`→`to`별로 분리 |
-| 쿠폰 상태 변경 실패 사유별 | 실패를 `reason`별로 분리 |
-| 정합성 검증 현황 (체크/상태/대상) | `consistency_verification_total`을 `check`, `status`, `scope`별로 분리. 상단 `check`/`status`/`scope` 변수로 원하는 조합만 골라볼 수 있음 |
+| 쿠폰 발급 현황 (발급 판정/비동기 저장 확정 · 성공/실패) | `coupon_issue_total`(발급 요청 판정 결과)과 `coupon_issue_relay_total`(RELAY 모드의 비동기 저장 확정 결과)을 한 그래프에 "발급 판정"/"비동기 저장 확정" 두 개의 라인으로 같이 표시. SYNC 모드에서는 `coupon.issue`의 `success`가 곧 저장까지 끝난 최종 결과라 "발급 판정"이라는 모드 중립적인 이름을 씁니다 (SYNC/RELAY 어느 모드든 legendFormat 자체는 안 바뀝니다). 동기든 비동기든 둘 다 쿠폰 발급이라 한 패널로 묶었지만, 같은 발급 건에 대해 두 지표가 순서대로 각각 한 번씩 찍히므로(RELAY 모드 한정) **두 값을 더하면 이중집계**가 됩니다 — 그래서 sum하지 않고 별도 라인으로만 분리해서 보여줍니다. 상단 `result_issue`(발급 판정)/`result_relay`(비동기 저장 확정) 변수로 각각 골라볼 수 있음 |
+| 쿠폰 발급 실패 사유별 (발급 판정/비동기 저장) | 위와 같은 이유로 `coupon_issue_total{result="fail"}`과 `coupon_issue_relay_total{result="fail"}`을 `reason_label`(한글)별로 분리해 한 패널에 같이 표시. 상단 `reason_issue`/`reason_relay` 변수로 원하는 사유만 골라볼 수 있음 |
+| 쿠폰 상태 변경 현황 (전이별) | `coupon_state_change_total` 성공 건을 `from_label`→`to_label`(한글)별로 분리 |
+| 쿠폰 상태 변경 실패 사유별 | 실패를 `reason_label`(한글)별로 분리. 상단 `reason_state` 변수로 원하는 사유만 골라볼 수 있음 |
+| 정합성 검증 현황 (체크/상태/대상) | `consistency_verification_total`을 `check_label`, `status_label`, `scope_label`별로 분리해 한글 범례로 표시. 필터링은 상단 `check`/`status`/`scope` 변수(영문 원본 값 기준)로 원하는 조합만 골라볼 수 있음 |
 
 **대시보드 상단 변수(토글/필터)**
 
 | 변수 | 의미 | 적용 패널 |
 |---|---|---|
 | `interval` | 집계 단위. `5s`부터 `1d`까지 드롭다운으로 선택(`1s`는 제외 — 3절 참고) — 초/분/시간 단위 그래프를 즉시 바꿔볼 수 있음 | 전체 |
-| `result_issue` | 발급 접수 결과(`success`/`fail`) 다중 선택 | 쿠폰 발급 현황 |
-| `result_relay` | RELAY 저장 결과(`success`/`fail`) 다중 선택 | 쿠폰 발급 현황 |
+| `result_issue` | 발급 판정 결과(`success`/`fail`) 다중 선택 | 쿠폰 발급 현황 |
+| `result_relay` | 비동기 저장 확정 결과(`success`/`fail`) 다중 선택 | 쿠폰 발급 현황 |
+| `reason_issue` | 발급 판정 실패 사유 다중 선택 | 쿠폰 발급 실패 사유별 |
+| `reason_relay` | 비동기 저장 실패 사유 다중 선택 | 쿠폰 발급 실패 사유별 |
+| `reason_state` | 상태 변경 실패 사유 다중 선택 | 쿠폰 상태 변경 실패 사유별 |
 | `check` | 정합성 검증 항목 다중 선택 | 정합성 검증 현황 |
 | `scope` | 정합성 검증 대상(`EVENT`/`AS_OF_RANGE`/`ALL`) 다중 선택 | 정합성 검증 현황 |
 | `status` | 정합성 검증 상태(`PASS`/`FAIL`/`ERROR`) 다중 선택 | 정합성 검증 현황 |
 
 패널마다 쓰는 변수를 분리해뒀기 때문에(`result_issue` vs `result_relay`) 한 패널의 필터를 바꿔도 다른 패널에는 영향이 없습니다. 반대로 `check`/`scope`/`status`는 정합성 검증 패널 하나만 참조하므로 이미 그 패널에만 국한됩니다. 여러 패널이 완전히 동일한 변수를 공유하게 만들면(예: 지금처럼 `result` 하나로 합쳐두면) 한쪽 필터가 다른 패널까지 같이 바뀌어버리니, 패널을 새로 추가할 때도 필터를 패널별로 독립시키고 싶다면 변수 이름을 패널마다 따로 만들어야 합니다.
 
-각 패널은 `rate()` 대신 `increase(...[$interval])`을 써서 Y축이 "초당 건수"가 아니라 **선택한 집계 단위(interval) 동안의 실제 발급/검증 건수**로 표시됩니다. 예를 들어 `interval`을 `1h`로 바꾸면 시간당 발급 건수 그래프가 됩니다. 각 쿼리에는 `interval: "$interval"`이 지정돼 있어서, 그래프가 실제로 데이터를 찍는 간격(step)도 `interval` 값을 그대로 따라갑니다 — 이 지정이 없으면 Grafana가 Time range/패널 크기로 자동 계산한 step(기본 시간 범위 15분 기준 약 15s)을 대신 쓰기 때문에, 드롭다운에서 어떤 값을 골라도 그래프가 안 바뀌는 것처럼 보입니다.
+각 패널은 `rate()`나 `increase()`로 감싸지 않고 카운터(`coupon_issue_total` 등)를 `sum by (...)`로 그대로 조회합니다. `increase()`는 구간 경계에서 값을 추정(extrapolation)하기 때문에 실제 누적 카운터 값과 완전히 똑같지 않을 수 있는데, "지금까지 총 몇 건인지"를 오차 없이 정확하게 보여줘야 해서 아예 빼고 카운터 원본값을 그대로 그립니다. 그 결과 그래프는 "구간별 증가량" 막대가 아니라, 서비스가 떠 있는 동안 계속 우상향(또는 평행)하는 **누적 총 건수** 선으로 보입니다 — 앱을 재시작해 카운터가 0으로 리셋되면 그 시점에서 선도 다시 0부터 시작합니다. 마지막 지점(가장 오른쪽 값)이 곧 "지금까지 총 몇 건"이라는 뜻입니다.
 
-`interval`을 지나치게 짧게 잡으면 그래프에 "No data"가 뜰 수 있습니다. `increase()`는 지정한 창 안에 원본 샘플이 최소 2개는 있어야 값을 계산하는데, `interval`이 Prometheus `scrape_interval`과 비슷하거나 더 짧으면 그 창 안에 샘플이 1개(또는 0개)만 들어가 계산 자체가 안 됩니다. `interval`은 최소 `scrape_interval`의 2~3배 이상으로 잡아야 안정적으로 값이 나옵니다 — 그래서 드롭다운 목록에서 `1s`는 아예 뺐습니다. 골라도 항상 "No data"만 뜨는 선택지를 목록에 남겨두는 건 혼란만 주기 때문입니다.
+`interval`(집계 단위) 드롭다운은 더 이상 합산 구간을 정하지 않습니다 — 각 쿼리에 `interval: "$interval"`이 지정돼 있어서, 그래프가 실제로 데이터를 찍는 간격(step)만 조절합니다. 값을 크게 잡으면 선이 더 성기게(점 간격이 넓게) 찍히고, 작게 잡으면 촘촘하게 찍힐 뿐 그래프에 나오는 숫자 자체는 바뀌지 않습니다. `1s`를 목록에서 뺀 이유(Prometheus `scrape_interval`보다 짧으면 무의미)는 그대로 유효합니다.
+
+각 패널 쿼리에는 `<라벨>_label=~".+"` 조건이 붙어 있습니다. `_label` 태그를 붙이기 전(과거 코드)에 이미 수집된 샘플은 이 태그가 아예 없는데, Prometheus는 없는 라벨을 빈 문자열로 취급하므로 이 조건 없이 `sum by (result_label)`을 하면 그 오래된 시계열까지 같이 합산돼 숫자가 부풀려집니다. `_label=~".+"`는 `_label` 값이 존재하는(빈 문자열이 아닌) 시계열만 걸러내 이런 과거 데이터 오염을 막습니다.
+
+> [!NOTE]
+> 패널 단위는 `short`(1.0k처럼 축약 표기) 대신 `none` + `decimals: 0`으로 지정해 뒀기 때문에, 큰 숫자도 축약이나 반올림 없이 정수 그대로 표시됩니다.
 
 `result_issue`/`result_relay`/`check`/`scope`/`status` 변수는 Prometheus에 `label_values(...)`로 값을 물어보는 방식이라, 해당 라벨 값을 가진 데이터가 한 번도 수집되지 않았다면(예: RELAY 모드를 아직 켜지 않아 `coupon_issue_relay_total`이 없는 경우) 드롭다운에 값이 안 뜰 수 있습니다. 관련 API를 한 번 호출한 뒤 대시보드를 새로고침하면 값이 채워집니다.
 
@@ -106,8 +118,8 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
   title="쿠폰 발급 현황"
   panelId={1}
   filterGroups={[
-    { name: 'result_issue', label: '접수 결과', options: [{ value: 'success', label: '성공' }, { value: 'fail', label: '실패' }] },
-    { name: 'result_relay', label: '저장 결과', options: [...] },
+    { name: 'result_issue', label: '발급 판정', options: [{ value: 'success', label: '성공' }, { value: 'fail', label: '실패' }] },
+    { name: 'result_relay', label: '비동기 저장 확정', options: [...] },
   ]}
 />
 ```
