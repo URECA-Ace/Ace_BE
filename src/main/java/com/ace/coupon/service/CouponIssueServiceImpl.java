@@ -58,12 +58,14 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 		try {
 			CouponIssueAcceptedResponse response = doIssue(eventId, userId, idempotencyKey);
 			meterRegistry.counter("coupon.issue",
+					"event_id", eventId.toString(),
 					"result", "success",
 					"result_label", "성공").increment();
 			return response;
 		} catch (CouponException exception) {
 			String reason = exception.getErrorCode().name();
 			meterRegistry.counter("coupon.issue",
+					"event_id", eventId.toString(),
 					"result", "fail",
 					"result_label", "실패",
 					"reason", reason,

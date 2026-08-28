@@ -14,7 +14,7 @@
     "refresh_intervals": ["1s", "5s", "10s", "30s", "1m", "5m", "15m"]
   },
   "schemaVersion": 39,
-  "version": 11,
+  "version": 13,
   "templating": {
     "list": [
       {
@@ -40,6 +40,19 @@
         "refresh": 2,
         "auto": false,
         "hide": 0
+      },
+      {
+        "name": "event_id",
+        "type": "query",
+        "label": "발급 회차",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(coupon_issue_total, event_id)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "sort": 3,
+        "hide": 2
       },
       {
         "name": "result_issue",
@@ -160,14 +173,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_total{result=~\"$result_issue\", result_label=~\".+\"})",
+          "expr": "sum by (result_label) (coupon_issue_total{event_id=\"$event_id\", result=~\"$result_issue\", result_label=~\".+\"})",
           "legendFormat": "발급 판정 - {{result_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_relay_total{result=~\"$result_relay\", result_label=~\".+\"})",
+          "expr": "sum by (result_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=~\"$result_relay\", result_label=~\".+\"})",
           "legendFormat": "비동기 저장 확정 - {{result_label}}"
         }
       ]
@@ -184,14 +197,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_total{result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"})",
+          "expr": "sum by (reason_label) (coupon_issue_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"})",
           "legendFormat": "발급 판정 실패 - {{reason_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_relay_total{result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"})",
+          "expr": "sum by (reason_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"})",
           "legendFormat": "비동기 저장 실패 - {{reason_label}}"
         }
       ]
@@ -208,7 +221,7 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (from_label, to_label) (coupon_state_change_total{result=\"success\", from_label=~\".+\", to_label=~\".+\"})",
+          "expr": "sum by (from_label, to_label) (increase(coupon_state_change_total{result=\"success\", from_label=~\".+\", to_label=~\".+\"}[$interval]))",
           "legendFormat": "{{from_label}} -> {{to_label}}"
         }
       ]
@@ -225,7 +238,7 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_state_change_total{result=\"fail\", reason=~\"$reason_state\", reason_label=~\".+\"})",
+          "expr": "sum by (reason_label) (increase(coupon_state_change_total{result=\"fail\", reason=~\"$reason_state\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "{{reason_label}}"
         }
       ]
@@ -242,7 +255,7 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (check_label, status_label, scope_label) (consistency_verification_total{check=~\"$check\", status=~\"$status\", scope=~\"$scope\", check_label=~\".+\"})",
+          "expr": "sum by (check_label, status_label, scope_label) (increase(consistency_verification_total{check=~\"$check\", status=~\"$status\", scope=~\"$scope\", check_label=~\".+\"}[$interval]))",
           "legendFormat": "{{check_label}} - {{status_label}} ({{scope_label}})"
         }
       ]

@@ -249,6 +249,7 @@ public class IssueStreamRelay implements SmartLifecycle {
 			acknowledge(key, record.getId());
 			// RELAY 모드 전환 대비: 비동기 저장 + 확정까지 끝난 최종 성공만 센다
 			meterRegistry.counter("coupon.issue.relay",
+					"event_id", Long.toString(issueRecord.campaignId()),
 					"result", "success",
 					"result_label", "성공").increment();
 		} catch (RuntimeException exception) {
@@ -291,6 +292,7 @@ public class IssueStreamRelay implements SmartLifecycle {
 				coordinator.recordConfirmAbandoned(issueRecord, incidentId, exception);
 				// RELAY 모드 전환 대비: 저장은 됐지만 확정 처리가 최종 실패한 케이스
 				meterRegistry.counter("coupon.issue.relay",
+						"event_id", Long.toString(issueRecord.campaignId()),
 						"result", "fail",
 						"result_label", "실패",
 						"reason", "CONFIRM_ABANDONED",
@@ -314,6 +316,7 @@ public class IssueStreamRelay implements SmartLifecycle {
 		}
 		// RELAY 모드 전환 대비: 재시도 한도 초과로 원복까지 끝난 최종 발급 실패
 		meterRegistry.counter("coupon.issue.relay",
+				"event_id", Long.toString(issueRecord.campaignId()),
 				"result", "fail",
 				"result_label", "실패",
 				"reason", "PERSIST_ABANDONED",
