@@ -11,9 +11,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.ace.coupon.entity.IssueFailureLog;
-import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceProbe;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+import com.ace.coupon.persistence.failure.IssueFailureStageGroup;
 import com.ace.coupon.redis.CouponIssueCompensationResult;
 import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
@@ -39,29 +39,13 @@ public class CompensationFailureRetryService {
 	// 경보에 실을 회차 수
 	private static final int BLOCKED_EVENT_SAMPLE_SIZE = 20;
 
-	// 이 재처리기가 맡는 단계
+	// 이 재처리기가 맡는 단계와 판정 값
 	// COMPENSATE 는 보상 호출 자체가 실패한 기록, DB_INSERT / RELAY 는 그 짝으로 남는 저장 실패 기록이다
-	private static final Set<IssueFailureStage> STAGES = Set.of(
-			IssueFailureStage.COMPENSATE,
-			IssueFailureStage.DB_INSERT,
-			IssueFailureStage.RELAY);
-
-	// 재고가 묶였거나 확정이 안 됐을 수 있어 다시 시도해 볼 값
-	// SKIPPED_PERSISTED 는 저장은 됐는데 확정을 못 한 건이라 확정 재시도 대상이다
-	private static final Set<String> RETRYABLE_RESULTS = Set.of(
-			IssuePersistenceCoordinator.CALL_FAILED,
-			IssuePersistenceCoordinator.COMPENSATION_SKIPPED_UNVERIFIED,
-			IssuePersistenceCoordinator.COMPENSATION_SKIPPED_PERSISTED,
-			CouponIssueCompensationResult.INTERNAL_WRITE_ERROR.name());
-
-	// 재고가 이미 돌아왔거나 확정이 끝나 회차를 막지 않는 값
-	// IssuePersistenceCoordinator 는 보상에 성공해도 resolvedAt 을 찍지 않고 기록만 남긴다
-	// 이 값을 경보에서 빼지 않으면 복구된 건이 영구히 막힌 회차로 보고된다
-	private static final Set<String> SETTLED_RESULTS = Set.of(
-			CouponIssueCompensationResult.COMPENSATED.name(),
-			CouponIssueCompensationResult.ALREADY_COMPENSATED.name(),
-			CouponIssueConfirmResult.CONFIRMED_NOW.name(),
-			CouponIssueConfirmResult.ALREADY_CONFIRMED.name());
+	// 관제 API 와 같은 기준을 써야 하므로 IssueFailureStageGroup 에서 가져온다
+	private static final IssueFailureStageGroup GROUP = IssueFailureStageGroup.PERSIST;
+	private static final Set<IssueFailureStage> STAGES = GROUP.getStages();
+	private static final Set<String> RETRYABLE_RESULTS = GROUP.getRetryableResults();
+	private static final Set<String> SETTLED_RESULTS = GROUP.getSettledResults();
 
 	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
 	private final AtomicReference<String> lastReport = new AtomicReference<>();

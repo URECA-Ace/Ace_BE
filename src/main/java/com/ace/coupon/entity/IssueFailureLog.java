@@ -88,6 +88,18 @@ public class IssueFailureLog {
 	@Column(name = "resolved_at", columnDefinition = "datetime(6)")
 	private LocalDateTime resolvedAt;
 
+	// 아래 3개는 사람이 직접 닫은 건에만 채워진다
+	@Column(name = "resolved_by", length = 60)
+	private String resolvedBy;
+
+	@Column(name = "resolve_reason", length = 300)
+	private String resolveReason;
+
+	// 종결 시점에 다시 확인한 저장 상태
+	// 사람 판단으로 닫되 닫던 순간의 사실은 남긴다
+	@Column(name = "resolve_probe_result", length = 20)
+	private String resolveProbeResult;
+
 	public boolean isResolved() {
 		return resolvedAt != null;
 	}
@@ -120,5 +132,18 @@ public class IssueFailureLog {
 			return;
 		}
 		this.resolvedAt = resolvedAt;
+	}
+
+	// 자동으로 회수할 수 없는 건을 사람이 닫는다
+	// 사유와 조작자, 종결 시점의 저장 상태를 함께 남긴다
+	public void resolveManually(
+			LocalDateTime resolvedAt, String resolvedBy, String reason, String probeResult) {
+		if (reason == null || reason.isBlank()) {
+			throw new IllegalArgumentException("종결 사유가 필요합니다.");
+		}
+		resolve(resolvedAt);
+		this.resolvedBy = resolvedBy;
+		this.resolveReason = reason;
+		this.resolveProbeResult = probeResult;
 	}
 }

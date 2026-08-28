@@ -11,8 +11,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.ace.coupon.entity.IssueFailureLog;
-import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+import com.ace.coupon.persistence.failure.IssueFailureStageGroup;
 import com.ace.coupon.redis.CouponIssueConfirmResult;
 import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
@@ -34,21 +34,13 @@ public class ConfirmFailureRetryService {
 	// 경보에 실을 회차 수
 	private static final int BLOCKED_EVENT_SAMPLE_SIZE = 20;
 
-	// 이 재처리기가 맡는 단계
+	// 이 재처리기가 맡는 단계와 판정 값
 	// 보상 실패(COMPENSATE 및 그 짝인 DB_INSERT / RELAY)는 CompensationFailureRetryService 가 맡는다
-	private static final Set<IssueFailureStage> STAGES = Set.of(IssueFailureStage.CONFIRM);
-
-	// 확정이 끝나 회차를 막지 않는 값
-	// 지금은 확정 성공 시 기록을 남기지 않아 실제로 저장되지 않지만
-	// 기록 규칙이 바뀌어도 해소된 건이 경보에 섞이지 않도록 방어
-	private static final Set<String> SETTLED_RESULTS = Set.of(
-			CouponIssueConfirmResult.CONFIRMED_NOW.name(),
-			CouponIssueConfirmResult.ALREADY_CONFIRMED.name());
-
-	// 재확인해 볼 값
-	private static final Set<String> RETRYABLE_RESULTS = Set.of(
-			IssuePersistenceCoordinator.CALL_FAILED,
-			CouponIssueConfirmResult.INTERNAL_WRITE_ERROR.name());
+	// 관제 API 와 같은 기준을 써야 하므로 IssueFailureStageGroup 에서 가져온다
+	private static final IssueFailureStageGroup GROUP = IssueFailureStageGroup.CONFIRM;
+	private static final Set<IssueFailureStage> STAGES = GROUP.getStages();
+	private static final Set<String> SETTLED_RESULTS = GROUP.getSettledResults();
+	private static final Set<String> RETRYABLE_RESULTS = GROUP.getRetryableResults();
 
 	// 같은 경보를 주기마다 반복하지 않기 위한 직전 보고 내용
 	private final AtomicReference<String> lastReport = new AtomicReference<>();
