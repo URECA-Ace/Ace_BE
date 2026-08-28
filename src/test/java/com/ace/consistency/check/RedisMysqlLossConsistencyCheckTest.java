@@ -4,6 +4,7 @@ import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,10 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
+		assertThat(outcome.getViolations()).singleElement().satisfies(violation -> {
+			assertThat(violation.getTargetType()).isEqualTo(ViolationTargetType.EVENT);
+			assertThat(violation.getTargetId()).isEqualTo(eventId);
+		});
 	}
 
 	@Test

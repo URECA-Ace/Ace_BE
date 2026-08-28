@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 
 // 재고 정합성 검사의 Drain 조건을 확인
 class StockConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
@@ -59,7 +60,12 @@ class StockConsistencyCheckTest extends ConsistencyCheckIntegrationTestBase {
 		insertEvent(eventId, "CLOSED", 1_000, 400, 600);
 		insertIssues(eventId, 401);
 
-		assertThat(check.check(allScope(eventId)).isPass()).isFalse();
+		CheckOutcome allOutcome = check.check(allScope(eventId));
+		assertThat(allOutcome.isPass()).isFalse();
+		assertThat(allOutcome.getViolations()).singleElement().satisfies(violation -> {
+			assertThat(violation.getTargetType()).isEqualTo(ViolationTargetType.EVENT);
+			assertThat(violation.getTargetId()).isEqualTo(eventId);
+		});
 		assertThat(check.check(Scope.ofEvent(eventId)).isPass()).isFalse();
 	}
 
