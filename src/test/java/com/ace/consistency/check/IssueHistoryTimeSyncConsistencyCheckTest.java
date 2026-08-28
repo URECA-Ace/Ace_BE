@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,8 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
 			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
+			assertThat(outcome.getViolations()).singleElement()
+					.satisfies(violation -> assertThat(violation.getTargetType()).isEqualTo(ViolationTargetType.ISSUE));
 		}
 	}
 

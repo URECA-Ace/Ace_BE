@@ -4,6 +4,7 @@ import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.coupon.redis.CouponRedisKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.RedisSystemException;
@@ -115,6 +116,6 @@ public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 		detail.put("reason", "비동기 파이프라인 이벤트 유실 의심: Redis에서 승인된 쿠폰 수량과 DB에 적재된 수량이 일치하지 않습니다.");
 
 		// 위반 건수는 1건(이벤트 단위 불일치 1건)으로 처리
-		return CheckOutcome.fail(1, detail);
+		return CheckOutcome.fail(1, detail, List.of(new Violation(ViolationTargetType.EVENT, eventId, detail)));
 	}
 }

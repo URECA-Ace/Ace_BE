@@ -74,7 +74,7 @@ class ConsistencyRecoveryDispatcherTest {
 	private VerificationResultEntity failResult() {
 		return VerificationResultEntity.from(VerificationResult.fail(
 				CHECK_NAME, TriggerType.ON_DEMAND, Scope.ofEvent(1L),
-				1, Map.of("eventId", 1L), LocalDateTime.now(), 10L));
+				1, Map.of("eventId", 1L), List.of(), LocalDateTime.now(), 10L));
 	}
 
 	@Test
