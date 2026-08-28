@@ -136,7 +136,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope)
-				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS)
+				.addValue("maxBatchLagSeconds", this.maxBatchLagSeconds)
 				.addValue("manualExpiredReason", MANUAL_EXPIRED_REASON);
 
 		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
