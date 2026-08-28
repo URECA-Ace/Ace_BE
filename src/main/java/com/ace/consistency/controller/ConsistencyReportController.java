@@ -12,6 +12,7 @@ import com.ace.common.ApiResponse;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.dto.response.ConsistencyResultPageResponse;
 import com.ace.consistency.dto.response.ConsistencyResultResponse;
+import com.ace.consistency.dto.response.ConsistencyViolationPageResponse;
 import com.ace.consistency.service.ConsistencyReportService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -36,6 +37,14 @@ public class ConsistencyReportController {
 	@GetMapping("/results/{resultId}")
 	public ResponseEntity<ApiResponse<ConsistencyResultResponse>> findResult(@PathVariable long resultId) {
 		return ResponseEntity.ok(ApiResponse.success(service.findResult(resultId)));
+	}
+
+	@GetMapping("/results/{resultId}/violations")
+	public ResponseEntity<ApiResponse<ConsistencyViolationPageResponse>> findViolations(
+			@PathVariable long resultId,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+		return ResponseEntity.ok(ApiResponse.success(service.findViolations(resultId, page, size)));
 	}
 
 }

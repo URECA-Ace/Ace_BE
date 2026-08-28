@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.ace.common.ApiResponse;
@@ -15,6 +16,7 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.dto.request.ConsistencyVerificationRequest;
 import com.ace.consistency.dto.response.ConsistencyCheckCatalogResponse;
 import com.ace.consistency.dto.response.ConsistencyVerificationResponse;
+import com.ace.consistency.dto.response.ConsistencyJobExecutionResponse;
 import com.ace.consistency.service.ConsistencyVerificationService;
 
 import jakarta.validation.Valid;
@@ -43,5 +45,11 @@ public class ConsistencyExecutionController {
 				? HttpStatus.ACCEPTED
 				: HttpStatus.OK;
 		return ResponseEntity.status(status).body(ApiResponse.success(response));
+	}
+
+	@GetMapping("/verifications/{jobExecutionId}")
+	public ResponseEntity<ApiResponse<ConsistencyJobExecutionResponse>> findExecution(
+			@PathVariable long jobExecutionId) {
+		return ResponseEntity.ok(ApiResponse.success(service.findExecution(jobExecutionId)));
 	}
 }

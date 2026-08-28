@@ -8,7 +8,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
@@ -20,6 +22,7 @@ import com.ace.consistency.dto.request.ConsistencyVerificationRequest;
 import com.ace.consistency.dto.request.ConsistencyVerificationRequest.ScopeRequest;
 import com.ace.consistency.dto.response.ConsistencyCheckCatalogResponse;
 import com.ace.consistency.dto.response.ConsistencyVerificationResponse;
+import com.ace.consistency.dto.response.ConsistencyJobExecutionResponse;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,6 +33,7 @@ public class ConsistencyVerificationService {
 	private final ConsistencyVerificationRunner runner;
 	private final List<ConsistencyCheck> checks;
 	private final Clock clock;
+	private final JobRepository jobRepository;
 
 	public ConsistencyCheckCatalogResponse findSupportedChecks(Scope.ScopeType scopeType) {
 		List<ConsistencyCheck> supportedChecks = checks.stream()
@@ -50,6 +54,15 @@ public class ConsistencyVerificationService {
 
 		return ConsistencyVerificationResponse.sync(
 				runner.run(selectedChecks, scope, TriggerType.ON_DEMAND));
+	}
+
+	public ConsistencyJobExecutionResponse findExecution(long jobExecutionId) {
+		JobExecution execution = jobRepository.getJobExecution(jobExecutionId);
+		if (execution == null) {
+			throw new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,
+					"정합성 검증 실행 이력을 찾을 수 없습니다.");
+		}
+		return ConsistencyJobExecutionResponse.from(execution);
 	}
 
 	private List<ConsistencyCheck> resolveChecks(List<String> requestedNames) {

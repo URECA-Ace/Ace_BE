@@ -17,6 +17,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.repository.JobRepository;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
@@ -35,6 +36,7 @@ class ConsistencyVerificationServiceTest {
 			Instant.parse("2026-08-27T09:00:00Z"),
 			ZoneId.of("Asia/Seoul"));
 	private final ConsistencyVerificationRunner runner = mock(ConsistencyVerificationRunner.class);
+	private final JobRepository jobRepository = mock(JobRepository.class);
 	private final ConsistencyCheck eventAndAll = new FakeCheck(
 			"EventAndAllCheck", "이벤트·전체 검사", Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL));
 	private final ConsistencyCheck rangeCheck = new FakeCheck(
@@ -44,7 +46,7 @@ class ConsistencyVerificationServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new ConsistencyVerificationService(runner, List.of(eventAndAll, rangeCheck), clock);
+		service = new ConsistencyVerificationService(runner, List.of(eventAndAll, rangeCheck), clock, jobRepository);
 	}
 
 	@Test

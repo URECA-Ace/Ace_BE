@@ -2,6 +2,7 @@ package com.ace.consistency.repository;
 
 import com.ace.consistency.entity.VerificationViolationEntity;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -22,7 +23,7 @@ public interface VerificationViolationRepository extends JpaRepository<Verificat
 	List<VerificationViolationEntity> findByVerificationResultId(Long verificationResultId);
 
 	/** 화면 표시용으로 최근 N건만 필요할 때 사용한다. */
-	List<VerificationViolationEntity> findByVerificationResultIdOrderByIdDesc(Long verificationResultId, Pageable pageable);
+	Page<VerificationViolationEntity> findByVerificationResultIdOrderByIdDesc(Long verificationResultId, Pageable pageable);
 
 	/** ALL 스코프 배치 Step 성공 시, 재시작 전후에 누적된 행 전체를 실제 결과에 연결한다. */
 	@Modifying
