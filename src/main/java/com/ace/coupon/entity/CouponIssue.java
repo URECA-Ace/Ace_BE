@@ -118,6 +118,11 @@ public class CouponIssue {
 		this.canceledAt = canceledAt;
 	}
 
+	public void expire(LocalDateTime expiredAt) {
+		validateTransition(CouponIssueStatus.EXPIRED);
+		this.status = CouponIssueStatus.EXPIRED;
+	}
+
 	/**
 	 * 재고 초과발급 복구 전용 전이. 일반 사용자 API가 쓰는 {@link CouponIssueStatus#allowedTransitions()}
 	 * 상태머신과는 무관하게, ISSUED 상태의 건만 CANCELED로 되돌린다(슬롯 반납).
