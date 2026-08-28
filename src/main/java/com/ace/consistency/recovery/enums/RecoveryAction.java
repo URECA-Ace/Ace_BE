@@ -31,9 +31,11 @@ public enum RecoveryAction {
 	 */
 	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수"),
 
+	/** CouponIssueHistoryStateConsistencyCheck 전용: 누락된 최초 ISSUED 이력을 복원한다. */
 	RESTORE_INITIAL_ISSUE_HISTORY("최초 발급 이력 복원"),
 
-	EXPIRE_DELAYED_ISSUE("만료 지연 쿠폰 만료 처리");
+	/** CouponExpirationLagConsistencyCheck 전용: 지연된 만료 처리를 수행한다. */
+	EXPIRE_DELAYED_ISSUE("지연 만료 처리");
 
 	private final String label;
 

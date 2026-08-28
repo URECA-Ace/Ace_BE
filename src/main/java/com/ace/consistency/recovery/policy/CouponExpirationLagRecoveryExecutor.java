@@ -19,6 +19,7 @@ import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.RowLevelRecoveryRepository;
 import com.ace.consistency.recovery.RowLevelRecoveryRepository.IssueSnapshot;
 
+/** EXPIRATION_BATCH_DELAY 위반에 대해 ISSUED 쿠폰을 안전하게 EXPIRED로 전환하는 실행기. */
 @Component
 public class CouponExpirationLagRecoveryExecutor {
 
@@ -29,11 +30,12 @@ public class CouponExpirationLagRecoveryExecutor {
 	private final long allowedDelayMillis;
 
 	public CouponExpirationLagRecoveryExecutor(RowLevelRecoveryRepository repository,
-			@Value("${consistency.expiration.allowed-delay-ms}") long allowedDelayMillis) {
+			@Value("${consistency.expiration.allowed-delay-ms:120000}") long allowedDelayMillis) {
 		this.repository = repository;
 		this.allowedDelayMillis = allowedDelayMillis;
 	}
 
+	/** 각 issue를 별도 물리 트랜잭션으로 처리하여 부분 성공을 명확히 보장한다. */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public RecoveryOutcome recoverIssue(VerificationResultEntity target, long issueId) {
 		try {
@@ -126,7 +128,11 @@ public class CouponExpirationLagRecoveryExecutor {
 	}
 
 	private Scope fallbackScope(VerificationResultEntity target) {
-		return target.getEventId() == null ? Scope.all(LocalDateTime.now()) : Scope.ofEvent(target.getEventId());
+		return switch (target.getScopeType()) {
+			case EVENT -> Scope.ofEvent(target.getEventId());
+			case AS_OF_RANGE -> Scope.ofAsOfRange(target.getScopeFrom(), target.getScopeTo());
+			case ALL -> Scope.all(LocalDateTime.now());
+		};
 	}
 
 	private boolean isUuid(String value) {

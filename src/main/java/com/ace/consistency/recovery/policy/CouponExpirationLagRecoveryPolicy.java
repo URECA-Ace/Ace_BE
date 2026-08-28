@@ -3,19 +3,22 @@ package com.ace.consistency.recovery.policy;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 import lombok.RequiredArgsConstructor;
 
+/** CouponExpirationLagConsistencyCheck의 EXPIRATION_BATCH_DELAY 복구 정책. */
 @Component
 @RequiredArgsConstructor
 public class CouponExpirationLagRecoveryPolicy implements ConsistencyRecoveryPolicy {
@@ -24,6 +27,7 @@ public class CouponExpirationLagRecoveryPolicy implements ConsistencyRecoveryPol
 	private static final String TARGET_VIOLATION = "EXPIRATION_BATCH_DELAY";
 
 	private final CouponExpirationLagRecoveryExecutor executor;
+	private final VerificationViolationRepository violationRepository;
 
 	@Override
 	public String checkName() {
@@ -51,20 +55,15 @@ public class CouponExpirationLagRecoveryPolicy implements ConsistencyRecoveryPol
 	}
 
 	private Set<Long> extractIssueIds(VerificationResultEntity target) {
-		Object rawSample = target.getDiffDetail().get("sample");
-		if (!(rawSample instanceof List<?> sample)) {
-			throw new ConsistencyCheckException(ErrorCode.RECOVERY_NOT_APPLICABLE,
-					"검증 결과에서 복구 대상 issue를 찾을 수 없습니다.");
-		}
 		Set<Long> issueIds = new LinkedHashSet<>();
-		for (Object rawRow : sample) {
-			if (!(rawRow instanceof Map<?, ?> row) || !TARGET_VIOLATION.equals(row.get("violation_type"))) {
+		for (VerificationViolationEntity violation : violationRepository.findByVerificationResultId(target.getId())) {
+			if (violation.getTargetType() != ViolationTargetType.ISSUE
+					|| violation.getTargetId() == null
+					|| violation.getDetail() == null
+					|| !TARGET_VIOLATION.equals(violation.getDetail().get("violation_type"))) {
 				continue;
 			}
-			Object rawIssueId = row.get("issue_id");
-			if (rawIssueId instanceof Number issueId) {
-				issueIds.add(issueId.longValue());
-			}
+			issueIds.add(violation.getTargetId());
 		}
 		if (issueIds.isEmpty()) {
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_NOT_APPLICABLE,
@@ -72,5 +71,4 @@ public class CouponExpirationLagRecoveryPolicy implements ConsistencyRecoveryPol
 		}
 		return issueIds;
 	}
-
 }

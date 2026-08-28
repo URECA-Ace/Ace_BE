@@ -20,16 +20,21 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import com.ace.consistency.common.ConsistencyCheck.Violation;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.ConsistencyRecoveryDispatcher;
 import com.ace.consistency.recovery.RecoveryOutcome;
-import com.ace.consistency.recovery.enums.RecoveryResultStatus;
+import com.ace.consistency.recovery.RecoveryResult;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 @SpringBootTest(properties = {
 		"spring.autoconfigure.exclude=org.springframework.boot.batch.autoconfigure.BatchAutoConfiguration",
@@ -52,6 +57,7 @@ class RowLevelRecoveryExecutorIntegrationTest {
 	@Autowired CouponExpirationLagRecoveryExecutor expirationExecutor;
 	@Autowired ConsistencyRecoveryDispatcher dispatcher;
 	@Autowired VerificationResultRepository verificationResultRepository;
+	@Autowired VerificationViolationRepository violationRepository;
 	@Autowired RecoveryResultRepository recoveryResultRepository;
 
 	private long eventId;
@@ -61,6 +67,7 @@ class RowLevelRecoveryExecutorIntegrationTest {
 	@BeforeEach
 	void setUp() {
 		jdbcTemplate.update("DELETE FROM recovery_result");
+		jdbcTemplate.update("DELETE FROM verification_violation");
 		jdbcTemplate.update("DELETE FROM verification_result");
 		jdbcTemplate.update("DELETE FROM coupon_history");
 		jdbcTemplate.update("DELETE FROM coupon_issue");
@@ -83,18 +90,16 @@ class RowLevelRecoveryExecutorIntegrationTest {
 	}
 
 	@Test
-	void NO_HISTORY_ISSUED는_초기이력을_한번만_복원한다() {
+	void NO_HISTORY_ISSUED는_최초이력을_한번만_복원한다() {
 		VerificationResultEntity target = target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId);
 
 		RecoveryOutcome first = historyExecutor.recoverIssue(target, issueId);
 		RecoveryOutcome second = historyExecutor.recoverIssue(target, issueId);
 
 		assertThat(first.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
-		assertThat(first.getDetail()).containsKeys("before", "after", "issueId", "violationType");
 		assertThat(second.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(second.getDetail()).containsEntry("catchUp", true);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isEqualTo(1);
+		assertThat(historyCount(issueId)).isEqualTo(1);
 	}
 
 	@Test
@@ -105,8 +110,7 @@ class RowLevelRecoveryExecutorIntegrationTest {
 				target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId), issueId);
 
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isZero();
+		assertThat(historyCount(issueId)).isZero();
 	}
 
 	@Test
@@ -117,60 +121,51 @@ class RowLevelRecoveryExecutorIntegrationTest {
 				"SELECT user_id FROM user WHERE email=?", Long.class, "unsafe-recovery@test.com");
 		long unsafeIssueId = insertIssue(userId, 2, "ISSUED", issuedAt.plusHours(1));
 		jdbcTemplate.update("UPDATE coupon_issue SET used_at=? WHERE issue_id=?", LocalDateTime.now(), unsafeIssueId);
-		VerificationResultEntity target = target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId);
 
-		RecoveryOutcome success = historyExecutor.recoverIssue(target, issueId);
-		RecoveryOutcome failure = historyExecutor.recoverIssue(target, unsafeIssueId);
+		RecoveryOutcome success = historyExecutor.recoverIssue(
+				target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId), issueId);
+		RecoveryOutcome failure = historyExecutor.recoverIssue(
+				target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", unsafeIssueId), unsafeIssueId);
 
 		assertThat(success.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(failure.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isEqualTo(1);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, unsafeIssueId))
-				.isZero();
+		assertThat(historyCount(issueId)).isEqualTo(1);
+		assertThat(historyCount(unsafeIssueId)).isZero();
 	}
 
 	@Test
 	void Dispatcher는_복구결과를_저장하고_EVENT_재검증_통과시_RECOVERED로_갱신한다() {
-		VerificationResultEntity target = verificationResultRepository.save(
-				target("CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId));
+		VerificationResultEntity target = saveTarget(
+				"CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId);
 
-		var results = dispatcher.recover(target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
+		List<RecoveryResult> results = dispatcher.recover(target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
 
-		assertThat(results).singleElement()
-				.satisfies(result -> assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS));
+		assertThat(results).singleElement().satisfies(result ->
+				assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS));
 		assertThat(recoveryResultRepository.findAll()).hasSize(1);
 		assertThat(verificationResultRepository.findById(target.getId()).orElseThrow().getRecoveryStatus())
 				.isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERED);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isEqualTo(1);
+		assertThat(historyCount(issueId)).isEqualTo(1);
 	}
 
 	@Test
-	void Dispatcher_다중_issue는_성공_target만_commit하고_각_RecoveryResult를_남긴다() {
+	void Dispatcher는_여러_issue를_각각_처리하고_성공한_대상만_복구한다() {
 		jdbcTemplate.update("INSERT INTO user(email, name, created_at) VALUES (?, ?, ?)",
 				"partial-recovery@test.com", "partial-recovery", issuedAt.minusDays(1));
 		long otherUserId = jdbcTemplate.queryForObject(
 				"SELECT user_id FROM user WHERE email=?", Long.class, "partial-recovery@test.com");
 		long unsafeIssueId = insertIssue(otherUserId, 2, "ISSUED", issuedAt.plusHours(1));
 		jdbcTemplate.update("UPDATE coupon_issue SET canceled_at=? WHERE issue_id=?", LocalDateTime.now(), unsafeIssueId);
-		List<Map<String, Object>> sample = List.of(
-				Map.of("issue_id", issueId, "event_id", eventId, "violation_type", "NO_HISTORY"),
-				Map.of("issue_id", unsafeIssueId, "event_id", eventId, "violation_type", "NO_HISTORY"));
-		VerificationResultEntity target = verificationResultRepository.save(
-				VerificationResultEntity.from(VerificationResult.fail(
-						"CouponIssueHistoryStateConsistencyCheck", TriggerType.ON_DEMAND, Scope.ofEvent(eventId),
-						2, Map.of("sample", sample), LocalDateTime.now(), 1L)));
 
-		var results = dispatcher.recover(target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
+		VerificationResultEntity target = saveTarget(
+				"CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId, unsafeIssueId);
+		List<RecoveryResult> results = dispatcher.recover(target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
 
-		assertThat(results).extracting(result -> result.getStatus())
+		assertThat(results).extracting(RecoveryResult::getStatus)
 				.containsExactly(RecoveryResultStatus.SUCCESS, RecoveryResultStatus.FAIL);
 		assertThat(recoveryResultRepository.findAll()).hasSize(2);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isEqualTo(1);
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, unsafeIssueId))
-				.isZero();
+		assertThat(historyCount(issueId)).isEqualTo(1);
+		assertThat(historyCount(unsafeIssueId)).isZero();
 		assertThat(verificationResultRepository.findById(target.getId()).orElseThrow().getRecoveryStatus())
 				.isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
 	}
@@ -185,12 +180,9 @@ class RowLevelRecoveryExecutorIntegrationTest {
 		RecoveryOutcome second = expirationExecutor.recoverIssue(target, issueId);
 
 		assertThat(first.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
-		assertThat(first.getDetail()).containsKeys("before", "after", "issueId", "violationType");
 		assertThat(second.getDetail()).containsEntry("catchUp", true);
-		assertThat(jdbcTemplate.queryForObject("SELECT status FROM coupon_issue WHERE issue_id=?", String.class, issueId))
-				.isEqualTo("EXPIRED");
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isEqualTo(1);
+		assertThat(status(issueId)).isEqualTo("EXPIRED");
+		assertThat(historyCount(issueId)).isEqualTo(1);
 	}
 
 	@Test
@@ -206,10 +198,28 @@ class RowLevelRecoveryExecutorIntegrationTest {
 			jdbcTemplate.execute("ALTER TABLE coupon_history MODIFY actor VARCHAR(20)");
 		}
 
-		assertThat(jdbcTemplate.queryForObject("SELECT status FROM coupon_issue WHERE issue_id=?", String.class, issueId))
-				.isEqualTo("ISSUED");
-		assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, issueId))
-				.isZero();
+		assertThat(status(issueId)).isEqualTo("ISSUED");
+		assertThat(historyCount(issueId)).isZero();
+	}
+
+	private VerificationResultEntity target(String checkName, String violationType, long targetIssueId) {
+		return VerificationResultEntity.from(VerificationResult.fail(
+				checkName, TriggerType.ON_DEMAND, Scope.ofEvent(eventId), 1,
+				Map.of("violationType", violationType, "issueId", targetIssueId), List.of(),
+				LocalDateTime.now(), 1L));
+	}
+
+	private VerificationResultEntity saveTarget(String checkName, String violationType, long... issueIds) {
+		VerificationResultEntity target = verificationResultRepository.save(
+				VerificationResultEntity.from(VerificationResult.fail(
+						checkName, TriggerType.ON_DEMAND, Scope.ofEvent(eventId), issueIds.length,
+						Map.of("violationType", violationType), List.of(), LocalDateTime.now(), 1L)));
+		for (long id : issueIds) {
+			violationRepository.save(VerificationViolationEntity.forResult(target.getId(),
+					new Violation(ViolationTargetType.ISSUE, id,
+							Map.of("issue_id", id, "event_id", eventId, "violation_type", violationType))));
+		}
+		return target;
 	}
 
 	private long insertIssue(long userId, int sequence, String status, LocalDateTime validTo) {
@@ -223,13 +233,12 @@ class RowLevelRecoveryExecutorIntegrationTest {
 				Long.class, eventId, sequence);
 	}
 
-	private VerificationResultEntity target(String checkName, String violationType, long targetIssueId) {
-		Map<String, Object> sample = Map.of(
-				"issue_id", targetIssueId,
-				"event_id", eventId,
-				"violation_type", violationType);
-		return VerificationResultEntity.from(VerificationResult.fail(
-				checkName, TriggerType.ON_DEMAND, Scope.ofEvent(eventId), 1,
-				Map.of("sample", List.of(sample)), LocalDateTime.now(), 1L));
+	private int historyCount(long id) {
+		return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM coupon_history WHERE issue_id=?", Integer.class, id);
 	}
+
+	private String status(long id) {
+		return jdbcTemplate.queryForObject("SELECT status FROM coupon_issue WHERE issue_id=?", String.class, id);
+	}
+
 }

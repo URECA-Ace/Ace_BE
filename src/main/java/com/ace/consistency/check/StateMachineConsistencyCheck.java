@@ -2,11 +2,13 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,18 +79,17 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 		}
 
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new java.util.ArrayList<>(violations.size());
+		List<Violation> violationList = new ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			sample.add(sampleRow);
+			Map<String, Object> detail = new LinkedHashMap<>(violation);
+			detail.remove("total_violation_count");
+			violationList.add(new Violation(ViolationTargetType.ISSUE, ((Number) violation.get("issue_id")).longValue(), detail));
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("sample", sample);
 		diff.put("reason", "상태 머신 위반: 이전 이력의 도착 상태와 현재 이력의 출발 상태가 이어지지 않습니다(연속성 붕괴).");
 
-		return CheckOutcome.fail(violationCount, diff);
+		return CheckOutcome.fail(violationCount, diff, violationList);
 	}
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {

@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -22,7 +23,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck {
 
-	private static final String RESTORE_INITIAL_ISSUE_HISTORY = "RESTORE_INITIAL_ISSUE_HISTORY";
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SCOPED_ISSUE_CONDITION = """
@@ -94,22 +94,15 @@ public class CouponIssueHistoryStateConsistencyCheck implements ConsistencyCheck
 			return CheckOutcome.pass();
 		}
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new ArrayList<>(violations.size());
+		List<Violation> violationList = new ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			boolean initialHistoryRecoveryCandidate =
-					"NO_HISTORY".equals(sampleRow.get("violation_type"))
-							&& "ISSUED".equals(sampleRow.get("current_status"));
-			sampleRow.put("candidate_recovery_action",
-					initialHistoryRecoveryCandidate ? RESTORE_INITIAL_ISSUE_HISTORY : null);
-			sampleRow.put("manual_review_required", !initialHistoryRecoveryCandidate);
-			sample.add(sampleRow);
+			Map<String, Object> violationDetail = new LinkedHashMap<>(violation);
+			violationDetail.remove("total_violation_count");
+			violationList.add(new Violation(ViolationTargetType.ISSUE, ((Number) violation.get("issue_id")).longValue(), violationDetail));
 		}
 
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("rule", "coupon_issue.status must equal the latest coupon_history.to_status");
-		detail.put("sample", sample);
-		return CheckOutcome.fail(violationCount, detail);
+		return CheckOutcome.fail(violationCount, detail, violationList);
 	}
 }

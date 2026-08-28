@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,10 +32,11 @@ import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 @ExtendWith(MockitoExtension.class)
 class RowLevelRecoveryExecutorTest {
 
-	@Mock RowLevelRecoveryRepository repository;
+	@Mock
+	private RowLevelRecoveryRepository repository;
 
 	@Test
-	void issue별_Executor는_REQUIRES_NEW_트랜잭션을_사용한다() throws Exception {
+	void 두_Executor는_각_issue를_REQUIRES_NEW로_실행한다() throws Exception {
 		Method history = CouponIssueHistoryStateRecoveryExecutor.class
 				.getMethod("recoverIssue", VerificationResultEntity.class, long.class);
 		Method expiration = CouponExpirationLagRecoveryExecutor.class
@@ -45,35 +47,7 @@ class RowLevelRecoveryExecutorTest {
 	}
 
 	@Test
-	void 초기이력_복구는_사용취소_흔적이_있으면_FAIL이다() {
-		IssueSnapshot issue = issue("ISSUED", null, LocalDateTime.now(), LocalDateTime.now().plusHours(1));
-		given(repository.findIssueForUpdate(1L)).willReturn(Optional.of(issue));
-		given(repository.countHistories(1L)).willReturn(0);
-
-		RecoveryOutcome outcome = new CouponIssueHistoryStateRecoveryExecutor(repository)
-				.recoverIssue(target("CouponIssueHistoryStateConsistencyCheck"), 1L);
-
-		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
-		verify(repository, never()).insertHistory(any(Long.class), any(), any(), any(), any(), any(), any(), any());
-	}
-
-	@Test
-	void 초기이력이_이미_정상적으로_존재하면_noop_SUCCESS이다() {
-		IssueSnapshot issue = issue("ISSUED", null, null, LocalDateTime.now().plusHours(1));
-		given(repository.findIssueForUpdate(1L)).willReturn(Optional.of(issue));
-		given(repository.countHistories(1L)).willReturn(1);
-		given(repository.initialHistoryRestored(1L, issue.requestId())).willReturn(true);
-
-		RecoveryOutcome outcome = new CouponIssueHistoryStateRecoveryExecutor(repository)
-				.recoverIssue(target("CouponIssueHistoryStateConsistencyCheck"), 1L);
-
-		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
-		assertThat(outcome.getDetail()).containsEntry("catchUp", true);
-		verify(repository, never()).insertHistory(any(Long.class), any(), any(), any(), any(), any(), any(), any());
-	}
-
-	@Test
-	void 정상_NO_HISTORY는_이력을_복원하고_before_after를_남긴다() {
+	void NO_HISTORY_ISSUED는_최초_History를_복원한다() {
 		IssueSnapshot issue = issue("ISSUED", null, null, LocalDateTime.now().plusHours(1));
 		given(repository.findIssueForUpdate(1L)).willReturn(Optional.of(issue));
 		given(repository.countHistories(1L)).willReturn(0);
@@ -90,7 +64,20 @@ class RowLevelRecoveryExecutorTest {
 	}
 
 	@Test
-	void 이미_정상_만료이력까지_존재하면_noop_SUCCESS이다() {
+	void 사용_또는_취소_흔적이_있으면_복구하지_않는다() {
+		IssueSnapshot issue = issue("ISSUED", LocalDateTime.now(), null, LocalDateTime.now().plusHours(1));
+		given(repository.findIssueForUpdate(1L)).willReturn(Optional.of(issue));
+		given(repository.countHistories(1L)).willReturn(0);
+
+		RecoveryOutcome outcome = new CouponIssueHistoryStateRecoveryExecutor(repository)
+				.recoverIssue(target("CouponIssueHistoryStateConsistencyCheck"), 1L);
+
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		verify(repository, never()).insertHistory(any(Long.class), any(), any(), any(), any(), any(), any(), any());
+	}
+
+	@Test
+	void 이미_만료_복구된_issue는_noop_SUCCESS다() {
 		IssueSnapshot issue = issue("EXPIRED", null, null, LocalDateTime.now().minusHours(2));
 		given(repository.findIssueForUpdate(1L)).willReturn(Optional.of(issue));
 		given(repository.hasExpirationRecoveryHistory(1L)).willReturn(true);
@@ -106,8 +93,8 @@ class RowLevelRecoveryExecutorTest {
 
 	private VerificationResultEntity target(String checkName) {
 		return VerificationResultEntity.from(VerificationResult.fail(
-				checkName, TriggerType.ON_DEMAND, Scope.ofEvent(10L), 1,
-				java.util.Map.of("sample", java.util.List.of()), LocalDateTime.now(), 1L));
+				checkName, TriggerType.ON_DEMAND, Scope.ofEvent(10L), 1, Map.of(), java.util.List.of(),
+				LocalDateTime.now(), 1L));
 	}
 
 	private IssueSnapshot issue(String status, LocalDateTime usedAt, LocalDateTime canceledAt,

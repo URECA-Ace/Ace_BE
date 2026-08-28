@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.ToString;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -63,13 +64,28 @@ public interface ConsistencyCheck {
 		private final boolean pass;
 		private final int violationCount;
 		private final Map<String, Object> diffDetail;
+		private final List<Violation> violations;
 
 		public static CheckOutcome pass() {
-			return new CheckOutcome(true, 0, Collections.emptyMap());
+			return new CheckOutcome(true, 0, Collections.emptyMap(), Collections.emptyList());
 		}
 
-		public static CheckOutcome fail(int violationCount, Map<String, Object> diffDetail) {
-			return new CheckOutcome(false, violationCount, Map.copyOf(diffDetail));
+		public static CheckOutcome fail(int violationCount, Map<String, Object> diffDetail, List<Violation> violations) {
+			return new CheckOutcome(false, violationCount, Map.copyOf(diffDetail), List.copyOf(violations));
 		}
+	}
+
+	/**
+	 * 위반 1건을 나타내는 값 객체. VerificationViolationEntity(행 1개 = 위반 1건)로 그대로 저장된다.
+	 * 검증마다 위반의 자연스러운 단위(이벤트/발급 건/이력)가 다르므로 targetType(enum)으로 구분하고,
+	 * 그 단위를 식별하는 값 하나만 targetId에 담는다.
+	 */
+	@Getter
+	@ToString
+	@AllArgsConstructor
+	class Violation {
+		private final ViolationTargetType targetType;
+		private final Long targetId;
+		private final Map<String, Object> detail;
 	}
 }

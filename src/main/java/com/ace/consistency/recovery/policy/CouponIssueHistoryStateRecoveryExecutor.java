@@ -19,6 +19,7 @@ import com.ace.consistency.recovery.RowLevelRecoveryRepository.IssueSnapshot;
 
 import lombok.RequiredArgsConstructor;
 
+/** NO_HISTORY + ISSUED 위반에 대해 최초 ISSUED History를 복원하는 실행기. */
 @Component
 @RequiredArgsConstructor
 public class CouponIssueHistoryStateRecoveryExecutor {
@@ -28,6 +29,7 @@ public class CouponIssueHistoryStateRecoveryExecutor {
 
 	private final RowLevelRecoveryRepository repository;
 
+	/** 각 issue를 별도 물리 트랜잭션으로 처리하여 한 대상 실패가 다른 대상의 커밋을 되돌리지 않도록 한다. */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public RecoveryOutcome recoverIssue(VerificationResultEntity target, long issueId) {
 		try {
@@ -101,7 +103,11 @@ public class CouponIssueHistoryStateRecoveryExecutor {
 	}
 
 	private Scope fallbackScope(VerificationResultEntity target) {
-		return target.getEventId() == null ? Scope.all(LocalDateTime.now()) : Scope.ofEvent(target.getEventId());
+		return switch (target.getScopeType()) {
+			case EVENT -> Scope.ofEvent(target.getEventId());
+			case AS_OF_RANGE -> Scope.ofAsOfRange(target.getScopeFrom(), target.getScopeTo());
+			case ALL -> Scope.all(LocalDateTime.now());
+		};
 	}
 
 	private boolean isUuid(String value) {

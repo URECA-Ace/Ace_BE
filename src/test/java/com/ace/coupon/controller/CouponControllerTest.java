@@ -1,5 +1,6 @@
 package com.ace.coupon.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -21,6 +22,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import com.ace.coupon.dto.request.CouponCreateRequest;
 import com.ace.coupon.dto.response.CouponSummaryResponse;
@@ -134,6 +136,18 @@ class CouponControllerTest {
 		mockMvc.perform(get("/api/v1/coupons").param("size", "51"))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+	}
+
+	@Test
+	@DisplayName("컴파일러 파라미터 메타데이터 없이도 쿠폰 조회 요청 파라미터 이름을 해석한다")
+	void declaresCouponQueryRequestParameterNames() throws Exception {
+		var method = CouponController.class.getDeclaredMethod(
+				"findCoupons", String.class, int.class);
+
+		assertThat(method.getParameters()[0].getAnnotation(RequestParam.class).name())
+				.isEqualTo("keyword");
+		assertThat(method.getParameters()[1].getAnnotation(RequestParam.class).name())
+				.isEqualTo("size");
 	}
 
 	private static Stream<Arguments> invalidCouponRequests() {

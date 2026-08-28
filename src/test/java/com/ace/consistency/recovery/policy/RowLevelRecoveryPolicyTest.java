@@ -4,84 +4,114 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
+import com.ace.consistency.common.ConsistencyCheck.Violation;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 @ExtendWith(MockitoExtension.class)
 class RowLevelRecoveryPolicyTest {
 
-	@Mock CouponIssueHistoryStateRecoveryExecutor historyExecutor;
-	@Mock CouponExpirationLagRecoveryExecutor expirationExecutor;
+	@Mock
+	private CouponIssueHistoryStateRecoveryExecutor historyExecutor;
+	@Mock
+	private CouponExpirationLagRecoveryExecutor expirationExecutor;
+	@Mock
+	private VerificationViolationRepository violationRepository;
+
+	private VerificationResultEntity historyTarget;
+	private VerificationResultEntity expirationTarget;
+
+	@BeforeEach
+	void setUp() {
+		historyTarget = failTarget("CouponIssueHistoryStateConsistencyCheck", Scope.ofEvent(10L));
+		expirationTarget = failTarget("CouponExpirationLagConsistencyCheck", Scope.ofEvent(10L));
+	}
 
 	@Test
-	void 이력상태_Policy는_NO_HISTORY_issue만_distinct로_복구한다() {
-		VerificationResultEntity target = fail("CouponIssueHistoryStateConsistencyCheck", List.of(
-				Map.of("issue_id", 1L, "violation_type", "NO_HISTORY"),
-				Map.of("issue_id", 1L, "violation_type", "NO_HISTORY"),
-				Map.of("issue_id", 2L, "violation_type", "LATEST_STATUS_MISMATCH")));
+	void NO_HISTORY_violation의_issue만_중복없이_executor에_전달한다() {
+		given(violationRepository.findByVerificationResultId(historyTarget.getId())).willReturn(List.of(
+				violation(ViolationTargetType.ISSUE, 1L, "NO_HISTORY"),
+				violation(ViolationTargetType.ISSUE, 1L, "NO_HISTORY"),
+				violation(ViolationTargetType.ISSUE, 2L, "LATEST_STATUS_MISMATCH"),
+				violation(ViolationTargetType.EVENT, 3L, "NO_HISTORY"),
+				violation(ViolationTargetType.ISSUE, 4L, null)));
 		RecoveryOutcome outcome = RecoveryOutcome.success(Scope.ofEvent(10L), Map.of(), "ok");
-		given(historyExecutor.recoverIssue(target, 1L)).willReturn(outcome);
+		given(historyExecutor.recoverIssue(historyTarget, 1L)).willReturn(outcome);
 
-		List<RecoveryOutcome> results = new CouponIssueHistoryStateRecoveryPolicy(historyExecutor)
-				.recover(target, RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
+		List<RecoveryOutcome> outcomes = new CouponIssueHistoryStateRecoveryPolicy(historyExecutor, violationRepository)
+				.recover(historyTarget, RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
 
-		assertThat(results).containsExactly(outcome);
-		verify(historyExecutor).recoverIssue(target, 1L);
+		assertThat(outcomes).containsExactly(outcome);
+		verify(historyExecutor).recoverIssue(historyTarget, 1L);
 	}
 
 	@Test
-	void 만료_Policy는_EXPIRATION_BATCH_DELAY만_복구한다() {
-		VerificationResultEntity target = fail("CouponExpirationLagConsistencyCheck", List.of(
-				Map.of("issue_id", 3L, "violation_type", "EXPIRATION_BATCH_DELAY"),
-				Map.of("issue_id", 4L, "violation_type", "USED_AFTER_EXPIRATION")));
+	void EXPIRATION_BATCH_DELAY_violation의_issue만_중복없이_executor에_전달한다() {
+		given(violationRepository.findByVerificationResultId(expirationTarget.getId())).willReturn(List.of(
+				violation(ViolationTargetType.ISSUE, 5L, "EXPIRATION_BATCH_DELAY"),
+				violation(ViolationTargetType.ISSUE, 5L, "EXPIRATION_BATCH_DELAY"),
+				violation(ViolationTargetType.ISSUE, 6L, "USED_AFTER_EXPIRATION"),
+				violation(ViolationTargetType.EVENT, 7L, "EXPIRATION_BATCH_DELAY")));
 		RecoveryOutcome outcome = RecoveryOutcome.success(Scope.ofEvent(10L), Map.of(), "ok");
-		given(expirationExecutor.recoverIssue(target, 3L)).willReturn(outcome);
+		given(expirationExecutor.recoverIssue(expirationTarget, 5L)).willReturn(outcome);
 
-		List<RecoveryOutcome> results = new CouponExpirationLagRecoveryPolicy(expirationExecutor)
-				.recover(target, RecoveryAction.EXPIRE_DELAYED_ISSUE);
+		List<RecoveryOutcome> outcomes = new CouponExpirationLagRecoveryPolicy(expirationExecutor, violationRepository)
+				.recover(expirationTarget, RecoveryAction.EXPIRE_DELAYED_ISSUE);
 
-		assertThat(results).containsExactly(outcome);
-		verify(expirationExecutor).recoverIssue(target, 3L);
+		assertThat(outcomes).containsExactly(outcome);
+		verify(expirationExecutor).recoverIssue(expirationTarget, 5L);
 	}
 
 	@Test
-	void Action이_Check와_맞지_않으면_복구하지_않는다() {
-		VerificationResultEntity target = fail("CouponIssueHistoryStateConsistencyCheck", List.of(
-				Map.of("issue_id", 1L, "violation_type", "NO_HISTORY")));
+	void 위반_행이_없거나_알려지지_않은_유형이면_복구를_거부한다() {
+		given(violationRepository.findByVerificationResultId(historyTarget.getId())).willReturn(List.of(
+				violation(ViolationTargetType.ISSUE, 1L, "UNKNOWN")));
 
-		assertThatThrownBy(() -> new CouponIssueHistoryStateRecoveryPolicy(historyExecutor)
-				.recover(target, RecoveryAction.EXPIRE_DELAYED_ISSUE))
-				.isInstanceOf(ConsistencyCheckException.class);
-		verifyNoInteractions(historyExecutor);
+		assertThatThrownBy(() -> new CouponIssueHistoryStateRecoveryPolicy(historyExecutor, violationRepository)
+				.recover(historyTarget, RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
+				.isEqualTo(ErrorCode.RECOVERY_NOT_APPLICABLE);
 	}
 
 	@Test
-	void availableActions는_Check별_Action만_노출한다() {
-		assertThat(new CouponIssueHistoryStateRecoveryPolicy(historyExecutor).availableActions())
-				.containsExactly(RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
-		assertThat(new CouponExpirationLagRecoveryPolicy(expirationExecutor).availableActions())
-				.containsExactly(RecoveryAction.EXPIRE_DELAYED_ISSUE);
+	void 정책별_action이_아니면_복구를_거부한다() {
+		assertThatThrownBy(() -> new CouponExpirationLagRecoveryPolicy(expirationExecutor, violationRepository)
+				.recover(expirationTarget, RecoveryAction.DEFAULT))
+				.isInstanceOf(ConsistencyCheckException.class)
+				.extracting(ex -> ((ConsistencyCheckException) ex).getErrorCode())
+				.isEqualTo(ErrorCode.RECOVERY_NOT_APPLICABLE);
 	}
 
-	private VerificationResultEntity fail(String checkName, List<Map<String, Object>> sample) {
+	private VerificationResultEntity failTarget(String checkName, Scope scope) {
 		return VerificationResultEntity.from(VerificationResult.fail(
-				checkName, TriggerType.ON_DEMAND, Scope.ofEvent(10L), sample.size(),
-				Map.of("sample", sample), LocalDateTime.now(), 1L));
+				checkName, TriggerType.ON_DEMAND, scope, 1, Map.of(), List.of(), LocalDateTime.now(), 1L));
+	}
+
+	private VerificationViolationEntity violation(ViolationTargetType targetType, long targetId, String type) {
+		Map<String, Object> detail = type == null ? Map.of("issue_id", targetId) : Map.of("issue_id", targetId,
+				"violation_type", type);
+		return VerificationViolationEntity.forResult(1L,
+				new Violation(targetType, targetId, detail));
 	}
 }

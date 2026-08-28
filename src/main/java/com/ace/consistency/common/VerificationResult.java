@@ -6,6 +6,7 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,6 +35,7 @@ public final class VerificationResult {
 	private final Status status;
 	private final int violationCount;
 	private final Map<String, Object> diffDetail; // 불일치 상세 (예: {"eventId":123,"expected":10000,"actual":10007})
+	private final List<ConsistencyCheck.Violation> violations; // 위반 1건당 1개. VerificationViolationEntity로 그대로 저장된다.
 	private final String errorMessage;             // ERROR 상태일 때만 값 존재
 	private final LocalDateTime executedAt;
 	private final long durationMillis;
@@ -41,22 +43,23 @@ public final class VerificationResult {
 	public static VerificationResult pass(String checkName, TriggerType triggerType, Scope scope,
 										  LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.PASS,
-				0, Collections.emptyMap(), null, executedAt, durationMillis);
+				0, Collections.emptyMap(), Collections.emptyList(), null, executedAt, durationMillis);
 	}
 
 	public static VerificationResult fail(String checkName, TriggerType triggerType, Scope scope,
 										  int violationCount,
 										  Map<String, Object> diffDetail,
+										  List<ConsistencyCheck.Violation> violations,
 										  LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.FAIL,
-				violationCount, Map.copyOf(diffDetail), null, executedAt, durationMillis);
+				violationCount, Map.copyOf(diffDetail), List.copyOf(violations), null, executedAt, durationMillis);
 	}
 
 	public static VerificationResult error(String checkName, TriggerType triggerType, Scope scope,
 										   Throwable cause,
 										   LocalDateTime executedAt, long durationMillis) {
 		return new VerificationResult(checkName, triggerType, scope, Status.ERROR,
-				0, Collections.emptyMap(), describe(cause), executedAt, durationMillis);
+				0, Collections.emptyMap(), Collections.emptyList(), describe(cause), executedAt, durationMillis);
 	}
 
 	// ConsistencyCheckException이면 클래스명 대신 ErrorCode로 원인을 구분한다.

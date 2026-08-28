@@ -55,7 +55,25 @@ class JdbcIssueWriterTest {
 				""", couponId, now.minusMinutes(1), now.plusHours(1), now, now);
 		long eventId = lastInsertId();
 
-		userId = jdbcTemplate.queryForObject("SELECT MIN(user_id) FROM user", Long.class);
+		// 로컬 DB에 미리 생성된 사용자가 없어도 테스트가 독립적으로 실행되도록 fixture를 준비한다.
+		// 중복 순번/requestId 충돌 테스트가 서로 다른 사용자를 사용하므로 최소 2명이 필요하다.
+		Long foundUserId = jdbcTemplate.queryForObject("SELECT MIN(user_id) FROM user", Long.class);
+		if (foundUserId == null) {
+			jdbcTemplate.update("""
+					INSERT INTO user (email, name, phone, created_at)
+					VALUES (?, 'JdbcIssueWriterTest', '010-0000-0000', ?)
+					""", "jdbc-writer-" + UUID.randomUUID() + "@test.com", now);
+			foundUserId = lastInsertId();
+		}
+		userId = foundUserId;
+		Long otherUserId = jdbcTemplate.queryForObject(
+				"SELECT MIN(user_id) FROM user WHERE user_id > ?", Long.class, userId);
+		if (otherUserId == null) {
+			jdbcTemplate.update("""
+					INSERT INTO user (email, name, phone, created_at)
+					VALUES (?, 'JdbcIssueWriterTest2', '010-0000-0001', ?)
+					""", "jdbc-writer-" + UUID.randomUUID() + "@test.com", now);
+		}
 		metadata = new CampaignMetadata(eventId, VALID_HOURS, now.minusMinutes(1), now.plusHours(1));
 	}
 
