@@ -60,12 +60,12 @@ public class VerificationResultPersister {
 	 */
 	@Transactional
 	public VerificationResultEntity saveStepResult(VerificationResult result, Long jobInstanceId,
-												 String stepName, boolean stepFailed) {
+												 String stepName, boolean stepIncomplete) {
 		VerificationResultEntity saved = saveResultsAndViolations(List.of(result)).getFirst();
 
 		// 실패한 Step의 reader 위치와 violationCount는 재시작 시 복원된다. 같은 이유로
 		// 이미 커밋된 위반 행도 유지하고, 최종 완료된 Step에서만 결과에 연결한다.
-		if (!stepFailed) {
+		if (!stepIncomplete) {
 			int linked = violationRepository.linkToResult(jobInstanceId, stepName, saved.getId());
 			if (linked != result.getViolationCount()) {
 				// 일시적인 DB 오류라면 트랜잭션 롤백 후 재시작으로 복구될 수 있다. 하지만 실제로

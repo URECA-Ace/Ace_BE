@@ -18,7 +18,9 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class ConsistencyStepCompletionListenerTest {
 
@@ -38,6 +40,21 @@ class ConsistencyStepCompletionListenerTest {
 		assertThat(step.getFailureExceptions()).hasSize(1);
 		assertThat(exitStatus.getExitCode()).isEqualTo(ExitStatus.FAILED.getExitCode());
 		assertThat(exitStatus.getExitDescription()).contains("count mismatch");
+	}
+
+	@Test
+	void STOPPED_Step은_ERROR로_저장하고_임시_violation을_연결하지_않는다() {
+		VerificationResultPersister persister = mock(VerificationResultPersister.class);
+		CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(mock(VerificationViolationRepository.class));
+		ConsistencyStepCompletionListener listener = new ConsistencyStepCompletionListener(
+				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister);
+		StepExecution step = stepExecution();
+		step.setStatus(BatchStatus.STOPPED);
+
+		ExitStatus exitStatus = listener.afterStep(step);
+
+		assertThat(exitStatus).isEqualTo(ExitStatus.COMPLETED);
+		verify(persister).saveStepResult(any(), eq(5L), eq("TestStep"), eq(true));
 	}
 
 	private StepExecution stepExecution() {

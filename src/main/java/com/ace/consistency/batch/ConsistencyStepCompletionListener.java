@@ -41,7 +41,10 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
             long durationMillis = Duration.between(executedAt, LocalDateTime.now()).toMillis();
 
             VerificationResult result = buildResult(stepExecution, executedAt, durationMillis);
-            boolean stepFailed = stepExecution.getStatus() == BatchStatus.FAILED;
+            // COMPLETED 이외의 상태(FAILED, STOPPED 등)는 재시작 가능한 미완료 Step이다.
+            // 이 상태에서 임시 violation을 연결하면 재시작 시 누적 건수와 새로 연결할
+            // 행의 건수가 달라질 수 있으므로, 완료된 Step에서만 연결한다.
+            boolean stepIncomplete = stepExecution.getStatus() != BatchStatus.COMPLETED;
 
             // 완료 Step은 재시작 전후에 누적된 위반 행을 결과에 연결한다. 실패 Step의 행은
             // ExecutionContext와 함께 재시작에 사용해야 하므로 cleanup 유예 시간 동안 보존한다.
@@ -52,7 +55,7 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
                     result,
                     stepExecution.getJobExecution().getJobInstance().getInstanceId(),
                     stepExecution.getStepName(),
-                    stepFailed);
+                    stepIncomplete);
 
             return stepExecution.getExitStatus();
         } catch (RuntimeException ex) {
@@ -65,7 +68,7 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
     }
 
     private VerificationResult buildResult(StepExecution stepExecution, LocalDateTime executedAt, long durationMillis) {
-        if (stepExecution.getStatus() == BatchStatus.FAILED) {
+        if (stepExecution.getStatus() != BatchStatus.COMPLETED) {
             Throwable cause = stepExecution.getFailureExceptions().isEmpty()
                     ? new IllegalStateException("Step failed without recorded exception")
                     : stepExecution.getFailureExceptions().getFirst();
