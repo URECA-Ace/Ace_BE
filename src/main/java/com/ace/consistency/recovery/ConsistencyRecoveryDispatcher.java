@@ -1,6 +1,5 @@
 package com.ace.consistency.recovery;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +21,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.policy.ConsistencyRecoveryPolicy;
-import com.ace.consistency.recovery.repository.RecoveryResultRepository;
+import com.ace.consistency.recovery.service.RecoveryResultRecorder;
 import com.ace.consistency.repository.VerificationResultRepository;
 
 import jakarta.annotation.PostConstruct;
@@ -40,7 +39,7 @@ import lombok.RequiredArgsConstructor;
 public class ConsistencyRecoveryDispatcher {
 
 	private final VerificationResultRepository verificationResultRepository;
-	private final RecoveryResultRepository recoveryResultRepository;
+	private final RecoveryResultRecorder recoveryResultRecorder;
 	private final ConsistencyVerificationRunner verificationRunner;
 	private final List<ConsistencyRecoveryPolicy> recoveryPolicies;
 	private final List<ConsistencyCheck> checks;
@@ -90,8 +89,7 @@ public class ConsistencyRecoveryDispatcher {
 		List<RecoveryResult> results = new ArrayList<>();
 		boolean allRecovered = true;
 		for (RecoveryOutcome outcome : outcomes) {
-			RecoveryResult saved = recoveryResultRepository.save(
-					RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
+			RecoveryResult saved = recoveryResultRecorder.record(verificationResultId, outcome);
 			results.add(saved);
 
 			if (outcome.getStatus() == RecoveryResultStatus.FAIL) {

@@ -1,6 +1,12 @@
 package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -18,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -25,6 +32,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import com.ace.consistency.common.ConsistencyCheck.Violation;
+import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
@@ -64,6 +72,7 @@ class RowLevelRecoveryExecutorIntegrationTest {
 	@Autowired VerificationResultRepository verificationResultRepository;
 	@Autowired VerificationViolationRepository violationRepository;
 	@Autowired RecoveryResultRepository recoveryResultRepository;
+	@MockitoSpyBean ConsistencyVerificationRunner verificationRunner;
 
 	private long eventId;
 	private long issueId;
@@ -173,6 +182,36 @@ class RowLevelRecoveryExecutorIntegrationTest {
 		assertThat(historyCount(unsafeIssueId)).isZero();
 		assertThat(verificationResultRepository.findById(target.getId()).orElseThrow().getRecoveryStatus())
 				.isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
+	}
+
+	@Test
+	void 복구와_RecoveryResult를_commit한_뒤_재검증이_실패해도_이력은_유지되고_재시도에서_catchUp된다() {
+		VerificationResultEntity target = saveTarget(
+				"CouponIssueHistoryStateConsistencyCheck", "NO_HISTORY", issueId);
+		doThrow(new IllegalStateException("forced revalidation failure"))
+				.when(verificationRunner)
+				.run(anyList(), any(Scope.class), eq(TriggerType.RECOVERY_REVALIDATION));
+
+		assertThatThrownBy(() -> dispatcher.recover(
+				target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY))
+				.isInstanceOf(IllegalStateException.class);
+
+		assertThat(historyCount(issueId)).isEqualTo(1);
+		assertThat(recoveryResultRepository.findAll()).singleElement()
+				.satisfies(result -> assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS));
+		assertThat(verificationResultRepository.findById(target.getId()).orElseThrow().getRecoveryStatus())
+				.isEqualTo(VerificationResultEntity.RecoveryStatus.NONE);
+
+		reset(verificationRunner);
+		List<RecoveryResult> retryResults = dispatcher.recover(
+				target.getId(), RecoveryAction.RESTORE_INITIAL_ISSUE_HISTORY);
+
+		assertThat(retryResults).singleElement().satisfies(result -> {
+			assertThat(result.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+			assertThat(result.getDetail()).containsEntry("catchUp", true);
+		});
+		assertThat(historyCount(issueId)).isEqualTo(1);
+		assertThat(recoveryResultRepository.findAll()).hasSize(2);
 	}
 
 	@Test
