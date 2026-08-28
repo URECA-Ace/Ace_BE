@@ -3,6 +3,7 @@ package com.ace.consistency.common;
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.common.transaction.AfterCommitExecutor;
 import io.micrometer.core.instrument.MeterRegistry;
 import com.ace.consistency.repository.VerificationViolationRepository;
 import lombok.RequiredArgsConstructor;
@@ -58,7 +59,7 @@ public class VerificationResultPersister {
 	public List<VerificationResultEntity> saveAndNotify(List<VerificationResult> results, Scope scope, TriggerType triggerType) {
 		List<VerificationResultEntity> savedResults = saveResultsAndViolations(results);
 
-		results.forEach(this::recordMetric);
+		AfterCommitExecutor.execute(() -> results.forEach(this::recordMetric));
 
 		//todo: notify 도메인 머지 후 주석해제
 		/*
@@ -93,8 +94,6 @@ public class VerificationResultPersister {
 												 String stepName, boolean stepIncomplete) {
 		VerificationResultEntity saved = saveResultsAndViolations(List.of(result)).getFirst();
 
-		recordMetric(result);
-
 		// 실패한 Step의 reader 위치와 violationCount는 재시작 시 복원된다. 같은 이유로
 		// 이미 커밋된 위반 행도 유지하고, 최종 완료된 Step에서만 결과에 연결한다.
 		if (!stepIncomplete) {
@@ -109,6 +108,8 @@ public class VerificationResultPersister {
 						+ ", jobInstanceId=" + jobInstanceId + ", stepName=" + stepName);
 			}
 		}
+
+		AfterCommitExecutor.execute(() -> recordMetric(result));
 
 		return saved;
 	}

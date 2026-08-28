@@ -2,6 +2,7 @@ package com.ace.coupon.service;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
+import com.ace.common.transaction.AfterCommitExecutor;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;
@@ -56,13 +57,13 @@ public class CouponStateProcessor {
 		try {
 			CouponStateChangeResponse response =
 					doProcessStateChange(issueId, userId, idempotencyKey, targetStatus, reason);
-			meterRegistry.counter("coupon.state.change",
+			AfterCommitExecutor.execute(() -> meterRegistry.counter("coupon.state.change",
 					"result", "success",
 					"result_label", "성공",
 					"from", response.previousStatus().name(),
 					"from_label", STATE_LABELS.get(response.previousStatus()),
 					"to", response.currentStatus().name(),
-					"to_label", STATE_LABELS.get(response.currentStatus())).increment();
+					"to_label", STATE_LABELS.get(response.currentStatus())).increment());
 			return response;
 		} catch (CouponException exception) {
 			String reasonCode = exception.getErrorCode().name();

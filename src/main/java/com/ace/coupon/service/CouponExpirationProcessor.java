@@ -7,6 +7,7 @@ import java.util.List;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.ace.common.transaction.AfterCommitExecutor;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;
 import com.ace.coupon.enums.CouponIssueStatus;
@@ -35,11 +36,6 @@ public class CouponExpirationProcessor {
 		List<Long> ids = targets.stream().map(CouponIssue::getId).toList();
 		int actualExpired = couponIssueRepository.bulkExpire(ids);
 
-		meterRegistry.counter("coupon.state.change",
-				"result", "success",
-				"from", CouponIssueStatus.ISSUED.name(),
-				"to", CouponIssueStatus.EXPIRED.name()).increment(actualExpired);
-
 		List<CouponHistory> histories = new ArrayList<>(targets.size());
 
 		for (CouponIssue issue : targets) {
@@ -58,6 +54,10 @@ public class CouponExpirationProcessor {
 		}
 
 		couponHistoryRepository.saveAll(histories);
+		AfterCommitExecutor.execute(() -> meterRegistry.counter("coupon.state.change",
+				"result", "success",
+				"from", CouponIssueStatus.ISSUED.name(),
+				"to", CouponIssueStatus.EXPIRED.name()).increment(actualExpired));
 		return actualExpired;
 	}
 }

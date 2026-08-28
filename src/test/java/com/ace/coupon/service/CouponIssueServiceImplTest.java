@@ -66,8 +66,7 @@ class CouponIssueServiceImplTest {
 				couponEventRepository,
 				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
 				coordinator,
-				userRepository);
-				coordinator,
+				userRepository,
 				new SimpleMeterRegistry());
 	}
 
