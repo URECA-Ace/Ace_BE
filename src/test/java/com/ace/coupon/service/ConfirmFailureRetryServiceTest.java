@@ -48,7 +48,7 @@ class ConfirmFailureRetryServiceTest {
 
 		given(failureLogRepository.findRetryTargets(any(), any(), any()))
 				.willReturn(List.of());
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of());
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of());
 	}
 
 	@Test
@@ -157,8 +157,8 @@ class ConfirmFailureRetryServiceTest {
 		givenTargets(resolved, expired);
 		givenConfirm(resolved, CouponIssueConfirmResult.CONFIRMED_NOW);
 		givenConfirm(expired, CouponIssueConfirmResult.REQUEST_NOT_FOUND);
-		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(3L);
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(77L));
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(3L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of(77L));
 
 		SweepResult result = service.retryFailedConfirmations();
 
@@ -214,8 +214,8 @@ class ConfirmFailureRetryServiceTest {
 	@Test
 	@DisplayName("재시도 대상이 없어도 막힌 회차는 조회해 보고한다")
 	void reportsBlockedEventsEvenWhenNothingIsRetryable() {
-		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(2L);
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(55L));
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(2L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of(55L));
 
 		SweepResult result = service.retryFailedConfirmations();
 
@@ -241,8 +241,8 @@ class ConfirmFailureRetryServiceTest {
 		IssueFailureLog first = failure(1L);
 		givenTargets(first);
 		givenConfirm(first, CouponIssueConfirmResult.CORRUPTED_STATE);
-		given(failureLogRepository.countUnrecoverable(any(), any())).willReturn(1L);
-		given(failureLogRepository.findBlockedEventIds(any(), any())).willReturn(List.of(101L));
+		given(failureLogRepository.countUnrecoverable(any(), any(), any())).willReturn(1L);
+		given(failureLogRepository.findBlockedEventIds(any(), any(), any())).willReturn(List.of(101L));
 
 		SweepResult firstSweep = service.retryFailedConfirmations();
 		SweepResult secondSweep = service.retryFailedConfirmations();
