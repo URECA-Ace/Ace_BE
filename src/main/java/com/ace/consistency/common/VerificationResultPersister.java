@@ -3,6 +3,8 @@ package com.ace.consistency.common;
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.common.transaction.AfterCommitExecutor;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.ace.consistency.repository.VerificationViolationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -11,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 // 정합성 검증 DB 저장 시 정합성 검증이 실패한 경우 실패 알림을 보낼 때, Transaction 처리를 하기 위해 별도로 컴포넌트로 분리
 // Runner와 같은 클래스에서 작성하면 AOP가 작동을 안해서 별도로 뺐습니다.
@@ -22,6 +25,32 @@ public class VerificationResultPersister {
 	private final VerificationViolationRepository violationRepository;
 	//todo: notify 도메인 머지 후 주석해제
 	private final ApplicationEventPublisher eventPublisher;
+	private final MeterRegistry meterRegistry;
+
+	// Grafana 범례에 클래스명/enum명 대신 한글로 표시하기 위한 라벨. check/status/scope 태그와 별도로
+	// check_label/status_label/scope_label 태그로 함께 심어서, legendFormat이 이 태그를 그대로 참조하게 한다.
+	private static final Map<String, String> CHECK_LABELS = Map.ofEntries(
+			Map.entry("StockConsistencyCheck", "재고 정합성"),
+			Map.entry("RedisMysqlLossConsistencyCheck", "Redis-MySQL 유실"),
+			Map.entry("StateMachineConsistencyCheck", "상태 전이"),
+			Map.entry("CouponIssueStructuralConsistencyCheck", "발급 구조 정합성"),
+			Map.entry("CouponIssueHistoryStateConsistencyCheck", "발급 이력 상태 정합성"),
+			Map.entry("CouponHistoryStructuralConsistencyCheck", "쿠폰 이력 구조 정합성"),
+			Map.entry("CouponExpirationLagConsistencyCheck", "쿠폰 만료 지연"),
+			Map.entry("IssueHistoryTimeSyncConsistencyCheck", "이력 시간 동기화")
+	);
+
+	private static final Map<VerificationResult.Status, String> STATUS_LABELS = Map.of(
+			VerificationResult.Status.PASS, "정상",
+			VerificationResult.Status.FAIL, "실패",
+			VerificationResult.Status.ERROR, "에러"
+	);
+
+	private static final Map<Scope.ScopeType, String> SCOPE_LABELS = Map.of(
+			Scope.ScopeType.EVENT, "이벤트 지정",
+			Scope.ScopeType.AS_OF_RANGE, "기간 지정",
+			Scope.ScopeType.ALL, "전체"
+	);
 
 	/**
 	 * @return 저장된 VerificationResultEntity 목록 (results와 같은 순서).
@@ -29,6 +58,8 @@ public class VerificationResultPersister {
 	@Transactional
 	public List<VerificationResultEntity> saveAndNotify(List<VerificationResult> results, Scope scope, TriggerType triggerType) {
 		List<VerificationResultEntity> savedResults = saveResultsAndViolations(results);
+
+		AfterCommitExecutor.execute(() -> results.forEach(this::recordMetric));
 
 		//todo: notify 도메인 머지 후 주석해제
 		/*
@@ -78,7 +109,23 @@ public class VerificationResultPersister {
 			}
 		}
 
+		AfterCommitExecutor.execute(() -> recordMetric(result));
+
 		return saved;
+	}
+
+	private void recordMetric(VerificationResult result) {
+		String checkName = result.getCheckName();
+		VerificationResult.Status status = result.getStatus();
+		Scope.ScopeType scopeType = result.getScope().getType();
+
+		meterRegistry.counter("consistency.verification",
+				"check", checkName,
+				"check_label", CHECK_LABELS.getOrDefault(checkName, checkName),
+				"status", status.name(),
+				"status_label", STATUS_LABELS.get(status),
+				"scope", scopeType.name(),
+				"scope_label", SCOPE_LABELS.get(scopeType)).increment();
 	}
 
 	private List<VerificationResultEntity> saveResultsAndViolations(List<VerificationResult> results) {
