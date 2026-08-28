@@ -2,6 +2,7 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -153,11 +154,11 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 			return CheckOutcome.pass();
 		}
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new ArrayList<>(violations.size());
+		List<Violation> violationList = new ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			sample.add(sampleRow);
+			Map<String, Object> violationDetail = new LinkedHashMap<>(violation);
+			violationDetail.remove("total_violation_count");
+			violationList.add(new Violation(ViolationTargetType.ISSUE, ((Number) violation.get("issue_id")).longValue(), violationDetail));
 		}
 
 		Map<String, Object> detail = new LinkedHashMap<>();
@@ -171,7 +172,6 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 		}
 		detail.put("checkedAt", checkedAt);
 		detail.put("allowedDelayMillis", allowedDelayMillis);
-		detail.put("sample", sample);
-		return CheckOutcome.fail(violationCount, detail);
+		return CheckOutcome.fail(violationCount, detail, violationList);
 	}
 }

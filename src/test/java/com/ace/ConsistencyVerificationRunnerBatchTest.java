@@ -1,7 +1,6 @@
 package com.ace;
 
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
-import com.ace.consistency.check.DuplicateConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;

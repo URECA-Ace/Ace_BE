@@ -231,7 +231,7 @@ public class ConsistencyVerificationRunner {
 			} else {
 				log.warn("Check {} FAILED. scope={}, diff={}", check.getName(), scope, outcome.getDiffDetail());
 				return VerificationResult.fail(check.getName(), triggerType, scope, outcome.getViolationCount(), outcome.getDiffDetail(),
-						executedAt, duration);
+						outcome.getViolations(), executedAt, duration);
 			}
 		} catch (Exception ex) {
 			long duration = System.currentTimeMillis() - start;

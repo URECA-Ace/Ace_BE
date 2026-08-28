@@ -38,8 +38,11 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
         long durationMillis = Duration.between(executedAt, LocalDateTime.now()).toMillis();
 
         VerificationResult result = buildResult(stepExecution, executedAt, durationMillis);
+        boolean stepFailed = stepExecution.getStatus() == BatchStatus.FAILED;
 
-        resultPersister.saveAndNotify(List.of(result), scope, triggerType);
+        // 결과 저장과, writer가 청크마다 stepExecutionId로 임시 태깅해둔 위반 행의 연결(성공)/
+        // 일괄 삭제(실패)를 하나의 트랜잭션으로 묶어, 그 사이 장애로 위반 행이 고아로 남는 것을 막는다.
+        resultPersister.saveStepResultAndLinkViolations(result, stepExecution.getId(), stepFailed);
 
         return stepExecution.getExitStatus();
     }
@@ -56,11 +59,10 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
             return VerificationResult.pass(check.getName(), triggerType, scope, executedAt, durationMillis);
         }
 
-        Map<String, Object> diffDetail = Map.of(
-                "violationCount", writer.getViolationCount(),
-                "sample", writer.getSamples()
-        );
+        // 위반 행 자체는 writer가 청크마다 이미 verification_violation에 직접 저장해뒀으므로
+        // (afterStep에서 stepExecutionId로 연결), 여기서는 violations를 다시 채우지 않는다.
+        Map<String, Object> diffDetail = Map.of("violationCount", writer.getViolationCount());
         return VerificationResult.fail(check.getName(), triggerType, scope,
-                writer.getViolationCount(), diffDetail, executedAt, durationMillis);
+                writer.getViolationCount(), diffDetail, List.of(), executedAt, durationMillis);
     }
 }
