@@ -89,7 +89,36 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 
 ## 6. 프론트엔드(Ace_FE)에 임베드하기
 
-`Ace_FE`의 **모니터링** 탭(`src/tabs/MonitoringTab.jsx`)이 5절의 Grafana 대시보드를 iframe으로 그대로 띄웁니다. 별도의 차트 구현 없이 Grafana 대시보드 자체를 화면 안에 넣는 방식이라, 5절에서 설명한 변수 드롭다운과 범례 클릭(시리즈 isolate)이 그대로 동작합니다.
+`Ace_FE`는 5절의 대시보드를 통째로 보여주는 별도 "모니터링" 탭을 두지 않습니다. 대신 그래프가 실제로 관련 있는 화면(발급 운영/쿠폰 관리/정합성 리포트)에 패널 하나하나를 나눠서 넣고, Grafana의 대시보드 UI(Add 패널, Time range picker, 변수 드롭다운 등)는 전혀 노출하지 않습니다. 화면에 보이는 필터/집계 단위 컨트롤은 전부 Ace_FE가 직접 그린 버튼/드롭다운이며, 이 값들을 Grafana 패널의 URL 쿼리 파라미터(`var-<변수명>=<값>`)로 그대로 전달해서 그래프만 갱신합니다.
+
+이를 위해 Grafana 패널을 대시보드 전체가 아니라 **`d-solo`** 경로로 하나씩 불러옵니다. `d-solo`는 지정한 `panelId` 패널 하나만 렌더링하고 대시보드 자체의 좌측 메뉴/툴바/Add 패널 버튼은 렌더링하지 않는 Grafana 임베드 전용 모드입니다.
+
+```
+{GRAFANA_URL}/d-solo/ace-coupon-metrics/ace-coupon-metrics?orgId=1&panelId={panelId}&theme=light&refresh=5s&var-interval={interval}&var-result_issue=success&...
+```
+
+`var-<변수명>` 쿼리 파라미터는 4~5절의 대시보드 JSON에 정의된 변수 타입(`interval` 드롭다운이든 `query` 다중 선택이든)과 무관하게, 대시보드가 로드될 때 해당 변수의 현재 값을 그 파라미터 값으로 강제로 덮어씁니다. 그래서 대시보드 JSON 쪽 드롭다운 옵션 목록에 없는 값이라도 URL로 넘기면 그대로 적용됩니다 — Grafana를 직접 열어보는 사람에게는 안전한 드롭다운을 보여주면서, Ace_FE는 자신이 만든 컨트롤 값을 그대로 밀어넣을 수 있는 이유가 이것입니다.
+
+재사용 가능한 임베드 컴포넌트는 `Ace_FE/src/components/GrafanaMetricCard.jsx`입니다. 패널 제목, (있다면) 다중 선택 토글 필터 그룹, 집계 단위(`interval`) 드롭다운, `d-solo` iframe을 한 세트로 렌더링합니다. 집계 단위 드롭다운의 선택지는 대시보드 JSON의 `interval` 변수 옵션 목록(`5s`~`1d`, `1s` 제외)과 동일하게 맞춰뒀습니다. 아래처럼 패널마다 필요한 필터 그룹만 지정해서 씁니다.
+
+```jsx
+<GrafanaMetricCard
+  title="쿠폰 발급 현황"
+  panelId={1}
+  filterGroups={[
+    { name: 'result_issue', label: '접수 결과', options: [{ value: 'success', label: '성공' }, { value: 'fail', label: '실패' }] },
+    { name: 'result_relay', label: '저장 결과', options: [...] },
+  ]}
+/>
+```
+
+패널별 배치는 다음과 같습니다.
+
+| 화면(탭) | 패널 |
+|---|---|
+| 발급 운영 | 쿠폰 발급 현황(`panelId=1`), 쿠폰 발급 실패 사유별(`panelId=2`) |
+| 쿠폰 관리 | 쿠폰 상태 변경 현황(`panelId=3`), 쿠폰 상태 변경 실패 사유별(`panelId=4`) |
+| 정합성 리포트 | 정합성 검증 현황(`panelId=5`) |
 
 이 방식이 동작하려면 Grafana를 다음 두 가지가 가능한 상태로 띄워야 합니다 (`docker-compose.yml`의 `grafana` 서비스에 이미 반영됨).
 - **로그인 없이 조회 가능**: `GF_AUTH_ANONYMOUS_ENABLED=true` + `GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer`. 익명 사용자는 Viewer 권한만 가지므로 대시보드를 보기만 할 수 있고 수정/삭제는 못합니다.
@@ -97,7 +126,7 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 
 Ace_FE 쪽 설정:
 1. `Ace_FE/.env`(또는 `.env.local`)에 `VITE_GRAFANA_URL`을 지정합니다. 기본값은 `http://localhost:3000`이라 로컬 docker-compose 그대로 쓰면 별도 설정 없이도 동작합니다.
-2. `npm run dev`로 프론트를 띄운 뒤 좌측 메뉴의 **모니터링** 탭을 클릭하면 대시보드가 보입니다.
+2. `npm run dev`로 프론트를 띄운 뒤 좌측 메뉴의 **발급 운영**/**쿠폰 관리**/**정합성 리포트** 탭에서 각각 관련 그래프를 확인할 수 있습니다.
 
 ## 7. 트러블슈팅
 
@@ -111,6 +140,6 @@ Ace_FE 쪽 설정:
 **`ace-backend` Target이 DOWN이에요**
 - 백엔드 서버가 8080 포트로 떠 있는지 확인하세요. `docker/prometheus/prometheus.yml`은 `host.docker.internal:8080`을 바라보므로, 서버를 컨테이너가 아니라 로컬(IDE)에서 직접 띄우는 구성을 전제로 합니다.
 
-**Ace_FE 모니터링 탭에서 iframe이 비어 보이거나 콘솔에 `Refused to display ... in a frame` 에러가 떠요**
+**Ace_FE의 그래프가 비어 보이거나 콘솔에 `Refused to display ... in a frame` 에러가 떠요**
 - Grafana 컨테이너가 `GF_SECURITY_ALLOW_EMBEDDING=true`를 반영하기 전에 이미 떠 있던 경우입니다. 1절의 `--force-recreate` 명령으로 재생성하세요.
 - 브라우저 콘솔에 쿠키 관련 경고(SameSite)가 보이면, 프론트 개발 서버(예: `localhost:5173`)와 Grafana(`localhost:3000`)가 서로 다른 origin이라 발생하는 것입니다. 익명(Viewer) 접근이라 로그인 세션 자체는 필요 없지만, 브라우저 설정에 따라 여전히 막힐 수 있습니다 — 이 경우 크롬 기준 사이트 설정에서 서드파티 쿠키 차단을 해당 사이트에 한해 해제해보세요.
