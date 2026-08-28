@@ -20,8 +20,14 @@ public class IssuePersistenceCoordinator {
 
 	// 확정 호출 자체가 예외로 끝난 경우
 	public static final String CALL_FAILED = "CALL_FAILED";
-	private static final String COMPENSATION_SKIPPED_PERSISTED = "SKIPPED_PERSISTED";
-	private static final String COMPENSATION_SKIPPED_UNVERIFIED = "SKIPPED_UNVERIFIED";
+
+	// 저장이 확인돼 원복을 건너뛴 건
+	// 되돌리면 초과 발급이 되므로 재처리 대상X
+	public static final String COMPENSATION_SKIPPED_PERSISTED = "SKIPPED_PERSISTED";
+
+	// 저장 여부를 판별하지 못해 원복을 건너뛴 건
+	// 재고가 묶여 있을 수 있어 재처리 대상
+	public static final String COMPENSATION_SKIPPED_UNVERIFIED = "SKIPPED_UNVERIFIED";
 
 	private final IssuePersistenceService persistenceService;
 	private final IssuePersistenceProbe persistenceProbe;

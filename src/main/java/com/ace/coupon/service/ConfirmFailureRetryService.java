@@ -34,6 +34,10 @@ public class ConfirmFailureRetryService {
 	// 경보에 실을 회차 수
 	private static final int BLOCKED_EVENT_SAMPLE_SIZE = 20;
 
+	// 이 재처리기가 맡는 단계
+	// 보상 실패(COMPENSATE 및 그 짝인 DB_INSERT / RELAY)는 CompensationFailureRetryService 가 맡는다
+	private static final Set<IssueFailureStage> STAGES = Set.of(IssueFailureStage.CONFIRM);
+
 	// 재확인해 볼 값
 	private static final Set<String> RETRYABLE_RESULTS = Set.of(
 			IssuePersistenceCoordinator.CALL_FAILED,
@@ -73,7 +77,7 @@ public class ConfirmFailureRetryService {
 		// 마지막 시도 시각 오름차순으로 한 페이지만 가져온다
 		// 커서를 들고 다니지 않아도 시도한 건은 자연히 뒤로 밀린다
 		List<IssueFailureLog> targets = failureLogRepository.findRetryTargets(
-				IssueFailureStage.CONFIRM,
+				STAGES,
 				RETRYABLE_RESULTS,
 				PageRequest.of(0, batchSize));
 
@@ -94,10 +98,9 @@ public class ConfirmFailureRetryService {
 		// 그 상태를 비어 있다고 보고하면 막힌 회차가 은폐된다
 		SweepResult result = new SweepResult(
 				scanned, resolved, alreadyResolved, expired, notRetryable, retryFailed,
-				failureLogRepository.countUnrecoverable(
-						IssueFailureStage.CONFIRM, RETRYABLE_RESULTS),
+				failureLogRepository.countUnrecoverable(STAGES, RETRYABLE_RESULTS),
 				failureLogRepository.findBlockedEventIds(
-						IssueFailureStage.CONFIRM, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
+						STAGES, PageRequest.of(0, BLOCKED_EVENT_SAMPLE_SIZE)));
 		warnWhenUnrecovered(result);
 		return result;
 	}

@@ -19,16 +19,17 @@ public interface IssueFailureLogRepository extends JpaRepository<IssueFailureLog
 	// 재처리 대상
 	// 되살릴 수 있는 실패만 조회
 	// 정렬은 마지막 시도 시각 오름차순
+	// 단계를 목록으로 받는 이유: 한 단계만 조회하면 나머지 단계가 아무에게도 안 읽힌다
 	@Query("""
 			SELECT failure
 			FROM IssueFailureLog failure
-			WHERE failure.failureStage = :stage
+			WHERE failure.failureStage IN :stages
 				AND failure.resolvedAt IS NULL
 				AND failure.compensationResult IN :retryableResults
 			ORDER BY failure.lastAttemptAt ASC, failure.id ASC
 			""")
 	List<IssueFailureLog> findRetryTargets(
-			@Param("stage") IssueFailureStage stage,
+			@Param("stages") Collection<IssueFailureStage> stages,
 			@Param("retryableResults") Collection<String> retryableResults,
 			Pageable pageable);
 
@@ -36,23 +37,23 @@ public interface IssueFailureLogRepository extends JpaRepository<IssueFailureLog
 	@Query("""
 			SELECT COUNT(failure)
 			FROM IssueFailureLog failure
-			WHERE failure.failureStage = :stage
+			WHERE failure.failureStage IN :stages
 				AND failure.resolvedAt IS NULL
 				AND failure.compensationResult NOT IN :retryableResults
 			""")
 	long countUnrecoverable(
-			@Param("stage") IssueFailureStage stage,
+			@Param("stages") Collection<IssueFailureStage> stages,
 			@Param("retryableResults") Collection<String> retryableResults);
 
-	// 미해소 확정 실패가 남아 있는 회차
+	// 미해소 실패가 남아 있는 회차
 	@Query("""
 			SELECT DISTINCT failure.eventId
 			FROM IssueFailureLog failure
-			WHERE failure.failureStage = :stage
+			WHERE failure.failureStage IN :stages
 				AND failure.resolvedAt IS NULL
 			ORDER BY failure.eventId
 			""")
 	List<Long> findBlockedEventIds(
-			@Param("stage") IssueFailureStage stage,
+			@Param("stages") Collection<IssueFailureStage> stages,
 			Pageable pageable);
 }

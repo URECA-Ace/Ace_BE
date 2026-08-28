@@ -44,7 +44,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.flush();
 
 		List<Long> found = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
+				Set.of(IssueFailureStage.CONFIRM), RETRYABLE, PageRequest.of(0, 100)));
 
 		assertThat(found).contains(callFailed.getId(), writeError.getId());
 		assertThat(found).doesNotContain(
@@ -66,7 +66,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.clear();
 
 		List<Long> found = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
+				Set.of(IssueFailureStage.CONFIRM), RETRYABLE, PageRequest.of(0, 100)));
 
 		assertThat(found).containsSubsequence(
 				neverTried.getId(), longAgo.getId(), recentlyTried.getId());
@@ -84,7 +84,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.clear();
 
 		List<Long> found = idsOf(repository.findRetryTargets(
-				IssueFailureStage.CONFIRM, RETRYABLE, PageRequest.of(0, 100)));
+				Set.of(IssueFailureStage.CONFIRM), RETRYABLE, PageRequest.of(0, 100)));
 
 		assertThat(found).doesNotContain(failure.getId());
 	}
@@ -99,12 +99,12 @@ class IssueFailureLogRepositoryTest {
 		persist(eventId, IssueFailureStage.CONFIRM, "REQUEST_NOT_FOUND", LocalDateTime.now());
 		entityManager.flush();
 
-		long before = repository.countUnrecoverable(IssueFailureStage.CONFIRM, RETRYABLE);
+		long before = repository.countUnrecoverable(Set.of(IssueFailureStage.CONFIRM), RETRYABLE);
 
 		persist(eventId, IssueFailureStage.CONFIRM, "INVALID_ARGUMENT", null);
 		entityManager.flush();
 
-		assertThat(repository.countUnrecoverable(IssueFailureStage.CONFIRM, RETRYABLE))
+		assertThat(repository.countUnrecoverable(Set.of(IssueFailureStage.CONFIRM), RETRYABLE))
 				.isEqualTo(before + 1);
 	}
 
@@ -118,7 +118,7 @@ class IssueFailureLogRepositoryTest {
 		entityManager.flush();
 
 		List<Long> blockedEventIds = repository.findBlockedEventIds(
-				IssueFailureStage.CONFIRM, PageRequest.of(0, 100));
+				Set.of(IssueFailureStage.CONFIRM), PageRequest.of(0, 100));
 
 		// 되살릴 수 없는 건도 회차를 막으므로 재시도 가능 여부와 무관하게 잡혀야 한다
 		assertThat(blockedEventIds).contains(blocked);
