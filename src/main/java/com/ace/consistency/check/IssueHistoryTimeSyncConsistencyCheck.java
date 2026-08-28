@@ -22,6 +22,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "발급·이력 시간 동기화 검사";
+	}
 
 	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간 .env로 일괄 관리예정 !!!!!
 	private static final int MAX_BATCH_LAG_SECONDS = 86400; 

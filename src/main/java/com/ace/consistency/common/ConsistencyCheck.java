@@ -32,6 +32,11 @@ public interface ConsistencyCheck {
 		return this.getClass().getSimpleName();
 	}
 
+	/** 관리자 화면에 노출할 검사 이름. */
+	default String getLabel() {
+		return getName();
+	}
+
 	/**
 	 * 이 Check가 지원하는 Scope 종류들. Runner가 실행 전 사전 검증에 사용한다.
 	 * 하나의 Check가 여러 ScopeType을 지원할 수 있다 — 예를 들어 재고 정합성 검사는

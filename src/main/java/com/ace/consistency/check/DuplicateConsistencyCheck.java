@@ -28,6 +28,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class DuplicateConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "중복 발급 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 

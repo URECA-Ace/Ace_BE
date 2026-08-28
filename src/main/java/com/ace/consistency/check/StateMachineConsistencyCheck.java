@@ -26,6 +26,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class StateMachineConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "상태 전이 정합성 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 

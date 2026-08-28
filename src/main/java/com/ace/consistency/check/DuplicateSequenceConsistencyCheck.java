@@ -21,6 +21,10 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 public class DuplicateSequenceConsistencyCheck implements ConsistencyCheck {
+	@Override
+	public String getLabel() {
+		return "중복 순번 검사";
+	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 	private static final String SCOPE_CONDITION = """
