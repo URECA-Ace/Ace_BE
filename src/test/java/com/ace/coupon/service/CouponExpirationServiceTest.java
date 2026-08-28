@@ -89,4 +89,40 @@ class CouponExpirationServiceTest {
 		assertThat(result).isEqualTo(2);
 		verify(processor, Mockito.times(2)).processChunk(any(), any());
 	}
+
+	@Test
+	@DisplayName("대상이 정확히 chunkSize 배수일 때 다음 루프에서 빈 리스트를 받고 종료된다")
+	void exactChunkSizeMultiplier_loopsProperly() {
+		CouponIssue issue1 = CouponIssue.builder().id(1L).status(CouponIssueStatus.ISSUED).build();
+		CouponIssue issue2 = CouponIssue.builder().id(2L).status(CouponIssueStatus.ISSUED).build();
+
+		given(couponIssueRepository.findExpiredIssuesChunk(any(), eq(0L), any()))
+				.willReturn(List.of(issue1, issue2)); // chunkSize와 동일한 개수 반환
+		given(couponIssueRepository.findExpiredIssuesChunk(any(), eq(2L), any()))
+				.willReturn(Collections.emptyList()); // 다음 루프에서 빈 리스트
+
+		given(processor.processChunk(any(), any())).willReturn(2);
+
+		int result = service.expireDueCoupons(2);
+
+		assertThat(result).isEqualTo(2);
+		verify(couponIssueRepository, Mockito.times(2)).findExpiredIssuesChunk(any(), any(), any());
+		verify(processor, Mockito.times(1)).processChunk(any(), any());
+	}
+
+	@Test
+	@DisplayName("동시성 등으로 이미 EXPIRED 상태로 전이되어 갱신 건수가 0건이면 0을 반환하여 멱등성을 보장한다")
+	void idempotency_alreadyExpired() {
+		CouponIssue issue1 = CouponIssue.builder().id(1L).status(CouponIssueStatus.ISSUED).build();
+
+		given(couponIssueRepository.findExpiredIssuesChunk(any(), eq(0L), any()))
+				.willReturn(List.of(issue1));
+		// 벌크 쿼리가 0을 반환하여 processor가 0을 반환한다고 가정
+		given(processor.processChunk(any(), any())).willReturn(0);
+
+		int result = service.expireDueCoupons(100);
+
+		assertThat(result).isZero();
+		verify(processor).processChunk(any(), any());
+	}
 }

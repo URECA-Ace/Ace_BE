@@ -23,6 +23,8 @@ public class CouponExpirationServiceImpl implements CouponExpirationService {
 	private final CouponExpirationProcessor processor;
 	private final CouponIssueRedisProperties properties;
 
+	private static final int MAX_PAGES = 50;
+
 	@Override
 	public int expireDueCoupons(int chunkSize) {
 		LocalDateTime now = LocalDateTime.now(properties.zoneId());
@@ -31,7 +33,7 @@ public class CouponExpirationServiceImpl implements CouponExpirationService {
 		Pageable pageable = PageRequest.of(0, chunkSize);
 		int pageCount = 0;
 
-		while (pageCount < 50) {
+		while (pageCount < MAX_PAGES) {
 			List<CouponIssue> chunk = couponIssueRepository
 					.findExpiredIssuesChunk(now, lastId, pageable);
 
@@ -49,7 +51,7 @@ public class CouponExpirationServiceImpl implements CouponExpirationService {
 			pageCount++;
 		}
 
-		if (pageCount >= 50) {
+		if (pageCount >= MAX_PAGES) {
 			log.warn("최대 페이지 상한에 도달했습니다.");
 		}
 
