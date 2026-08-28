@@ -89,7 +89,7 @@ public class ConsistencyRecoveryDispatcher {
 		List<RecoveryResult> results = new ArrayList<>();
 		boolean allRecovered = true;
 		for (RecoveryOutcome outcome : outcomes) {
-			RecoveryResult saved = recoveryResultRecorder.record(verificationResultId, outcome);
+			RecoveryResult saved = recoveryResultRecorder.record(verificationResultId, target.getCheckName(), action, outcome);
 			results.add(saved);
 
 			if (outcome.getStatus() == RecoveryResultStatus.FAIL) {

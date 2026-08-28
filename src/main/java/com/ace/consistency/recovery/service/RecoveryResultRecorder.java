@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.RecoveryResult;
+import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,7 @@ public class RecoveryResultRecorder {
 	 * Issue/History 복구와 이후 재검증은 별도 단계이므로, 실행 결과 이력은 outcome 단위로 커밋한다.
 	 */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public RecoveryResult record(Long verificationResultId, RecoveryOutcome outcome) {
-		return repository.save(RecoveryResult.from(verificationResultId, outcome, LocalDateTime.now()));
+	public RecoveryResult record(Long verificationResultId, String checkName, RecoveryAction action, RecoveryOutcome outcome) {
+		return repository.save(RecoveryResult.from(verificationResultId, checkName, action, outcome, LocalDateTime.now()));
 	}
 }
