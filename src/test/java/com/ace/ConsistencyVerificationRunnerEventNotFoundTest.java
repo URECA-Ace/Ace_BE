@@ -1,7 +1,6 @@
 package com.ace;
 
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
-import com.ace.consistency.check.DuplicateConsistencyCheck;
 import com.ace.consistency.check.StockConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
@@ -24,12 +23,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * ConsistencyVerificationRunner가 존재하지 않는 event_id(EVENT 스코프)로 호출됐을 때
  * EventNotFoundException을 실제로 던지는지 확인하는 통합 테스트.
  *
- * StockAndDuplicateConsistencyCheckTest와 달리 여기서는 반드시 Runner를 거쳐서 호출해야 한다 —
+ * StockConsistencyCheckTest와 달리 여기서는 반드시 Runner를 거쳐서 호출해야 한다 —
  * 존재 여부 검증은 Check가 아니라 Runner가 담당하기 때문이다.
  *
  * Runner는 CouponEventRepository(Spring Data JPA)에 의존하는데, 이건 @JdbcTest 슬라이스에서는
  * 로드되지 않는 컴포넌트라서 @SpringBootTest로 전체 컨텍스트를 띄운다
- * (그만큼 StockAndDuplicateConsistencyCheckTest보다 느리다).
+ * (그만큼 StockConsistencyCheckTest보다 느리다).
  *
  * ConsistencyCheckIntegrationTestBase가 띄우는 Testcontainers MySQL에 대고 실행한다.
  */
@@ -44,9 +43,6 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 
 	@Autowired
 	private StockConsistencyCheck stockConsistencyCheck;
-
-	@Autowired
-	private DuplicateConsistencyCheck duplicateConsistencyCheck;
 
 	private Long createdEventId;
 
@@ -66,7 +62,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하지_않는_이벤트로_Runner를_호출하면_EventNotFoundException이_발생한다() {
 		Long nonExistentEventId = findNonExistentEventId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck);
 
 		EntityNotFoundException ex = assertThrows(EntityNotFoundException.class,
 				() -> runner.run(checks, Scope.ofEvent(nonExistentEventId), TriggerType.ON_DEMAND));
@@ -83,7 +79,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하지_않는_이벤트면_결과가_저장되지_않는다() {
 		Long nonExistentEventId = findNonExistentEventId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck);
 
 		long before = countVerificationResults();
 
@@ -102,11 +98,11 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 	@Test
 	void 존재하는_이벤트면_정상적으로_결과를_반환한다() {
 		Long existingEventId = insertDummyEvent();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck);
 
 		assertDoesNotThrow(() -> {
 			var results = runner.run(checks, Scope.ofEvent(existingEventId), TriggerType.ON_DEMAND);
-			assertEquals(2, results.size());
+			assertEquals(1, results.size());
 		});
 	}
 

@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import static org.mockito.ArgumentMatchers.any;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -28,6 +29,9 @@ import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.recovery.repository.RecoveryResultRepository;
 
+// 컨트롤러가 @ConditionalOnProperty 로 묶여 있어, 켜 주지 않으면 빈이 등록되지 않아 전 요청이 404가 된다
+@WebMvcTest(ConsistencyRecoveryController.class)
+@TestPropertySource(properties = "consistency.recovery.admin.enabled=true")
 @WebMvcTest(value = ConsistencyRecoveryController.class,
 		properties = "consistency.recovery.admin.enabled=true")
 class ConsistencyRecoveryControllerTest {

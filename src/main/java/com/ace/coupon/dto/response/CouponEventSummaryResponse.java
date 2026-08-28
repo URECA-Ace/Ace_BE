@@ -15,7 +15,8 @@ public record CouponEventSummaryResponse(
 		Integer remainingStock,
 		CouponEventStatus status,
 		OffsetDateTime openAt,
-		OffsetDateTime closeAt) {
+		OffsetDateTime closeAt,
+		OffsetDateTime statusChangedAt) {
 
 	public static CouponEventSummaryResponse from(CouponEvent event, ZoneId zoneId) {
 		return new CouponEventSummaryResponse(
@@ -27,6 +28,7 @@ public record CouponEventSummaryResponse(
 				event.getRemainingStock(),
 				event.getStatus(),
 				event.getOpenAt().atZone(zoneId).toOffsetDateTime(),
-				event.getCloseAt().atZone(zoneId).toOffsetDateTime());
+				event.getCloseAt().atZone(zoneId).toOffsetDateTime(),
+				event.getUpdatedAt().atZone(zoneId).toOffsetDateTime());
 	}
 }

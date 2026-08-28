@@ -22,12 +22,14 @@ import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponStateChangeResponse;
 import com.ace.coupon.entity.CouponStateIdempotency;
 import com.ace.coupon.enums.CouponIssueStatus;
+import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 
 class CouponStateServiceImplTest {
 
     private CouponStateProcessor processor;
     private CouponStateIdempotencyRepository idempotencyRepository;
+    private CouponIssueRepository couponIssueRepository;
     private CouponStateServiceImpl couponStateService;
 
     private final Long ISSUE_ID = 1L;
@@ -38,7 +40,8 @@ class CouponStateServiceImplTest {
     void setUp() {
         processor = Mockito.mock(CouponStateProcessor.class);
         idempotencyRepository = Mockito.mock(CouponStateIdempotencyRepository.class);
-        couponStateService = new CouponStateServiceImpl(processor, idempotencyRepository);
+        couponIssueRepository = Mockito.mock(CouponIssueRepository.class);
+        couponStateService = new CouponStateServiceImpl(processor, idempotencyRepository, couponIssueRepository);
     }
 
     @Test

@@ -34,8 +34,8 @@ public class CouponController {
 
 	@GetMapping
 	public ResponseEntity<ApiResponse<List<CouponSummaryResponse>>> findCoupons(
-			@RequestParam(required = false) String keyword,
-			@RequestParam(defaultValue = "6")
+			@RequestParam(name = "keyword", required = false) String keyword,
+			@RequestParam(name = "size", defaultValue = "6")
 			@Min(value = 1, message = "size는 1 이상이어야 합니다.")
 			@Max(value = 50, message = "size는 50 이하여야 합니다.")
 			int size) {

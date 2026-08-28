@@ -57,6 +57,7 @@ class RedisCouponIssueIntegrationTest {
 	private static LettuceConnectionFactory connectionFactory;
 	private static StringRedisTemplate redisTemplate;
 	private static CampaignRedisInitializer initializer;
+	private static CampaignRedisCloser closer;
 	private static RedisCouponIssueProcessor processor;
 	private static RedisCouponEventStatsReader statsReader;
 	private static SimpleMeterRegistry meterRegistry;
@@ -80,6 +81,10 @@ class RedisCouponIssueIntegrationTest {
 				redisTemplate,
 				script("scripts/coupon-campaign-initialize.lua", List.class),
 				properties,
+				failureObserver);
+		closer = new CampaignRedisCloser(
+				redisTemplate,
+				script("scripts/coupon-campaign-close.lua", List.class),
 				failureObserver);
 		processor = new RedisCouponIssueProcessor(
 				redisTemplate,
@@ -126,6 +131,24 @@ class RedisCouponIssueIntegrationTest {
 		assertThat(conflict).isEqualTo(CampaignInitializationResult.CONFIGURATION_CONFLICT);
 		assertThat(redisTemplate.opsForValue().get(CouponRedisKeys.campaign(campaignId).stock()))
 				.isEqualTo("100");
+	}
+
+	@Test
+	@DisplayName("수동 마감 이후의 발급 요청은 Redis 원자 연산에서 전부 거절한다")
+	void rejectsIssueAfterManualClose() {
+		long campaignId = nextCampaignId();
+		Instant now = Instant.now();
+		initializer.initialize(campaignId, 10, now.minusSeconds(10), now.plusSeconds(600));
+
+		CampaignCloseDecision closeDecision = closer.close(campaignId);
+		CampaignCloseDecision replayDecision = closer.close(campaignId);
+		CouponIssueDecision issueDecision = processor.issue(campaignId, 1L, UUID.randomUUID());
+
+		assertThat(closeDecision.result()).isEqualTo(CampaignCloseResult.CLOSED);
+		assertThat(replayDecision.result()).isEqualTo(CampaignCloseResult.ALREADY_CLOSED);
+		assertThat(replayDecision.closedAt()).isEqualTo(closeDecision.closedAt());
+		assertThat(issueDecision.code()).isEqualTo(CouponIssueLuaCode.EVENT_CLOSED);
+		assertThat(statsReader.read(campaignId).status()).isEqualTo(CouponEventStatus.CLOSED);
 	}
 
 	@Test

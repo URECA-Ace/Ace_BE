@@ -4,6 +4,7 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResultPersister;
+import com.ace.consistency.repository.VerificationViolationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.Job;
@@ -35,13 +36,14 @@ import java.util.List;
 public class ConsistencyBatchJobFactory {
 
     public static final String JOB_NAME = "consistencyVerificationJob";
-    private static final int PAGE_SIZE = 500;
+    private static final int PAGE_SIZE = 10;
 
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final VerificationResultPersister resultPersister;
     private final BatchFailureLogRepository failureLogRepository;
+    private final VerificationViolationRepository violationRepository;
 
     public Job buildJob(List<ConsistencyCheck> checks, Scope scope, TriggerType triggerType) {
         List<Step> steps = checks.stream()
@@ -78,7 +80,7 @@ public class ConsistencyBatchJobFactory {
     private Step buildStep(ConsistencyCheck check, Scope scope, TriggerType triggerType) {
         EventIdPageReader reader = new EventIdPageReader(jdbcTemplate, PAGE_SIZE, scope.getTo());
         ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(check, scope.getTo());
-        CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter();
+        CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(violationRepository);
         ConsistencyStepCompletionListener listener =
                 new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister);
 
@@ -88,6 +90,7 @@ public class ConsistencyBatchJobFactory {
                 .processor(processor)
                 .writer(writer)
                 .transactionManager(transactionManager)
+                .listener(writer)
                 .listener(listener)
                 .build();
     }
