@@ -20,6 +20,7 @@ import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.CouponEventRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -31,9 +32,23 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 	private final CouponEventRepository couponEventRepository;
 	private final CouponIssuePersistenceProperties persistenceProperties;
 	private final IssuePersistenceCoordinator persistenceCoordinator;
+	private final MeterRegistry meterRegistry;
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
+		try {
+			CouponIssueAcceptedResponse response = doIssue(eventId, userId, idempotencyKey);
+			meterRegistry.counter("coupon.issue", "result", "success").increment();
+			return response;
+		} catch (CouponException exception) {
+			meterRegistry.counter("coupon.issue",
+					"result", "fail",
+					"reason", exception.getErrorCode().name()).increment();
+			throw exception;
+		}
+	}
+
+	private CouponIssueAcceptedResponse doIssue(Long eventId, Long userId, UUID idempotencyKey) {
 		CouponIssueDecision decision;
 		try {
 			decision = issueProcessor.issue(eventId, userId, idempotencyKey);

@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
 import com.ace.coupon.dto.response.CouponIssueAcceptedResponse;
@@ -59,7 +61,8 @@ class CouponIssueServiceImplTest {
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
 				couponEventRepository,
 				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
-				coordinator);
+				coordinator,
+				new SimpleMeterRegistry());
 	}
 
 	@Test

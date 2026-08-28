@@ -2,6 +2,7 @@ package com.ace.consistency.common;
 
 import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -19,6 +20,7 @@ public class VerificationResultPersister {
 	private final VerificationResultRepository resultRepository;
 	//todo: notify 도메인 머지 후 주석해제
 	private final ApplicationEventPublisher eventPublisher;
+	private final MeterRegistry meterRegistry;
 
 	@Transactional
 	public void saveAndNotify(List<VerificationResult> results, Scope scope, TriggerType triggerType) {
@@ -26,6 +28,10 @@ public class VerificationResultPersister {
 		resultRepository.saveAll(
 				results.stream().map(VerificationResultEntity::from).toList()
 		);
+
+		results.forEach(result -> meterRegistry.counter("consistency.verification",
+				"check", result.getCheckName(),
+				"status", result.getStatus().name()).increment());
 
 		//todo: notify 도메인 머지 후 주석해제
 		/*

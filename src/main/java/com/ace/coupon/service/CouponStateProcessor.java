@@ -11,6 +11,7 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.repository.CouponHistoryRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,9 +28,30 @@ public class CouponStateProcessor {
 	private final CouponHistoryRepository couponHistoryRepository;
 	private final CouponStateIdempotencyRepository idempotencyRepository;
 	private final CouponIssueRedisProperties properties;
+	private final MeterRegistry meterRegistry;
 
 	@Transactional
 	public CouponStateChangeResponse processStateChange(
+			Long issueId, Long userId, UUID idempotencyKey,
+			CouponIssueStatus targetStatus, String reason) {
+		try {
+			CouponStateChangeResponse response =
+					doProcessStateChange(issueId, userId, idempotencyKey, targetStatus, reason);
+			meterRegistry.counter("coupon.state.change",
+					"result", "success",
+					"from", response.previousStatus().name(),
+					"to", response.currentStatus().name()).increment();
+			return response;
+		} catch (CouponException exception) {
+			meterRegistry.counter("coupon.state.change",
+					"result", "fail",
+					"to", targetStatus.name(),
+					"reason", exception.getErrorCode().name()).increment();
+			throw exception;
+		}
+	}
+
+	private CouponStateChangeResponse doProcessStateChange(
 			Long issueId, Long userId, UUID idempotencyKey,
 			CouponIssueStatus targetStatus, String reason) {
 
