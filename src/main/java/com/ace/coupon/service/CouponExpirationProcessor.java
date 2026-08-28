@@ -56,8 +56,11 @@ public class CouponExpirationProcessor {
 		couponHistoryRepository.saveAll(histories);
 		AfterCommitExecutor.execute(() -> meterRegistry.counter("coupon.state.change",
 				"result", "success",
+				"result_label", "성공",
 				"from", CouponIssueStatus.ISSUED.name(),
-				"to", CouponIssueStatus.EXPIRED.name()).increment(actualExpired));
+				"from_label", CouponStateProcessor.STATE_LABELS.get(CouponIssueStatus.ISSUED),
+				"to", CouponIssueStatus.EXPIRED.name(),
+				"to_label", CouponStateProcessor.STATE_LABELS.get(CouponIssueStatus.EXPIRED)).increment(actualExpired));
 		return actualExpired;
 	}
 }

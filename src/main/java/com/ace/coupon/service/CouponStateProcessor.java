@@ -33,7 +33,8 @@ public class CouponStateProcessor {
 	private final MeterRegistry meterRegistry;
 
 	// Grafana 범례에 enum/ErrorCode 이름 대신 한글로 표시하기 위한 라벨. Ace_FE 쪽 상태/사유 토글과 문구를 맞춘다.
-	private static final Map<CouponIssueStatus, String> STATE_LABELS = Map.of(
+	// CouponExpirationProcessor도 동일한 라벨을 써야 해서 package-private으로 공유한다.
+	static final Map<CouponIssueStatus, String> STATE_LABELS = Map.of(
 			CouponIssueStatus.ISSUED, "발급 완료",
 			CouponIssueStatus.USED, "사용 완료",
 			CouponIssueStatus.EXPIRED, "기간 만료",
