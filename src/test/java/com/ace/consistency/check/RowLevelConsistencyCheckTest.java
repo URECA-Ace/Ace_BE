@@ -46,8 +46,8 @@ class RowLevelConsistencyCheckTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail()).containsKey("sample");
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations()).hasSize(1);
+		assertThat(outcome.getViolations().toString())
 				.doesNotContain("total_violation_count");
 	}
 

@@ -5,9 +5,12 @@ import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.batch.ConsistencyBatchJobFactory;
 import com.ace.consistency.batch.ConsistencyJobExecutionListener;
 import com.ace.coupon.repository.CouponEventRepository;
+import jakarta.annotation.PostConstruct;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.configuration.DuplicateJobException;
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.job.Job;
@@ -17,6 +20,7 @@ import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.core.launch.*;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.stereotype.Component;
 
@@ -48,6 +52,27 @@ public class ConsistencyVerificationRunner {
 	private final JobRepository jobRepository;
 	private final JobRegistry jobRegistry;
 	private final List<ConsistencyCheck> allChecks;
+
+	@Value("${consistency.violation-cleanup.restart-allowed-minutes:25}")
+	private long restartAllowedMinutes;
+
+	@Value("${consistency.violation-cleanup.orphan-threshold-minutes:30}")
+	private long orphanThresholdMinutes;
+
+	/**
+	 * 재시작 허용 시간이 고아 데이터 정리 threshold보다 짧아야, 재시작 검증을 통과한 직후
+	 * 정리 스케줄러가 그 위반 행을 지워버리는 경합을 막을 수 있다. 실제 재시작이 일어날 때가
+	 * 아니라 기동 시점에 즉시 검증해, 운영 중 잘못된 설정을 뒤늦게(장애 복구 시도 중에) 발견하는
+	 * 일이 없도록 한다.
+	 */
+	@PostConstruct
+	private void validateViolationCleanupWindow() {
+		if (restartAllowedMinutes <= 0 || restartAllowedMinutes >= orphanThresholdMinutes) {
+			throw new IllegalStateException("배치 재시작 허용 시간은 0보다 크고 고아 데이터 정리 threshold보다 짧아야 합니다. "
+					+ "restartAllowedMinutes=" + restartAllowedMinutes
+					+ ", orphanThresholdMinutes=" + orphanThresholdMinutes);
+		}
+	}
 
 	/**
 	 * 여러 Check를 지정된 Scope, TriggerType으로 순차 실행한다.
@@ -169,6 +194,8 @@ public class ConsistencyVerificationRunner {
 			throw new IllegalArgumentException("해당 jobExecutionId의 실행 기록이 없습니다. jobExecutionId=" + jobExecutionId);
 		}
 
+		validateRestartWindow(failedExecution);
+
 		ExecutionContext context = failedExecution.getExecutionContext();
 		List<ConsistencyCheck> checks = resolveChecks(context.getString(ConsistencyJobExecutionListener.RESTART_CHECK_NAMES_KEY));
 		LocalDateTime scopeTo = LocalDateTime.parse(context.getString(ConsistencyJobExecutionListener.RESTART_SCOPE_TO_KEY));
@@ -185,6 +212,24 @@ public class ConsistencyVerificationRunner {
 			return restarted;
 		} catch (DuplicateJobException | JobRestartException ex) {
 			throw new IllegalStateException("정합성 검증 배치 재시작에 실패했습니다. jobExecutionId=" + jobExecutionId, ex);
+		}
+	}
+
+	private void validateRestartWindow(JobExecution failedExecution) {
+		LocalDateTime lastUpdated = failedExecution.getStepExecutions().stream()
+				.filter(step -> step.getStatus() != BatchStatus.COMPLETED)
+				.map(StepExecution::getLastUpdated)
+				.filter(Objects::nonNull)
+				.max(LocalDateTime::compareTo)
+				.orElseThrow(() -> new IllegalStateException(
+						"재시작할 미완료 Step의 마지막 갱신 시각을 찾을 수 없습니다. jobExecutionId="
+								+ failedExecution.getId()));
+
+		LocalDateTime deadline = lastUpdated.plusMinutes(restartAllowedMinutes);
+		if (LocalDateTime.now().isAfter(deadline)) {
+			throw new IllegalStateException("배치 재시작 가능 시간이 만료되었습니다. 새로운 ALL 검증을 시작해야 합니다. "
+					+ "jobExecutionId=" + failedExecution.getId()
+					+ ", lastUpdated=" + lastUpdated + ", deadline=" + deadline);
 		}
 	}
 
@@ -231,7 +276,7 @@ public class ConsistencyVerificationRunner {
 			} else {
 				log.warn("Check {} FAILED. scope={}, diff={}", check.getName(), scope, outcome.getDiffDetail());
 				return VerificationResult.fail(check.getName(), triggerType, scope, outcome.getViolationCount(), outcome.getDiffDetail(),
-						executedAt, duration);
+						outcome.getViolations(), executedAt, duration);
 			}
 		} catch (Exception ex) {
 			long duration = System.currentTimeMillis() - start;
