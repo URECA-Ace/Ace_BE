@@ -95,6 +95,30 @@ public class CouponStateController {
 		
 		return ResponseEntity.ok(ApiResponse.success(response));
 	}
+
+	@PatchMapping("/{issueId}/expire")
+	public ResponseEntity<ApiResponse<CouponStateChangeResponse>> expire(
+			@PathVariable(name = "issueId")
+			@Positive(message = "issueId는 0보다 커야 합니다.")
+			Long issueId,
+
+			@RequestHeader(name = "Idempotency-Key")
+			String idempotencyKey,
+
+			@Valid
+			@RequestBody
+			CouponStateChangeRequest request) {
+
+		UUID parsedIdempotencyKey = parseIdempotencyKey(idempotencyKey);
+
+		CouponStateChangeResponse response = couponStateService.expire(
+				issueId,
+				request.userId(),
+				parsedIdempotencyKey,
+				request.reason());
+
+		return ResponseEntity.ok(ApiResponse.success(response));
+	}
   
 	private UUID parseIdempotencyKey(String value) {
 		try {
