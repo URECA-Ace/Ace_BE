@@ -162,4 +162,5 @@ public class VerificationResultEntity {
 				.recoveryStatus(RecoveryStatus.NONE)
 				.build();
 	}
+
 }

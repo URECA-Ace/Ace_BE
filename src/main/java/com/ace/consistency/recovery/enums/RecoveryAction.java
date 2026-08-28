@@ -29,7 +29,13 @@ public enum RecoveryAction {
 	 * StockConsistencyCheck 전용: 실제 활성 발급 건수가 total_stock을 초과한 진짜 초과발급 상태에서,
 	 * 가장 최근에 발급된 ISSUED 건부터 초과분만큼 CANCELED로 되돌려 슬롯을 반납한다.
 	 */
-	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수");
+	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수"),
+
+	/** IssueHistoryTimeSyncConsistencyCheck 전용: coupon_issue의 기준 시각을 coupon_history에 맞춰 동기화한다. */
+	SYNC_TIME_TO_HISTORY("이력 시간으로 동기화"),
+
+	/** StateMachineConsistencyCheck 전용: 중간 이력을 임의로 삽입하거나 끊긴 이력을 삭제하여 상태 연속성을 복원한다. */
+	RESTORE_STATE_MACHINE("상태 머신 복원");
 
 	private final String label;
 

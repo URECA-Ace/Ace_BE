@@ -35,6 +35,8 @@ public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> 
 	List<CouponIssue> findByCouponEvent_IdAndStatusInOrderByIssueSequenceDesc(
 			Long eventId, List<CouponIssueStatus> statuses);
 
+	// IssueHistoryTimeSyncConsistencyCheck 복구 대상 선정용: EXPIRED는 "더 늦은 쪽" 비교 대상이 아니라 제외
+	List<CouponIssue> findByCouponEvent_IdAndStatusIn(Long eventId, List<CouponIssueStatus> statuses);
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("SELECT ci FROM CouponIssue ci WHERE ci.id = :issueId")  
 	Optional<CouponIssue> findByIdForUpdate(@Param("issueId") Long issueId);
