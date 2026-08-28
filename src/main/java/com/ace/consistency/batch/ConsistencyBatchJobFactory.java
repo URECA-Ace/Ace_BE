@@ -36,7 +36,7 @@ import java.util.List;
 public class ConsistencyBatchJobFactory {
 
     public static final String JOB_NAME = "consistencyVerificationJob";
-    private static final int PAGE_SIZE = 500;
+    private static final int PAGE_SIZE = 10;
 
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;

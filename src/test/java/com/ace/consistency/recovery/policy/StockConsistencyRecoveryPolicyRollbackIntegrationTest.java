@@ -19,12 +19,17 @@ import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
+import com.ace.consistency.common.ConsistencyCheck.Violation;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.repository.CouponHistoryRepository;
+import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 /**
  * 여러 발급 건을 순차 회수하는 도중 예외가 발생했을 때, 앞서 처리한 변경까지 전부
@@ -37,6 +42,10 @@ class StockConsistencyRecoveryPolicyRollbackIntegrationTest extends ConsistencyC
 
 	@Autowired
 	private StockConsistencyRecoveryPolicy policy;
+	@Autowired
+	private VerificationResultRepository resultRepository;
+	@Autowired
+	private VerificationViolationRepository violationRepository;
 
 	@Test
 	@DisplayName("초과발급 회수 도중 예외가 발생하면 앞서 처리한 발급 건도 롤백되어 원래 상태로 남는다")
@@ -55,7 +64,7 @@ class StockConsistencyRecoveryPolicyRollbackIntegrationTest extends ConsistencyC
 
 		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
 				"StockConsistencyCheck", TriggerType.ON_DEMAND, Scope.ofEvent(eventId),
-				1, Map.of("eventId", eventId), LocalDateTime.now(), 10L));
+				1, Map.of("eventId", eventId), List.of(), LocalDateTime.now(), 10L));
 
 		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
@@ -95,13 +104,13 @@ class StockConsistencyRecoveryPolicyRollbackIntegrationTest extends ConsistencyC
 				.willThrow(new RuntimeException("강제 실패 - 이벤트 B History 저장 중 장애 발생"))
 				.willReturn(mock(CouponHistory.class));
 
-		Map<String, Object> diffDetail = Map.of("sample", List.of(
-				Map.of("eventId", (Object) eventA),
-				Map.of("eventId", (Object) eventB),
-				Map.of("eventId", (Object) eventC)));
-		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
+		VerificationResultEntity target = resultRepository.save(VerificationResultEntity.from(VerificationResult.fail(
 				"StockConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
-				3, diffDetail, LocalDateTime.now(), 10L));
+				3, Map.of("violationCount", 3), List.of(), LocalDateTime.now(), 10L)));
+		violationRepository.saveAll(List.of(eventA, eventB, eventC).stream()
+				.map(eventId -> VerificationViolationEntity.forResult(target.getId(),
+						new Violation(ViolationTargetType.EVENT, eventId, Map.of("eventId", eventId))))
+				.toList());
 
 		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 

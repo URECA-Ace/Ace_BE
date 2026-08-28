@@ -122,7 +122,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(25);
-		assertThat((List<?>) outcome.getDiffDetail().get("sample")).hasSize(25);
+		assertThat(outcome.getViolations()).hasSize(25);
 	}
 
 	@Test
@@ -133,7 +133,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				.check(Scope.all(TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_MESSAGE_ID_FORMAT");
 	}
 
@@ -146,7 +146,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_MESSAGE_ID_FORMAT");
 	}
 
@@ -179,7 +179,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				.check(Scope.all(TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_MESSAGE_ID_FORMAT");
 	}
 
@@ -191,7 +191,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				.check(Scope.all(TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_MESSAGE_ID_FORMAT");
 	}
 
@@ -206,7 +206,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_REQUEST_ID");
 	}
 
@@ -229,7 +229,7 @@ class RowLevelConsistencyCheckJdbcTest {
 				.check(Scope.all(TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("MISSING_CANCELED_AT");
 	}
 
@@ -255,7 +255,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("LATEST_STATUS_MISMATCH");
 	}
 
@@ -281,7 +281,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("NO_HISTORY");
 	}
 
@@ -332,7 +332,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("INVALID_STATUS_TRANSITION");
 	}
 
@@ -458,7 +458,7 @@ class RowLevelConsistencyCheckJdbcTest {
 						LocalDateTime.of(2026, 8, 18, 11, 0), TEST_CHECKED_AT));
 
 		assertThat(outcome.isPass()).isFalse();
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("MISSING_TIMESTAMP");
 	}
 
@@ -473,7 +473,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("USED_AFTER_EXPIRATION");
 	}
 
@@ -514,7 +514,7 @@ class RowLevelConsistencyCheckJdbcTest {
 
 		assertThat(outcome.isPass()).isFalse();
 		assertThat(outcome.getViolationCount()).isEqualTo(1);
-		assertThat(outcome.getDiffDetail().get("sample").toString())
+		assertThat(outcome.getViolations().toString())
 				.contains("EXPIRATION_BATCH_DELAY");
 	}
 

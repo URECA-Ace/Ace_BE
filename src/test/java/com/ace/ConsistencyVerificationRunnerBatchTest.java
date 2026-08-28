@@ -2,10 +2,12 @@ package com.ace;
 
 import com.ace.consistency.check.ConsistencyCheckIntegrationTestBase;
 import com.ace.consistency.check.StockConsistencyCheck;
+import com.ace.consistency.check.StateMachineConsistencyCheck;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.coupon.service.CouponIssueService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +21,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,7 +53,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	private StockConsistencyCheck stockConsistencyCheck;
 
 	@Autowired
-	private DuplicateConsistencyCheck duplicateConsistencyCheck;
+	private StateMachineConsistencyCheck stateMachineConsistencyCheck;
 
 	@Autowired
 	private RestartableFlakyConsistencyCheck flakyConsistencyCheck;
@@ -60,6 +63,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 
 	private Long maxIdBefore;
 	private Long dummyEventId;
+	private final List<Long> additionalEventIds = new ArrayList<>();
 
 	// 저장 결과를 직접 확인하기 위해 임시로 정리(cleanup)를 꺼둔 상태입니다. 확인이 끝나면 주석을 해제해주세요.
 	// @AfterEach
@@ -82,6 +86,12 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 
 	@AfterEach
 	void cleanUpEvent() {
+		flakyConsistencyCheck.resetTestState();
+		if (!additionalEventIds.isEmpty()) {
+			jdbcTemplate.update("DELETE FROM coupon_event WHERE event_id IN (:eventIds)",
+					new MapSqlParameterSource("eventIds", additionalEventIds));
+			additionalEventIds.clear();
+		}
 		if (dummyEventId != null) {
 			jdbcTemplate.update("DELETE FROM coupon_event WHERE event_id = :eventId",
 					new MapSqlParameterSource("eventId", dummyEventId));
@@ -99,6 +109,15 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		return eventId;
 	}
 
+	private void ensureAtLeastTenEventPages() {
+		Integer existing = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM coupon_event", Map.of(), Integer.class);
+		int required = Math.max(0, 101 - (existing == null ? 0 : existing));
+		for (int index = 0; index < required; index++) {
+			additionalEventIds.add(insertDummyEvent());
+		}
+	}
+
 	/**
 	 * [검증 목적] 실제 StockConsistencyCheck/DuplicateConsistencyCheck 두 개를 ALL 스코프로 넣고
 	 * runAsync()를 호출했을 때, Job이 정상적으로 두 Step을 모두 순차 실행하고
@@ -108,7 +127,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	@Test
 	void 두_Check_모두_정상적으로_실행되고_결과가_저장된다() {
 		maxIdBefore = maxVerificationResultId();
-		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(stockConsistencyCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
@@ -116,7 +135,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		assertEquals(BatchStatus.COMPLETED, finished.getStatus());
 		assertEquals(2, finished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StockConsistencyCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(2, rows.size());
@@ -132,7 +151,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 앞_Step이_예외로_실패하면_뒤_Step은_실행되지_않는다() {
 		maxIdBefore = maxVerificationResultId();
 		ConsistencyCheck throwingCheck = new ThrowingConsistencyCheck("FakeThrowingCheck");
-		List<ConsistencyCheck> checks = List.of(throwingCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(throwingCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
@@ -156,7 +175,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 앞_Step의_정합성_실패는_뒤_Step_실행을_막지_않는다() {
 		maxIdBefore = maxVerificationResultId();
 		ConsistencyCheck failingCheck = new FailingConsistencyCheck("FakeFailingCheck");
-		List<ConsistencyCheck> checks = List.of(failingCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(failingCheck, stateMachineConsistencyCheck);
 
 		JobExecution execution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution finished = awaitCompletion(execution);
@@ -165,7 +184,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 				"정합성 FAIL은 예외가 아니므로 Job 전체는 COMPLETED여야 합니다.");
 		assertEquals(2, finished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "FakeFailingCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(finished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(2, rows.size());
@@ -173,7 +192,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 				.filter(r -> "FakeFailingCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
 		Map<String, Object> duplicateResult = rows.stream()
-				.filter(r -> "DuplicateConsistencyCheck".equals(r.get("check_name")))
+				.filter(r -> "StateMachineConsistencyCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
 
 		assertEquals("FAIL", failingResult.get("status"));
@@ -189,7 +208,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	void 실패한_Job을_재시작하면_이어서_실행되어_완료된다() {
 		maxIdBefore = maxVerificationResultId();
 		flakyConsistencyCheck.throwOnNextCall();
-		List<ConsistencyCheck> checks = List.of(flakyConsistencyCheck, duplicateConsistencyCheck);
+		List<ConsistencyCheck> checks = List.of(flakyConsistencyCheck, stateMachineConsistencyCheck);
 
 		JobExecution firstExecution = runner.runAsync(checks, Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
 		JobExecution firstFinished = awaitCompletion(firstExecution);
@@ -207,7 +226,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		assertEquals(BatchStatus.COMPLETED, restartedFinished.getStatus());
 		assertEquals(2, restartedFinished.getStepExecutions().size());
 		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "RestartableFlakyConsistencyCheckStep").getStatus());
-		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "DuplicateConsistencyCheckStep").getStatus());
+		assertEquals(BatchStatus.COMPLETED, stepOf(restartedFinished, "StateMachineConsistencyCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
 		assertEquals(3, rows.size(), "1차 실행의 ERROR 1건 + 재시작 후 PASS 2건이 저장돼야 합니다: " + rows);
@@ -215,6 +234,56 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		long passCount = rows.stream().filter(r -> "PASS".equals(r.get("status"))).count();
 		assertEquals(1, errorCount);
 		assertEquals(2, passCount);
+	}
+
+	@Test
+	void 첫_청크의_violation은_Job_재시작_후_최종_결과에_연결된다() {
+		ensureAtLeastTenEventPages();
+		maxIdBefore = maxVerificationResultId();
+		flakyConsistencyCheck.failAfterAccumulatingViolations();
+
+		JobExecution firstExecution = runner.runAsync(
+				List.of(flakyConsistencyCheck), Scope.all(LocalDateTime.now()), TriggerType.ON_DEMAND);
+		JobExecution firstFinished = awaitCompletion(firstExecution);
+
+		assertEquals(BatchStatus.FAILED, firstFinished.getStatus());
+		List<Map<String, Object>> temporaryRows = jdbcTemplate.queryForList("""
+				SELECT id, verification_result_id, batch_job_instance_id, batch_step_name
+				FROM verification_violation
+				WHERE batch_job_instance_id = :jobInstanceId
+				  AND batch_step_name = 'RestartableFlakyConsistencyCheckStep'
+				ORDER BY id
+				""", new MapSqlParameterSource("jobInstanceId", firstFinished.getJobInstanceId()));
+		assertEquals(5, temporaryRows.size());
+		List<Long> violationIds = temporaryRows.stream().map(row -> {
+			assertNull(row.get("verification_result_id"));
+			assertEquals(firstFinished.getJobInstanceId(),
+					((Number) row.get("batch_job_instance_id")).longValue());
+			return ((Number) row.get("id")).longValue();
+		}).toList();
+
+		JobExecution restartedFinished = awaitCompletion(runner.restartRunAsync(firstFinished.getId()));
+
+		assertEquals(BatchStatus.COMPLETED, restartedFinished.getStatus());
+		assertEquals(firstFinished.getJobInstanceId(), restartedFinished.getJobInstanceId());
+		Map<String, Object> finalResult = fetchResultsAfter(maxIdBefore).stream()
+				.filter(row -> "RestartableFlakyConsistencyCheck".equals(row.get("check_name")))
+				.filter(row -> "FAIL".equals(row.get("status")))
+				.findFirst()
+				.orElseThrow();
+		assertEquals(5, ((Number) finalResult.get("violation_count")).intValue());
+
+		List<Map<String, Object>> linkedRows = jdbcTemplate.queryForList("""
+				SELECT verification_result_id, batch_job_instance_id, batch_step_name
+				FROM verification_violation WHERE id IN (:ids)
+				""", new MapSqlParameterSource("ids", violationIds));
+		assertEquals(5, linkedRows.size());
+		for (Map<String, Object> linked : linkedRows) {
+			assertEquals(((Number) finalResult.get("id")).longValue(),
+					((Number) linked.get("verification_result_id")).longValue());
+			assertNull(linked.get("batch_job_instance_id"));
+			assertNull(linked.get("batch_step_name"));
+		}
 	}
 
 	// ----------------- 테스트 전용 가짜 Check -----------------
@@ -261,7 +330,8 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 
 		@Override
 		public CheckOutcome check(Scope scope) {
-			return CheckOutcome.fail(1, Map.of("sample", List.of(Map.of("reason", "테스트용 강제 실패"))));
+			return CheckOutcome.fail(1, Map.of("violationCount", 1), List.of(
+					new Violation(ViolationTargetType.EVENT, 1L, Map.of("reason", "테스트용 강제 실패"))));
 		}
 	}
 
