@@ -24,12 +24,12 @@ import static org.junit.jupiter.api.Assertions.*;
  * ConsistencyVerificationRunner가 존재하지 않는 event_id(EVENT 스코프)로 호출됐을 때
  * EventNotFoundException을 실제로 던지는지 확인하는 통합 테스트.
  *
- * StockAndDuplicateConsistencyCheckTest와 달리 여기서는 반드시 Runner를 거쳐서 호출해야 한다 —
+ * StockConsistencyCheckTest와 달리 여기서는 반드시 Runner를 거쳐서 호출해야 한다 —
  * 존재 여부 검증은 Check가 아니라 Runner가 담당하기 때문이다.
  *
  * Runner는 CouponEventRepository(Spring Data JPA)에 의존하는데, 이건 @JdbcTest 슬라이스에서는
  * 로드되지 않는 컴포넌트라서 @SpringBootTest로 전체 컨텍스트를 띄운다
- * (그만큼 StockAndDuplicateConsistencyCheckTest보다 느리다).
+ * (그만큼 StockConsistencyCheckTest보다 느리다).
  *
  * ConsistencyCheckIntegrationTestBase가 띄우는 Testcontainers MySQL에 대고 실행한다.
  */
@@ -106,7 +106,7 @@ class ConsistencyVerificationRunnerEventNotFoundTest extends ConsistencyCheckInt
 
 		assertDoesNotThrow(() -> {
 			var results = runner.run(checks, Scope.ofEvent(existingEventId), TriggerType.ON_DEMAND);
-			assertEquals(2, results.size());
+			assertEquals(1, results.size());
 		});
 	}
 

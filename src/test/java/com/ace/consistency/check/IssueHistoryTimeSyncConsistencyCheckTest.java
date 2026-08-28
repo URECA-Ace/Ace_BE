@@ -2,15 +2,13 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck.CheckOutcome;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
-
-import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,21 +52,9 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 			CheckOutcome outcome = check.check(scope);
 			assertThat(outcome.isPass()).as("Scope: %s", scope.getType()).isFalse();
 			assertThat(outcome.getViolationCount()).as("Scope: %s", scope.getType()).isEqualTo(1);
-			assertSampleCarriesEventId(outcome, eventId);
+			assertThat(outcome.getViolations()).singleElement()
+					.satisfies(violation -> assertThat(violation.getTargetType()).isEqualTo(ViolationTargetType.ISSUE));
 		}
-	}
-
-	/**
-	 * 복구 정책(IssueHistoryTimeSyncConsistencyRecoveryPolicy)의 resolveEventIds()가
-	 * ALL 스코프에서 diffDetail.sample의 "eventId" 키를 그대로 읽어 쓰기 때문에, SELECT_CLAUSE에
-	 * event_id를 별칭 eventId로 추가한 게 실제로 sample에 반영되는지 실DB로 확인한다.
-	 */
-	@SuppressWarnings("unchecked")
-	private void assertSampleCarriesEventId(CheckOutcome outcome, long expectedEventId) {
-		List<Map<String, Object>> sample = (List<Map<String, Object>>) outcome.getDiffDetail().get("sample");
-		assertThat(sample).isNotEmpty();
-		assertThat(sample.get(0)).containsKey("eventId");
-		assertThat(((Number) sample.get(0).get("eventId")).longValue()).isEqualTo(expectedEventId);
 	}
 
 	@Test

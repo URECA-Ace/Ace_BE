@@ -12,8 +12,10 @@ import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 public class StateMachineConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy {
 
 	private final EventLogRecoveryExecutor eventRecoveryExecutor;
+	private final VerificationViolationRepository violationRepository;
 
 	@Override
 	public String checkName() {
@@ -69,22 +72,21 @@ public class StateMachineConsistencyRecoveryPolicy implements ConsistencyRecover
 
 	/**
 	 * EVENT 스코프는 target 자체가 이벤트를 특정한다. ALL 스코프는 target만으로 대상을 알 수
-	 * 없으므로, 그 체크를 실행했을 때 저장해둔 diffDetail.violations(위반 건 목록)에서 targetId를
-	 * 뽑아 위반 이벤트 목록을 복원한다.
+	 * 없으므로, verification_violation에 별도로 저장된 위반 행(위반 1건 = 행 1개) 전체에서
+	 * targetId를 뽑아 위반 이벤트 목록을 복원한다.
 	 */
-	@SuppressWarnings("unchecked")
 	private List<Long> resolveEventIds(VerificationResultEntity target) {
 		if (target.getScopeType() == Scope.ScopeType.EVENT) {
 			return List.of(target.getEventId());
 		}
 
-		List<Map<String, Object>> violations = (List<Map<String, Object>>) target.getDiffDetail().get("violations");
-		if (violations == null || violations.isEmpty()) {
+		List<VerificationViolationEntity> violations = violationRepository.findByVerificationResultId(target.getId());
+		if (violations.isEmpty()) {
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
 		}
 
 		return violations.stream()
-				.map(row -> ((Number) row.get("targetId")).longValue())
+				.map(VerificationViolationEntity::getTargetId)
 				.distinct()
 				.toList();
 	}

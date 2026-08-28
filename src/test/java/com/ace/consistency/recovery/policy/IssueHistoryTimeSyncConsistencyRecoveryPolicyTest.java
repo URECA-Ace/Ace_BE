@@ -2,6 +2,7 @@ package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -17,13 +18,17 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.ace.common.exception.ConsistencyCheckException;
+import com.ace.consistency.common.ConsistencyCheck.Violation;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
+import com.ace.consistency.common.ViolationTargetType;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 @ExtendWith(MockitoExtension.class)
 class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
@@ -33,11 +38,18 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 	@Mock
 	private EventLogRecoveryExecutor eventRecoveryExecutor;
 
+	@Mock
+	private VerificationViolationRepository violationRepository;
+
 	private IssueHistoryTimeSyncConsistencyRecoveryPolicy policy;
 
 	@BeforeEach
 	void setUp() {
-		policy = new IssueHistoryTimeSyncConsistencyRecoveryPolicy(eventRecoveryExecutor);
+		policy = new IssueHistoryTimeSyncConsistencyRecoveryPolicy(eventRecoveryExecutor, violationRepository);
+	}
+
+	private VerificationViolationEntity violationFor(Long targetId) {
+		return VerificationViolationEntity.forResult(10L, new Violation(ViolationTargetType.ISSUE, targetId, Map.of()));
 	}
 
 	private VerificationResultEntity failResultFor(Long eventId) {
@@ -60,14 +72,12 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 	}
 
 	@Test
-	void ALL_스코프_target이면_diffDetail_violations에_있는_targetId마다_executor를_호출한다() {
-		Map<String, Object> diffDetail = Map.of("violations", List.of(
-				Map.of("targetId", 1L),
-				Map.of("targetId", 2L)
-		));
+	void ALL_스코프_target이면_verification_violation에_있는_targetId마다_executor를_호출한다() {
 		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
 				"IssueHistoryTimeSyncConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
-				2, diffDetail, LocalDateTime.now(), 10L));
+				2, Map.of(), LocalDateTime.now(), 10L));
+		given(violationRepository.findByVerificationResultId(any()))
+				.willReturn(List.of(violationFor(1L), violationFor(2L)));
 
 		given(eventRecoveryExecutor.syncTimeHistory(1L))
 				.willReturn(RecoveryOutcome.success(Scope.ofEvent(1L), Map.of(), "성공"));
@@ -96,10 +106,11 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 	}
 
 	@Test
-	void ALL_스코프_target인데_diffDetail에_violations가_없으면_예외를_던진다() {
+	void ALL_스코프_target인데_verification_violation이_없으면_예외를_던진다() {
 		VerificationResultEntity target = VerificationResultEntity.from(VerificationResult.fail(
 				"IssueHistoryTimeSyncConsistencyCheck", TriggerType.SCHEDULED, Scope.all(LocalDateTime.now()),
 				0, Map.of(), LocalDateTime.now(), 10L));
+		given(violationRepository.findByVerificationResultId(any())).willReturn(List.of());
 
 		assertThatThrownBy(() -> policy.recover(target, RecoveryAction.SYNC_TIME_TO_HISTORY))
 				.isInstanceOf(ConsistencyCheckException.class)

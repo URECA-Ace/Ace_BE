@@ -2,7 +2,6 @@ package com.ace.consistency.recovery.policy;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import org.springframework.stereotype.Component;
 
@@ -10,8 +9,10 @@ import com.ace.common.ErrorCode;
 import com.ace.common.exception.ConsistencyCheckException;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.entity.VerificationResultEntity;
+import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
+import com.ace.consistency.repository.VerificationViolationRepository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy {
 
 	private final StockEventRecoveryExecutor eventRecoveryExecutor;
+	private final VerificationViolationRepository violationRepository;
 
 	@Override
 	public String checkName() {
@@ -60,23 +62,22 @@ public class StockConsistencyRecoveryPolicy implements ConsistencyRecoveryPolicy
 
 	/**
 	 * EVENT 스코프는 target 자체가 이벤트를 특정한다. ALL 스코프는 target만으로 대상을 알 수
-	 * 없으므로, 그 체크를 실행했을 때 저장해둔 diffDetail.sample(위반 건 목록)에서 eventId를
-	 * 뽑아 위반 이벤트 목록을 복원한다. sample은 SAMPLE_LIMIT 없이 위반 전체를 담고 있으므로
-	 * 이 목록이 곧 실제 위반 이벤트 전체와 같다.
+	 * 없으므로, 그 체크를 실행했을 때 verification_violation에 저장해둔 위반 행 전체에서
+	 * eventId를 뽑아 위반 이벤트 목록을 복원한다. 표본이 아닌 verificationResultId 기준
+	 * 전체 행을 조회하므로 이 목록이 곧 실제 위반 이벤트 전체와 같다.
 	 */
-	@SuppressWarnings("unchecked")
 	private List<Long> resolveEventIds(VerificationResultEntity target) {
 		if (target.getScopeType() == Scope.ScopeType.EVENT) {
 			return List.of(target.getEventId());
 		}
 
-		List<Map<String, Object>> sample = (List<Map<String, Object>>) target.getDiffDetail().get("sample");
-		if (sample == null || sample.isEmpty()) {
+		List<VerificationViolationEntity> violations = violationRepository.findByVerificationResultId(target.getId());
+		if (violations.isEmpty()) {
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_TARGET_EVENTS_NOT_FOUND);
 		}
 
-		return sample.stream()
-				.map(row -> ((Number) row.get("eventId")).longValue())
+		return violations.stream()
+				.map(VerificationViolationEntity::getTargetId)
 				.distinct()
 				.toList();
 	}

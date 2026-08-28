@@ -21,21 +21,11 @@ import com.ace.coupon.repository.CouponEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * 운영자가 캠페인 회차를 예정 시각보다 먼저 마감한다.
- *
- * <p>두 가지를 분리해서 처리한다.
- * <ul>
- *   <li><b>발급 차단</b> — Redis 메타데이터의 {@code closeAt} 을 현재로 당겨 즉시 막는다.
- *       판정이 Redis 에서 이뤄지므로 이 시점부터 신규 발급은 전건 거절된다.</li>
- *   <li><b>상태 전환</b> — {@code CLOSED} 는 검증팀의 Drain 조건이라 파이프라인이 빈 뒤에만 찍어야 한다.
- *       판단을 {@link CouponEventLifecycleService#closeIfDrained} 한 곳에 맡기고,
- *       아직 확정 대기 건이 남아 있으면 상태를 그대로 두고 주기 sweep 에 위임한다.</li>
- * </ul>
- *
- * <p>DB 는 마감 시각만 현재로 당긴다. 그래야 sweep 의 마감 대상 조회
- * ({@code closeAt <= CURRENT_TIMESTAMP}) 에 이 회차가 걸린다.
- */
+// 운영자가 캠페인 회차를 예정 시각보다 먼저 마감한다
+// 발급 차단 : Redis 의 closeAt 을 당겨 즉시 막는다. 판정이 Redis 라 이 시점부터 전건 거절
+// 상태 전환 : CLOSED 는 Drain 조건이라 closeIfDrained 한 곳에만 맡긴다
+//            확정 대기 건이 남아 있으면 상태를 두고 주기 sweep 에 위임
+// DB 는 마감 시각만 당긴다. 그래야 sweep 의 마감 대상 조회에 이 회차가 걸린다
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -62,6 +52,7 @@ public class CouponEventCloseService {
 					eventId,
 					CouponEventStatus.CLOSED,
 					toOffsetDateTime(event.getCloseAt()),
+					true,
 					true);
 		}
 
@@ -69,7 +60,7 @@ public class CouponEventCloseService {
 		validateRedisDecision(decision.result());
 
 		LocalDateTime closedAt = toLocalDateTime(decision.closedAt());
-		couponEventRepository.advanceCloseAt(eventId, CLOSABLE_STATUSES, closedAt);
+		boolean closeAtAdvanced = advanceCloseAt(eventId, closedAt);
 
 		// 상태 전환은 Drain 을 확인하는 한 경로로만
 		CouponEventLifecycleService.CloseAttempt attempt = lifecycleService.closeIfDrained(eventId);
@@ -83,7 +74,34 @@ public class CouponEventCloseService {
 				eventId,
 				statusAfter,
 				toOffsetDateTime(closedAt),
-				statusAfter == CouponEventStatus.CLOSED);
+				statusAfter == CouponEventStatus.CLOSED,
+				closeAtAdvanced);
+	}
+
+	// Redis 차단은 이미 끝났고 되돌릴 수 없으니 실패를 남김
+	// 0행  : 발급은 막혔고 원래 closeAt 이 되면 sweep 이 회수하므로 실패는 아니다. 응답으로만 알린다
+	// 예외 : Redis 만 닫힌 채 남음
+	private boolean advanceCloseAt(Long eventId, LocalDateTime closedAt) {
+		int updatedCount;
+		try {
+			updatedCount = couponEventRepository.advanceCloseAt(eventId, CLOSABLE_STATUSES, closedAt);
+		} catch (RuntimeException exception) {
+			log.error("Redis 발급은 차단했지만 DB 마감 시각을 당기지 못했습니다. "
+							+ "회차는 원래 마감 시각이 되어야 sweep 에 잡힙니다. eventId={}, redisClosedAt={}",
+					eventId, closedAt, exception);
+			throw new CouponException(
+					ErrorCode.CAMPAIGN_CLOSE_TEMPORARILY_UNAVAILABLE,
+					ErrorCode.CAMPAIGN_CLOSE_TEMPORARILY_UNAVAILABLE.getDefaultMessage(),
+					exception);
+		}
+
+		if (updatedCount == 0) {
+			log.warn("Redis 발급은 차단했지만 DB 마감 시각은 그대로입니다. "
+							+ "이미 마감 시각이 지났거나 그 사이 상태가 바뀐 회차입니다. eventId={}, redisClosedAt={}",
+					eventId, closedAt);
+			return false;
+		}
+		return true;
 	}
 
 	private CouponEventStatus requireClosableStatus(Long eventId) {

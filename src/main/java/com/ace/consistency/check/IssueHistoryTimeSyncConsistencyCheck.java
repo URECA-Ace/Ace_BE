@@ -2,11 +2,13 @@ package com.ace.consistency.check;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.ViolationTargetType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -134,28 +136,17 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 		}
 
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> formattedViolations = new java.util.ArrayList<>(violations.size());
+		List<Violation> violationList = new ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> detail = new LinkedHashMap<>();
-			detail.put("issueId", violation.get("issue_id"));
-			detail.put("status", violation.get("status"));
-			detail.put("issueTime", violation.get("issue_time"));
-			detail.put("historyTime", violation.get("history_time"));
-			detail.put("timeDiffSeconds", violation.get("time_diff_seconds"));
-
-			Map<String, Object> violationData = new LinkedHashMap<>();
-			violationData.put("targetType", "EVENT");
-			violationData.put("targetId", violation.get("eventId"));
-			violationData.put("detail", detail);
-
-			formattedViolations.add(violationData);
+			Map<String, Object> detail = new LinkedHashMap<>(violation);
+			detail.remove("total_violation_count");
+			violationList.add(new Violation(ViolationTargetType.ISSUE, ((Number) violation.get("issue_id")).longValue(), detail));
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("violations", formattedViolations);
 		diff.put("reason", "연동 도메인 시간 동기화 위반: coupon_issue와 coupon_history 간의 상태 변경 시간이 1초 이상 불일치합니다. (트랜잭션 원자성 의심)");
 
-		return CheckOutcome.fail(violationCount, diff);
+		return CheckOutcome.fail(violationCount, diff, violationList);
 	}
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {

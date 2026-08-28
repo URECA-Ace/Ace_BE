@@ -64,9 +64,46 @@ public class IssuePersistenceProbe {
 		}
 	}
 
+	// 실패 기록만 들고 저장 여부를 판별
+	// issue_failure_log 재처리용
+	// 그때는 원본 IssueRecord 도 Stream 엔트리도 없다
+	// issueSequence 는 비어 있을 수 있고, 그러면 request_id UNIQUE 에 기대어 순번 비교를 건너뛴다
+	@Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+	public Result probe(long campaignId, long userId, String requestId, Long issueSequence) {
+		try {
+			Optional<CouponIssue> stored = couponIssueRepository.findByRequestId(requestId);
+			if (stored.isEmpty()) {
+				return Result.ABSENT;
+			}
+			if (matches(stored.get(), campaignId, userId, issueSequence)) {
+				return Result.PERSISTED;
+			}
+
+			CouponIssue other = stored.get();
+			log.warn("같은 requestId의 다른 발급이 저장되어 있어 현재 요청은 미저장으로 판단합니다: "
+							+ "requestId={}, requestedEventId={}, requestedUserId={}, requestedSequence={}, "
+							+ "storedIssueId={}, storedEventId={}, storedUserId={}, storedSequence={}",
+					requestId, campaignId, userId, issueSequence,
+					other.getId(), other.getCouponEvent().getId(),
+					other.getUser().getId(), other.getIssueSequence());
+			return Result.ABSENT;
+		} catch (RuntimeException exception) {
+			log.error("저장 여부 판별 실패, 원복하지 않습니다: requestId={}", requestId, exception);
+			return Result.UNVERIFIED;
+		}
+	}
+
 	private boolean matches(CouponIssue stored, IssueRecord record) {
-		return stored.getCouponEvent().getId().longValue() == record.campaignId()
-				&& stored.getUser().getId().longValue() == record.userId()
-				&& stored.getIssueSequence().longValue() == record.issueSequence();
+		return matches(stored, record.campaignId(), record.userId(), record.issueSequence());
+	}
+
+	private boolean matches(CouponIssue stored, long campaignId, long userId, Long issueSequence) {
+		if (stored.getCouponEvent().getId().longValue() != campaignId
+				|| stored.getUser().getId().longValue() != userId) {
+			return false;
+		}
+		// 순번이 없으면 request_id UNIQUE 에 기대어 회차, 사용자 일치만으로 판단
+		return issueSequence == null
+				|| stored.getIssueSequence().longValue() == issueSequence;
 	}
 }
