@@ -19,9 +19,15 @@ import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.RowLevelRecoveryRepository;
 import com.ace.consistency.recovery.RowLevelRecoveryRepository.IssueSnapshot;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** EXPIRATION_BATCH_DELAY 위반에 대해 ISSUED 쿠폰을 안전하게 EXPIRED로 전환하는 실행기. */
 @Component
+@Slf4j
 public class CouponExpirationLagRecoveryExecutor {
+
+	private static final long NANOS_PER_MILLISECOND = 1_000_000L;
+	private static final long MAX_ALLOWED_DELAY_MILLIS = Long.MAX_VALUE / NANOS_PER_MILLISECOND;
 
 	private static final Pattern UUID_PATTERN = Pattern.compile(
 			"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
@@ -31,6 +37,10 @@ public class CouponExpirationLagRecoveryExecutor {
 
 	public CouponExpirationLagRecoveryExecutor(RowLevelRecoveryRepository repository,
 			@Value("${consistency.expiration.allowed-delay-ms:120000}") long allowedDelayMillis) {
+		if (allowedDelayMillis < 0 || allowedDelayMillis > MAX_ALLOWED_DELAY_MILLIS) {
+			throw new IllegalArgumentException("allowedDelayMillis must be between 0 and "
+					+ MAX_ALLOWED_DELAY_MILLIS);
+		}
 		this.repository = repository;
 		this.allowedDelayMillis = allowedDelayMillis;
 	}
@@ -55,7 +65,7 @@ public class CouponExpirationLagRecoveryExecutor {
 			if (!"ISSUED".equals(issue.status()) || issue.usedAt() != null || issue.validTo() == null) {
 				return failure(revalidationScope, issue, "현재는 EXPIRATION_BATCH_DELAY 위반이 아닙니다.");
 			}
-			if (!issue.validTo().plusNanos(Math.multiplyExact(allowedDelayMillis, 1_000_000L))
+			if (!issue.validTo().plusNanos(Math.multiplyExact(allowedDelayMillis, NANOS_PER_MILLISECOND))
 					.isBefore(recoveryCheckedAt)) {
 				return failure(revalidationScope, issue, "만료 처리 허용 지연 시간이 지나지 않았습니다.");
 			}
@@ -88,8 +98,9 @@ public class CouponExpirationLagRecoveryExecutor {
 			if (TransactionSynchronizationManager.isActualTransactionActive()) {
 				TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
 			}
+			log.error("만료 지연 복구 중 오류가 발생했습니다. issueId={}", issueId, ex);
 			return RecoveryOutcome.failure(fallbackScope(target), Map.of("issueId", issueId),
-					"만료 지연 복구 중 오류가 발생했습니다: " + ex.getMessage());
+					"만료 지연 복구 중 오류가 발생했습니다.");
 		}
 	}
 

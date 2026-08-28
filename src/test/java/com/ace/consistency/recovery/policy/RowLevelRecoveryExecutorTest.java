@@ -1,6 +1,7 @@
 package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -89,6 +90,44 @@ class RowLevelRecoveryExecutorTest {
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(outcome.getDetail()).containsEntry("catchUp", true);
 		verify(repository, never()).expireIfStillIssued(1L);
+	}
+
+	@Test
+	void 음수_allowedDelayMillis는_생성시_거부한다() {
+		assertThatThrownBy(() -> new CouponExpirationLagRecoveryExecutor(repository, -1L))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void 나노초_변환이_overflow하는_allowedDelayMillis는_생성시_거부한다() {
+		long overflow = Long.MAX_VALUE / 1_000_000L + 1;
+
+		assertThatThrownBy(() -> new CouponExpirationLagRecoveryExecutor(repository, overflow))
+				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void 만료_복구_예외_메시지는_DB_정보를_노출하지_않는다() {
+		given(repository.findIssueForUpdate(1L))
+				.willThrow(new IllegalStateException("Table 'coupon_issue' constraint 'fk_test' failed"));
+
+		RecoveryOutcome outcome = new CouponExpirationLagRecoveryExecutor(repository, 1_800_000L)
+				.recoverIssue(target("CouponExpirationLagConsistencyCheck"), 1L);
+
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		assertThat(outcome.getMessage()).doesNotContain("coupon_issue", "constraint", "fk_test");
+	}
+
+	@Test
+	void 최초_발급_이력_복구_예외_메시지는_DB_정보를_노출하지_않는다() {
+		given(repository.findIssueForUpdate(1L))
+				.willThrow(new IllegalStateException("Table 'coupon_issue' constraint 'fk_test' failed"));
+
+		RecoveryOutcome outcome = new CouponIssueHistoryStateRecoveryExecutor(repository)
+				.recoverIssue(target("CouponIssueHistoryStateConsistencyCheck"), 1L);
+
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		assertThat(outcome.getMessage()).doesNotContain("coupon_issue", "constraint", "fk_test");
 	}
 
 	private VerificationResultEntity target(String checkName) {

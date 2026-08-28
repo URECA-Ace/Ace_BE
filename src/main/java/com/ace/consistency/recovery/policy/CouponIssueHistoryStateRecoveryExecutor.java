@@ -18,10 +18,12 @@ import com.ace.consistency.recovery.RowLevelRecoveryRepository;
 import com.ace.consistency.recovery.RowLevelRecoveryRepository.IssueSnapshot;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /** NO_HISTORY + ISSUED 위반에 대해 최초 ISSUED History를 복원하는 실행기. */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class CouponIssueHistoryStateRecoveryExecutor {
 
 	private static final Pattern UUID_PATTERN = Pattern.compile(
@@ -77,8 +79,9 @@ public class CouponIssueHistoryStateRecoveryExecutor {
 			if (TransactionSynchronizationManager.isActualTransactionActive()) {
 				TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
 			}
+			log.error("최초 발급 이력 복구 중 오류가 발생했습니다. issueId={}", issueId, ex);
 			return RecoveryOutcome.failure(fallbackScope(target), Map.of("issueId", issueId),
-					"최초 발급 이력 복구 중 오류가 발생했습니다: " + ex.getMessage());
+					"최초 발급 이력 복구 중 오류가 발생했습니다.");
 		}
 	}
 
