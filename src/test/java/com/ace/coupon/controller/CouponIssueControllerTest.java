@@ -125,7 +125,10 @@ class CouponIssueControllerTest {
 						8271L,
 						1729L,
 						IssueRequestStatus.ACCEPTED,
-						decidedAt));
+						decidedAt,
+						"홍*동",
+						"hon****@example.com",
+						"010-****-5678"));
 
 		mockMvc.perform(get(
 						"/api/v1/events/{eventId}/issues/{requestId}",
@@ -138,7 +141,10 @@ class CouponIssueControllerTest {
 				.andExpect(jsonPath("$.data.issueSequence").value(8271))
 				.andExpect(jsonPath("$.data.remainingStock").value(1729))
 				.andExpect(jsonPath("$.data.status").value("ACCEPTED"))
-				.andExpect(jsonPath("$.data.decidedAt").value(decidedAt.toString()));
+				.andExpect(jsonPath("$.data.decidedAt").value(decidedAt.toString()))
+				.andExpect(jsonPath("$.data.maskedUserName").value("홍*동"))
+				.andExpect(jsonPath("$.data.maskedUserEmail").value("hon****@example.com"))
+				.andExpect(jsonPath("$.data.maskedUserPhone").value("010-****-5678"));
 
 		verify(couponIssueService).findStatus(EVENT_ID, requestId);
 	}
