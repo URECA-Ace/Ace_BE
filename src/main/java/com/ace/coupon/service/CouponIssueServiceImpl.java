@@ -1,6 +1,7 @@
 package com.ace.coupon.service;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.dao.DataAccessException;
@@ -23,6 +24,7 @@ import com.ace.coupon.repository.CouponEventRepository;
 import com.ace.user.entity.User;
 import com.ace.user.repository.UserRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -37,9 +39,42 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 	private final CouponIssuePersistenceProperties persistenceProperties;
 	private final IssuePersistenceCoordinator persistenceCoordinator;
 	private final UserRepository userRepository;
+	private final MeterRegistry meterRegistry;
+
+	// Grafana 범례에 ErrorCode 이름 대신 한글로 표시하기 위한 라벨. Ace_FE의 발급 판정 실패 사유 토글과 문구를 맞춘다.
+	private static final Map<String, String> ISSUE_REASON_LABELS = Map.of(
+			"SOLD_OUT", "재고 소진",
+			"ALREADY_ISSUED", "중복 발급",
+			"EVENT_NOT_OPEN", "오픈 전",
+			"EVENT_CLOSED", "마감",
+			"IDEMPOTENCY_CONFLICT", "키 충돌",
+			"ISSUE_PERSIST_FAILED", "저장 오류",
+			"ISSUE_TEMPORARILY_UNAVAILABLE", "일시 불가",
+			"EVENT_NOT_FOUND", "캠페인 없음"
+	);
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
+		try {
+			CouponIssueAcceptedResponse response = doIssue(eventId, userId, idempotencyKey);
+			meterRegistry.counter("coupon.issue",
+					"event_id", eventId.toString(),
+					"result", "success",
+					"result_label", "성공").increment();
+			return response;
+		} catch (CouponException exception) {
+			String reason = exception.getErrorCode().name();
+			meterRegistry.counter("coupon.issue",
+					"event_id", eventId.toString(),
+					"result", "fail",
+					"result_label", "실패",
+					"reason", reason,
+					"reason_label", ISSUE_REASON_LABELS.getOrDefault(reason, reason)).increment();
+			throw exception;
+		}
+	}
+
+	private CouponIssueAcceptedResponse doIssue(Long eventId, Long userId, UUID idempotencyKey) {
 		CouponIssueDecision decision;
 		try {
 			decision = issueProcessor.issue(eventId, userId, idempotencyKey);

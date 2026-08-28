@@ -36,6 +36,7 @@ import com.ace.coupon.persistence.IssuePersistenceCoordinator;
 import com.ace.coupon.persistence.IssuePersistenceService;
 import com.ace.coupon.persistence.IssueRecord;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+import io.micrometer.core.instrument.MeterRegistry;
 
 // Stream 소비 계층(2차 저장 경로)
 @Slf4j
@@ -53,6 +54,8 @@ public class IssueStreamRelay implements SmartLifecycle {
 	private final IssuePersistenceCoordinator coordinator;
 	private final RelayTargetProvider targetProvider;
 	private final CouponIssuePersistenceProperties properties;
+	// RELAY 모드 전환 대비: 비동기 저장/확정의 최종 성공·실패를 계측하기 위한 필드
+	private final MeterRegistry meterRegistry;
 
 	private final AtomicBoolean running = new AtomicBoolean(false);
 	private final String consumerName = resolveConsumerName();
@@ -63,12 +66,14 @@ public class IssueStreamRelay implements SmartLifecycle {
 			IssuePersistenceService persistenceService,
 			IssuePersistenceCoordinator coordinator,
 			RelayTargetProvider targetProvider,
-			CouponIssuePersistenceProperties properties) {
+			CouponIssuePersistenceProperties properties,
+			MeterRegistry meterRegistry) {
 		this.redisTemplate = redisTemplate;
 		this.persistenceService = persistenceService;
 		this.coordinator = coordinator;
 		this.targetProvider = targetProvider;
 		this.properties = properties;
+		this.meterRegistry = meterRegistry;
 	}
 
 	// 인스턴스가 2대라 컨슈머 이름이 겹치면 서로의 pending 을 가져간다
@@ -242,6 +247,11 @@ public class IssueStreamRelay implements SmartLifecycle {
 			stage = IssueFailureStage.CONFIRM;
 			coordinator.confirmPersisted(issueRecord, record.getId().getValue());
 			acknowledge(key, record.getId());
+			// RELAY 모드 전환 대비: 비동기 저장 + 확정까지 끝난 최종 성공만 센다
+			meterRegistry.counter("coupon.issue.relay",
+					"event_id", Long.toString(issueRecord.campaignId()),
+					"result", "success",
+					"result_label", "성공").increment();
 		} catch (RuntimeException exception) {
 			handleFailure(key, record.getId(), issueRecord, deliveryCount, stage, exception);
 		}
@@ -280,6 +290,13 @@ public class IssueStreamRelay implements SmartLifecycle {
 			if (deliveryCount == properties.maxDeliveryAttempts()) {
 				// 한도에 처음 닿았을 때만 기록한다. 매 주기 남기면 실패 로그가 부푼다
 				coordinator.recordConfirmAbandoned(issueRecord, incidentId, exception);
+				// RELAY 모드 전환 대비: 저장은 됐지만 확정 처리가 최종 실패한 케이스
+				meterRegistry.counter("coupon.issue.relay",
+						"event_id", Long.toString(issueRecord.campaignId()),
+						"result", "fail",
+						"result_label", "실패",
+						"reason", "CONFIRM_ABANDONED",
+						"reason_label", "확정 유실").increment();
 			}
 			return;
 		}
@@ -297,6 +314,13 @@ public class IssueStreamRelay implements SmartLifecycle {
 					issueRecord.requestId(), incidentId);
 			return;
 		}
+		// RELAY 모드 전환 대비: 재시도 한도 초과로 원복까지 끝난 최종 발급 실패
+		meterRegistry.counter("coupon.issue.relay",
+				"event_id", Long.toString(issueRecord.campaignId()),
+				"result", "fail",
+				"result_label", "실패",
+				"reason", "PERSIST_ABANDONED",
+				"reason_label", "저장 유실").increment();
 		acknowledge(key, recordId);
 	}
 
