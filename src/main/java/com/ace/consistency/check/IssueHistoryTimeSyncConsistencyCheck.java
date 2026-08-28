@@ -29,7 +29,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
 	private static final String SELECT_CLAUSE = """
-            SELECT ci.issue_id, ci.status, 
+            SELECT ci.issue_id, ci.event_id AS eventId, ci.status,
                    CASE ci.status 
                        WHEN 'USED' THEN ci.used_at 
                        WHEN 'ISSUED' THEN ci.issued_at 
@@ -134,15 +134,25 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 		}
 
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new java.util.ArrayList<>(violations.size());
+		List<Map<String, Object>> formattedViolations = new java.util.ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			sample.add(sampleRow);
+			Map<String, Object> detail = new LinkedHashMap<>();
+			detail.put("issueId", violation.get("issue_id"));
+			detail.put("status", violation.get("status"));
+			detail.put("issueTime", violation.get("issue_time"));
+			detail.put("historyTime", violation.get("history_time"));
+			detail.put("timeDiffSeconds", violation.get("time_diff_seconds"));
+
+			Map<String, Object> violationData = new LinkedHashMap<>();
+			violationData.put("targetType", "EVENT");
+			violationData.put("targetId", violation.get("eventId"));
+			violationData.put("detail", detail);
+
+			formattedViolations.add(violationData);
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("sample", sample);
+		diff.put("violations", formattedViolations);
 		diff.put("reason", "연동 도메인 시간 동기화 위반: coupon_issue와 coupon_history 간의 상태 변경 시간이 1초 이상 불일치합니다. (트랜잭션 원자성 의심)");
 
 		return CheckOutcome.fail(violationCount, diff);

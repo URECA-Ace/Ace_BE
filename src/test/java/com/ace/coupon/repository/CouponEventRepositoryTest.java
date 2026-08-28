@@ -107,6 +107,40 @@ class CouponEventRepositoryTest {
 	}
 
 	@Test
+	@DisplayName("수동 마감은 마감 시각만 앞당기고 상태는 그대로 둔다")
+	void advancesCloseAtWithoutChangingStatus() {
+		LocalDateTime databaseNow = entityManager
+				.createQuery("SELECT CURRENT_TIMESTAMP", Timestamp.class)
+				.getSingleResult()
+				.toLocalDateTime();
+		Coupon coupon = persistCoupon(databaseNow);
+		CouponEvent open = persistEvent(
+				coupon, 21, databaseNow.minusMinutes(1), databaseNow.plusMinutes(20),
+				CouponEventStatus.OPEN, databaseNow);
+		CouponEvent scheduled = persistEvent(
+				coupon, 22, databaseNow.plusMinutes(10), databaseNow.plusMinutes(20),
+				CouponEventStatus.SCHEDULED, databaseNow);
+		entityManager.flush();
+		entityManager.clear();
+
+		List<CouponEventStatus> closable =
+				List.of(CouponEventStatus.OPEN, CouponEventStatus.SOLD_OUT);
+		int updated = couponEventRepository.advanceCloseAt(open.getId(), closable, databaseNow);
+		// 이미 당겨진 뒤라 되돌리는 방향으로는 움직이지 않는다
+		int repeated = couponEventRepository.advanceCloseAt(open.getId(), closable, databaseNow);
+		int notClosable = couponEventRepository.advanceCloseAt(
+				scheduled.getId(), closable, databaseNow);
+
+		assertThat(updated).isOne();
+		assertThat(repeated).isZero();
+		assertThat(notClosable).isZero();
+		// 상태는 sweep 이 Drain 을 확인한 뒤에만 바꾼다
+		assertThat(findStatus(open.getId())).isEqualTo(CouponEventStatus.OPEN);
+		assertThat(findCloseAt(open.getId())).isEqualTo(databaseNow);
+		assertThat(findCloseAt(scheduled.getId())).isEqualTo(databaseNow.plusMinutes(20));
+	}
+
+	@Test
 	@DisplayName("확정 수를 반영하면 남은 재고를 총 재고에서 빼서 함께 갱신")
 	void appliesConfirmedQuantityAndDerivesRemainingStock() {
 		LocalDateTime databaseNow = databaseNow();
@@ -379,6 +413,11 @@ class CouponEventRepositoryTest {
 
 	private CouponEvent findEvent(Long eventId) {
 		return couponEventRepository.findById(eventId).orElseThrow();
+	}
+
+	private LocalDateTime findCloseAt(Long eventId) {
+		entityManager.clear();
+		return findEvent(eventId).getCloseAt();
 	}
 
 	private Coupon persistCoupon(LocalDateTime now) {

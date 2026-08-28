@@ -129,6 +129,35 @@ public class CouponIssue {
 		this.canceledAt = revokedAt;
 	}
 
+	/**
+	 * StateMachineConsistencyCheck 복구 전용 전이. 손상된 coupon_history 이력을 삭제하고
+	 * 원복할 때, 일반 상태머신 검증 없이 대상 상태로 되돌린다. 삭제 대상 범위에 USED/EXPIRED
+	 * 전이가 없는지는 이 정책 호출 전에 이미 확인됐다는 전제이므로, 여기서는 별도 검증하지 않는다.
+	 *
+	 * 주의: 이 엔티티에서 상태머신 검증(validateTransition)을 완전히 우회하는 유일한 public
+	 * 메서드다. 새 호출처를 추가하기 전에, 넘기는 target이 coupon_history의 최신 to_status와
+	 * 반드시 일치하는지 호출부가 직접 보장해야 한다 — 어긋나면 CouponIssueHistoryStateConsistencyCheck가
+	 * 위반으로 잡아내긴 하지만, 그건 사후 배치 탐지일 뿐 이 메서드 자체가 막아주는 게 아니다.
+	 */
+	public void restoreStatus(CouponIssueStatus target) {
+		this.status = target;
+	}
+
+	/**
+	 * IssueHistoryTimeSyncConsistencyCheck 복구 전용: coupon_history의 실제 기록 시각으로 issued_at을 맞춘다.
+	 * 값 검증 없는 단순 setter다 — 호출부(정책)가 이미 needsPatch로 걸러낸 값만 넘긴다는 전제이며,
+	 * status는 건드리지 않는다. 새 호출처를 추가할 때는 대상 발급 건의 status가 이미 최신 history와
+	 * 일치하는 상태인지(재사용 위험이 없는지) 반드시 직접 보장해야 한다.
+	 */
+	public void syncIssuedAt(LocalDateTime issuedAt) {
+		this.issuedAt = issuedAt;
+	}
+
+	/** IssueHistoryTimeSyncConsistencyCheck 복구 전용: coupon_history의 실제 기록 시각으로 used_at을 맞춘다. 주의사항은 {@link #syncIssuedAt}과 동일하다. */
+	public void syncUsedAt(LocalDateTime usedAt) {
+		this.usedAt = usedAt;
+	}
+
 	private void validateTransition(CouponIssueStatus target) {
 		if (!this.status.canTransitTo(target)) {
 			throw new IllegalStateException(

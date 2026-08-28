@@ -37,7 +37,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 			""";
 
 	private static final String SQL = """
-            SELECT sub.issue_id, sub.prev_to_status, sub.from_status, sub.to_status,
+            SELECT sub.issue_id, sub.event_id AS eventId, sub.prev_to_status, sub.from_status, sub.to_status,
                    COUNT(*) OVER() AS total_violation_count
             FROM (
                 SELECT ch.issue_id, 
@@ -77,15 +77,24 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 		}
 
 		int violationCount = ((Number) violations.getFirst().get("total_violation_count")).intValue();
-		List<Map<String, Object>> sample = new java.util.ArrayList<>(violations.size());
+		List<Map<String, Object>> formattedViolations = new java.util.ArrayList<>(violations.size());
 		for (Map<String, Object> violation : violations) {
-			Map<String, Object> sampleRow = new LinkedHashMap<>(violation);
-			sampleRow.remove("total_violation_count");
-			sample.add(sampleRow);
+			Map<String, Object> detail = new LinkedHashMap<>();
+			detail.put("issueId", violation.get("issue_id"));
+			detail.put("prevToStatus", violation.get("prev_to_status"));
+			detail.put("fromStatus", violation.get("from_status"));
+			detail.put("toStatus", violation.get("to_status"));
+
+			Map<String, Object> violationData = new LinkedHashMap<>();
+			violationData.put("targetType", "EVENT");
+			violationData.put("targetId", violation.get("eventId"));
+			violationData.put("detail", detail);
+
+			formattedViolations.add(violationData);
 		}
 
 		Map<String, Object> diff = new LinkedHashMap<>();
-		diff.put("sample", sample);
+		diff.put("violations", formattedViolations);
 		diff.put("reason", "상태 머신 위반: 이전 이력의 도착 상태와 현재 이력의 출발 상태가 이어지지 않습니다(연속성 붕괴).");
 
 		return CheckOutcome.fail(violationCount, diff);

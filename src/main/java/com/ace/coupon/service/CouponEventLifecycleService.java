@@ -109,23 +109,10 @@ public class CouponEventLifecycleService {
 			}
 
 			for (Long eventId : eventIds) {
-				StatsRead read = readStats(eventId);
-				if (read.unreadable()) {
-					unresolved++;
-					continue;
-				}
-				if (read.snapshot() == null) {
-					log.warn("마감 대상 회차의 Redis 현황이 없어 마감을 보류합니다. eventId={}", eventId);
-					unresolved++;
-					continue;
-				}
-				if (!isDrained(read.snapshot())) {
-					waitingForDrain++;
-					continue;
-				}
-				if (applyFinalSnapshot(eventId, read.snapshot())
-						&& markClosed(eventId, read.snapshot())) {
-					closed++;
+				switch (closeIfDrained(eventId)) {
+					case CLOSED -> closed++;
+					case WAITING_FOR_DRAIN -> waitingForDrain++;
+					case UNRESOLVED -> unresolved++;
 				}
 			}
 
@@ -135,6 +122,41 @@ public class CouponEventLifecycleService {
 			}
 		}
 		return new SweepResult(0, closed, waitingForDrain, unresolved);
+	}
+
+	/**
+	 * 회차 하나를 마감 가능한지 확인하고, 가능하면 {@code CLOSED} 로 전환한다.
+	 *
+	 * <p>주기 sweep 과 수동 마감 API 가 모두 이 메서드를 통해서만 상태를 진행시킨다.
+	 * 마감 판단이 한 곳에만 있어야 Drain 게이트를 우회하는 경로가 생기지 않는다.
+	 */
+	public CloseAttempt closeIfDrained(Long eventId) {
+		StatsRead read = readStats(eventId);
+		if (read.unreadable()) {
+			return CloseAttempt.UNRESOLVED;
+		}
+		if (read.snapshot() == null) {
+			log.warn("마감 대상 회차의 Redis 현황이 없어 마감을 보류합니다. eventId={}", eventId);
+			return CloseAttempt.UNRESOLVED;
+		}
+		if (!isDrained(read.snapshot())) {
+			// 재고는 다 나갔지만 아직 저장 중인 건이 있다. 지금 찍으면 확정 전 값으로 마감된다
+			return CloseAttempt.WAITING_FOR_DRAIN;
+		}
+		if (applyFinalSnapshot(eventId, read.snapshot())
+				&& markClosed(eventId, read.snapshot())) {
+			return CloseAttempt.CLOSED;
+		}
+		return CloseAttempt.UNRESOLVED;
+	}
+
+	public enum CloseAttempt {
+		/** 집계를 확정하고 CLOSED 로 전환했다. */
+		CLOSED,
+		/** 확정 대기 중인 발급 건이 남아 있어 마감을 미뤘다. */
+		WAITING_FOR_DRAIN,
+		/** Redis 현황을 읽지 못했거나 집계가 확정되지 않아 마감하지 못했다. */
+		UNRESOLVED
 	}
 
 	// 오픈 스케쥴러가 멈춰 한 번도 열리지 못한 회차를 마감
