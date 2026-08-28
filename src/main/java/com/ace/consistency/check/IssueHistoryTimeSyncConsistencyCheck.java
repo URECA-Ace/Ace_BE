@@ -3,7 +3,7 @@ package com.ace.consistency.check;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.ViolationTargetType;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -22,13 +22,21 @@ import java.util.Set;
  * 1초(허용 오차) 이상 크게 벌어지는 원자성(Atomicity) 붕괴 현상을 식별합니다.
  */
 @Component
-@RequiredArgsConstructor
 public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
-	// 배치가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초) - 기본값 24시간 .env로 일괄 관리예정 !!!!!
-	private static final int MAX_BATCH_LAG_SECONDS = 86400; 
-
 	private final NamedParameterJdbcTemplate jdbcTemplate;
+
+	// 배치(coupon.expiration.scheduler)가 돌지 않았다고 간주하는 최대 허용 지연 시간 (초).
+	// 정상 주기(coupon.expiration.scheduler.fixed-delay-ms)보다 충분히 크게 잡아 일시적 지연을
+	// 오탐하지 않으면서도, 스케줄러 장애를 하루 단위가 아니라 그날 안에 잡아낼 수 있게 한다.
+	private final long maxBatchLagSeconds;
+
+	public IssueHistoryTimeSyncConsistencyCheck(
+			NamedParameterJdbcTemplate jdbcTemplate,
+			@Value("${consistency.issue-history-time-sync.max-batch-lag-seconds:1800}") long maxBatchLagSeconds) {
+		this.jdbcTemplate = jdbcTemplate;
+		this.maxBatchLagSeconds = maxBatchLagSeconds;
+	}
 
 	private static final String SELECT_CLAUSE = """
             SELECT ci.issue_id, ci.event_id AS eventId, ci.status,
@@ -126,7 +134,7 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public CheckOutcome check(Scope scope) {
 		MapSqlParameterSource params = scopeParameters(scope)
-				.addValue("maxBatchLagSeconds", MAX_BATCH_LAG_SECONDS);
+				.addValue("maxBatchLagSeconds", maxBatchLagSeconds);
 
 		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(sql, params);
