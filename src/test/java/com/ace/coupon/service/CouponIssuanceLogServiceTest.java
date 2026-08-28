@@ -3,6 +3,7 @@ package com.ace.coupon.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.time.Clock;
@@ -62,7 +63,6 @@ class CouponIssuanceLogServiceTest {
 		CouponIssue second = issue(
 				102L, "김철", "kim@example.com", "01098765432",
 				22, "2026-08-27T10:00:00", "2026-08-27T10:00:02");
-		given(couponEventRepository.existsById(EVENT_ID)).willReturn(true);
 		given(couponIssueRepository
 				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
 						EVENT_ID, 20, PageRequest.of(0, 201)))
@@ -71,10 +71,10 @@ class CouponIssuanceLogServiceTest {
 		var result = couponIssuanceLogService.findLogs(EVENT_ID, 20, 200);
 
 		assertThat(result.eventId()).isEqualTo(EVENT_ID);
-		assertThat(result.nextSequence()).isEqualTo(22);
+		assertThat(result.nextSequence()).isEqualTo(22L);
 		assertThat(result.hasMore()).isFalse();
 		assertThat(result.logs()).extracting(log -> log.issueSequence())
-				.containsExactly(21, 22);
+				.containsExactly(21L, 22L);
 		assertThat(result.logs().getFirst()).satisfies(log -> {
 			assertThat(log.userId()).isEqualTo(101L);
 			assertThat(log.maskedUserName()).isEqualTo("홍*동");
@@ -82,8 +82,9 @@ class CouponIssuanceLogServiceTest {
 			assertThat(log.maskedUserPhone()).isEqualTo("010-****-5678");
 			assertThat(log.status()).isEqualTo("ISSUED");
 		});
-		assertThat(result.logs().getFirst().confirmedAt().toString())
+		assertThat(result.logs().getFirst().persistedAt().toString())
 				.isEqualTo("2026-08-27T10:00:01+09:00");
+		verify(couponEventRepository, never()).existsById(EVENT_ID);
 	}
 
 	@Test
@@ -100,12 +101,11 @@ class CouponIssuanceLogServiceTest {
 				.email("honggildong@example.com")
 				.phone("010-1234-5678")
 				.build();
-		given(couponEventRepository.existsById(EVENT_ID)).willReturn(true);
 		given(couponIssueRepository
 				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
 						EVENT_ID, 20, PageRequest.of(0, 201)))
 				.willReturn(List.of(confirmedIssue));
-		given(pendingLogReader.findRecentAfter(EVENT_ID, 20, 201))
+		given(pendingLogReader.findAfter(EVENT_ID, 20, 201))
 				.willReturn(List.of(processing, confirmed));
 		given(userRepository.findAllById(Mockito.any()))
 				.willReturn(List.of(processingUser));
@@ -113,13 +113,13 @@ class CouponIssuanceLogServiceTest {
 		var result = couponIssuanceLogService.findLogs(EVENT_ID, 20, 200);
 
 		assertThat(result.logs()).extracting(log -> log.issueSequence())
-				.containsExactly(21, 22);
+				.containsExactly(21L, 22L);
 		assertThat(result.logs().getFirst()).satisfies(log -> {
 			assertThat(log.status()).isEqualTo("PROCESSING");
 			assertThat(log.maskedUserName()).isEqualTo("홍*동");
 			assertThat(log.maskedUserEmail()).isEqualTo("hon****@example.com");
 			assertThat(log.maskedUserPhone()).isEqualTo("010-****-5678");
-			assertThat(log.confirmedAt()).isNull();
+			assertThat(log.persistedAt()).isNull();
 		});
 		assertThat(result.logs().getLast().status()).isEqualTo("ISSUED");
 		assertThat(result.logs().getLast().maskedUserName()).isEqualTo("김*수");
@@ -128,7 +128,6 @@ class CouponIssuanceLogServiceTest {
 	@Test
 	@DisplayName("요청 크기보다 한 건 더 조회해 다음 페이지 존재 여부를 표시한다")
 	void indicatesMoreLogsWithoutAdvancingPastVisibleItem() {
-		given(couponEventRepository.existsById(EVENT_ID)).willReturn(true);
 		given(couponIssueRepository
 				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
 						EVENT_ID, 0, PageRequest.of(0, 3)))
@@ -143,12 +142,47 @@ class CouponIssuanceLogServiceTest {
 		var result = couponIssuanceLogService.findLogs(EVENT_ID, 0, 2);
 
 		assertThat(result.logs()).hasSize(2);
-		assertThat(result.nextSequence()).isEqualTo(2);
+		assertThat(result.nextSequence()).isEqualTo(2L);
 		assertThat(result.hasMore()).isTrue();
 	}
 
 	@Test
-	@DisplayName("존재하지 않는 캠페인은 발급 로그를 조회하지 않고 404 예외로 처리한다")
+	@DisplayName("Redis와 DB의 같은 순번이 병합되면 보이지 않는 중복 때문에 다음 페이지를 만들지 않는다")
+	void doesNotReportMoreForOverwrittenDuplicate() {
+		IssueRecord processing = issueRecord(101L, 21);
+		CouponIssue confirmedIssue = issue(
+				101L, "홍길동", "hong@example.com", "010-1234-5678",
+				21, "2026-08-27T10:00:00", "2026-08-27T10:00:01");
+		given(pendingLogReader.findAfter(EVENT_ID, 20, 2))
+				.willReturn(List.of(processing));
+		given(couponIssueRepository
+				.findByCouponEvent_IdAndIssueSequenceGreaterThanOrderByIssueSequenceAsc(
+						EVENT_ID, 20, PageRequest.of(0, 2)))
+				.willReturn(List.of(confirmedIssue));
+
+		var result = couponIssuanceLogService.findLogs(EVENT_ID, 20, 1);
+
+		assertThat(result.logs()).hasSize(1);
+		assertThat(result.logs().getFirst().status()).isEqualTo("ISSUED");
+		assertThat(result.hasMore()).isFalse();
+	}
+
+	@Test
+	@DisplayName("int 범위를 넘는 Redis 발급 순번도 관제 응답에서 유실하지 않는다")
+	void keepsLongRedisSequence() {
+		long sequence = (long) Integer.MAX_VALUE + 1;
+		given(pendingLogReader.findAfter(EVENT_ID, Integer.MAX_VALUE, 2))
+				.willReturn(List.of(issueRecord(101L, sequence)));
+
+		var result = couponIssuanceLogService.findLogs(EVENT_ID, Integer.MAX_VALUE, 1);
+
+		assertThat(result.logs()).extracting(log -> log.issueSequence())
+				.containsExactly(sequence);
+		assertThat(result.nextSequence()).isEqualTo(sequence);
+	}
+
+	@Test
+	@DisplayName("로그가 비어 있고 캠페인도 존재하지 않으면 404 예외로 처리한다")
 	void rejectsMissingEvent() {
 		given(couponEventRepository.existsById(EVENT_ID)).willReturn(false);
 
@@ -166,7 +200,7 @@ class CouponIssuanceLogServiceTest {
 			String phone,
 			int sequence,
 			String issuedAt,
-			String confirmedAt) {
+			String persistedAt) {
 		return CouponIssue.builder()
 				.user(User.builder()
 						.id(userId)
@@ -177,11 +211,11 @@ class CouponIssuanceLogServiceTest {
 				.issueSequence(sequence)
 				.status(CouponIssueStatus.ISSUED)
 				.issuedAt(LocalDateTime.parse(issuedAt))
-				.createdAt(LocalDateTime.parse(confirmedAt))
+				.createdAt(LocalDateTime.parse(persistedAt))
 				.build();
 	}
 
-	private IssueRecord issueRecord(long userId, int sequence) {
+	private IssueRecord issueRecord(long userId, long sequence) {
 		return new IssueRecord(
 				UUID.randomUUID(),
 				EVENT_ID,

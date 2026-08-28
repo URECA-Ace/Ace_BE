@@ -43,11 +43,11 @@ class CouponIssuanceLogControllerTest {
 								"홍*동",
 								"hon****@example.com",
 								"010-****-5678",
-								21,
+								21L,
 								"ISSUED",
 								OffsetDateTime.parse("2026-08-27T10:00:00+09:00"),
 								OffsetDateTime.parse("2026-08-27T10:00:01+09:00"))),
-						21,
+						21L,
 						false));
 
 		mockMvc.perform(get("/api/v1/events/{eventId}/issuance-logs", EVENT_ID)
@@ -64,7 +64,7 @@ class CouponIssuanceLogControllerTest {
 						.value("010-****-5678"))
 				.andExpect(jsonPath("$.data.logs[0].issueSequence").value(21))
 				.andExpect(jsonPath("$.data.logs[0].status").value("ISSUED"))
-				.andExpect(jsonPath("$.data.logs[0].confirmedAt")
+				.andExpect(jsonPath("$.data.logs[0].persistedAt")
 						.value("2026-08-27T10:00:01+09:00"))
 				.andExpect(jsonPath("$.data.nextSequence").value(21))
 				.andExpect(jsonPath("$.data.hasMore").value(false));
