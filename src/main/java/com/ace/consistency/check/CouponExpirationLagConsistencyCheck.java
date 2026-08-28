@@ -28,7 +28,7 @@ public class CouponExpirationLagConsistencyCheck implements ConsistencyCheck {
 	@Autowired
 	public CouponExpirationLagConsistencyCheck(
 			NamedParameterJdbcTemplate jdbcTemplate,
-			@Value("${consistency.expiration.allowed-delay-ms}") long allowedDelayMillis) {
+			@Value("${consistency.expiration.allowed-delay-ms:120000}") long allowedDelayMillis) {
 		this(jdbcTemplate, allowedDelayMillis, Clock.systemDefaultZone());
 	}
 
