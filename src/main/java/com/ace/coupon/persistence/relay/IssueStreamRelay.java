@@ -40,7 +40,13 @@ import com.ace.coupon.persistence.failure.IssueFailureStage;
 // Stream 소비 계층(2차 저장 경로)
 @Slf4j
 @Component
-@ConditionalOnProperty(prefix = "coupon.issue.persistence", name = "mode", havingValue = "RELAY")
+// mode 를 안 적으면 RELAY
+// matchIfMissing 이 없으면 컨슈머만 안 떠서 재고만 줄고 저장이 멈춘다
+@ConditionalOnProperty(
+		prefix = "coupon.issue.persistence",
+		name = "mode",
+		havingValue = "RELAY",
+		matchIfMissing = true)
 public class IssueStreamRelay implements SmartLifecycle {
 
 	// 0 부터

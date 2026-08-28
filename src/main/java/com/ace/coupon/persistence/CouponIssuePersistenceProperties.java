@@ -15,10 +15,12 @@ public record CouponIssuePersistenceProperties(
 		Integer maxDeliveryAttempts,
 		Duration refreshInterval) {
 
-	private static final PersistenceMode DEFAULT_MODE = PersistenceMode.SYNC;
+	private static final PersistenceMode DEFAULT_MODE = PersistenceMode.RELAY;
 	private static final String DEFAULT_CONSUMER_GROUP = "issue-persist";
 	private static final int DEFAULT_BATCH_SIZE = 100;
-	private static final Duration DEFAULT_BLOCK_TIMEOUT = Duration.ofSeconds(2);
+	// spring.data.redis.timeout(2s) 보다 짧아야 한다
+	// 같으면 Stream 이 빌 때마다 BLOCK 이 그 시간을 다 쓰고 Lettuce 가 커맨드 타임아웃을 낸다
+	private static final Duration DEFAULT_BLOCK_TIMEOUT = Duration.ofSeconds(1);
 	private static final Duration DEFAULT_CLAIM_MIN_IDLE = Duration.ofSeconds(30);
 	private static final int DEFAULT_MAX_DELIVERY_ATTEMPTS = 3;
 	private static final Duration DEFAULT_REFRESH_INTERVAL = Duration.ofSeconds(10);

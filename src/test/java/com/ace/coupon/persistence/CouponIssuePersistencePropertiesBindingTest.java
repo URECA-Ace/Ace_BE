@@ -25,7 +25,7 @@ class CouponIssuePersistencePropertiesBindingTest {
 		runner.run(context -> {
 			assertThat(context).hasNotFailed();
 			assertThat(context.getBean(CouponIssuePersistenceProperties.class).mode())
-					.isEqualTo(PersistenceMode.SYNC);
+					.isEqualTo(PersistenceMode.RELAY);
 		});
 	}
 
