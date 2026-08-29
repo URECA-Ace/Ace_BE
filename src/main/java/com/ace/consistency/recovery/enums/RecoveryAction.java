@@ -31,6 +31,16 @@ public enum RecoveryAction {
 	 */
 	STOCK_REVOKE_EXCESS_ISSUANCE("초과발급 회수"),
 
+	/**
+	 * StateMachineConsistencyCheck 전용: 끊긴 상태 체인을 복구하고 원래 상태로 복원한다.
+	 */
+	RESTORE_STATE_MACHINE("이력 체인 복원"),
+
+	/**
+	 * IssueHistoryTimeSyncConsistencyCheck 전용: 시간 불일치를 히스토리 기준으로 동기화한다.
+	 */
+	SYNC_TIME_TO_HISTORY("시간 동기화"),
+
 	/** CouponIssueHistoryStateConsistencyCheck 전용: 누락된 최초 ISSUED 이력을 복원한다. */
 	RESTORE_INITIAL_ISSUE_HISTORY("최초 발급 이력 복원"),
 

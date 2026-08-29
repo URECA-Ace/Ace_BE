@@ -18,7 +18,7 @@ class IssueHistoryTimeSyncConsistencyCheckTest extends ConsistencyCheckIntegrati
 
 	@BeforeEach
 	void setUp() {
-		check = new IssueHistoryTimeSyncConsistencyCheck(jdbcTemplate);
+		check = new IssueHistoryTimeSyncConsistencyCheck(jdbcTemplate, 1800L);
 	}
 
 	private java.util.List<Scope> createTestScopes(long eventId) {

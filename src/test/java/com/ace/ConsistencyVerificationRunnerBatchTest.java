@@ -119,7 +119,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 	}
 
 	/**
-	 * [검증 목적] 실제 StockConsistencyCheck/DuplicateConsistencyCheck 두 개를 ALL 스코프로 넣고
+	 * [검증 목적] 실제 StockConsistencyCheck/StateMachineConsistencyCheck 두 개를 ALL 스코프로 넣고
 	 * runAsync()를 호출했을 때, Job이 정상적으로 두 Step을 모두 순차 실행하고
 	 * 각 Step 결과가 verification_result 테이블에 저장되는지 확인한다.
 	 * (심어둔 이벤트에는 coupon_issue가 없으므로 두 Check 모두 위반이 없는 상태다)
@@ -158,7 +158,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 
 		assertEquals(BatchStatus.FAILED, finished.getStatus());
 		assertEquals(1, finished.getStepExecutions().size(),
-				"뒤 Step(DuplicateConsistencyCheckStep)은 아예 시작되지 않아야 합니다.");
+				"뒤 Step(StateMachineConsistencyCheckStep)은 아예 시작되지 않아야 합니다.");
 		assertEquals(BatchStatus.FAILED, stepOf(finished, "FakeThrowingCheckStep").getStatus());
 
 		List<Map<String, Object>> rows = fetchResultsAfter(maxIdBefore);
@@ -191,12 +191,12 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 		Map<String, Object> failingResult = rows.stream()
 				.filter(r -> "FakeFailingCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
-		Map<String, Object> duplicateResult = rows.stream()
+		Map<String, Object> stateMachineResult = rows.stream()
 				.filter(r -> "StateMachineConsistencyCheck".equals(r.get("check_name")))
 				.findFirst().orElseThrow();
 
 		assertEquals("FAIL", failingResult.get("status"));
-		assertEquals("PASS", duplicateResult.get("status"));
+		assertEquals("PASS", stateMachineResult.get("status"));
 	}
 
 	/**
@@ -215,7 +215,7 @@ class ConsistencyVerificationRunnerBatchTest extends ConsistencyCheckIntegration
 
 		assertEquals(BatchStatus.FAILED, firstFinished.getStatus());
 		assertEquals(1, firstFinished.getStepExecutions().size(),
-				"뒤 Step(DuplicateConsistencyCheckStep)은 아직 실행되지 않아야 합니다.");
+				"뒤 Step(StateMachineConsistencyCheckStep)은 아직 실행되지 않아야 합니다.");
 
 		JobExecution restarted = runner.restartRunAsync(firstFinished.getId());
 		JobExecution restartedFinished = awaitCompletion(restarted);

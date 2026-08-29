@@ -43,7 +43,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 			""";
 
 	private static final String SQL = """
-            SELECT sub.issue_id, sub.prev_to_status, sub.from_status, sub.to_status,
+            SELECT sub.issue_id, sub.event_id AS eventId, sub.prev_to_status, sub.from_status, sub.to_status,
                    COUNT(*) OVER() AS total_violation_count
             FROM (
                 SELECT ch.issue_id, 
