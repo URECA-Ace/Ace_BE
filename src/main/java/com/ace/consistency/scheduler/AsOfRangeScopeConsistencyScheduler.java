@@ -2,6 +2,8 @@ package com.ace.consistency.scheduler;
 
 import com.ace.consistency.common.*;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.consistency.schedule.ConsistencySchedulerCoordinator;
+import com.ace.consistency.schedule.ConsistencySchedulerNames;
 import com.ace.event.scheduler.SchedulerCompletedEvent;
 import com.ace.event.scheduler.SchedulerStartedEvent;
 import lombok.RequiredArgsConstructor;
@@ -9,8 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PostConstruct;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,8 +31,9 @@ public class AsOfRangeScopeConsistencyScheduler {
 	private final ConsistencyVerificationRunner runner;
 	private final VerificationResultRepository resultRepository;
 	private final ApplicationEventPublisher eventPublisher;
+	private final ConsistencySchedulerCoordinator coordinator;
 
-	private static final String SCHEDULER_NAME = "AS_OF_RANGE_CONSISTENCY";
+	private static final String SCHEDULER_NAME = ConsistencySchedulerNames.AS_OF_RANGE;
 
 	@Value("${consistency.as-of-range.safety-margin-seconds}")
 	private long safetyMarginSeconds;
@@ -37,9 +41,14 @@ public class AsOfRangeScopeConsistencyScheduler {
 	@Value("${consistency.as-of-range.initial-lookback-hours}")
 	private long initialLookbackHours;
 
-	@Scheduled(
-			initialDelayString = "${consistency.as-of-range.fixed-delay-ms}",
-			fixedDelayString = "${consistency.as-of-range.fixed-delay-ms}")
+	@Value("${consistency.as-of-range.fixed-delay-ms}")
+	private long defaultIntervalMs;
+
+	@PostConstruct
+	void register() {
+		coordinator.register(SCHEDULER_NAME, defaultIntervalMs, this::run);
+	}
+
 	public void run() {
 		eventPublisher.publishEvent(SchedulerStartedEvent.builder()
 				.schedulerName(SCHEDULER_NAME)

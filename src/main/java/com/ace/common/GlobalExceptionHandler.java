@@ -19,6 +19,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -211,6 +212,15 @@ public class GlobalExceptionHandler {
 		String code = status != null ? status.name() : "HTTP_" + statusCode.value();
 		String message = status != null ? status.getReasonPhrase() : "요청을 처리할 수 없습니다.";
 		return ResponseEntity.status(statusCode).body(ApiResponse.error(code, message));
+	}
+
+	// SSE 등 비동기 응답 처리 중 클라이언트가 먼저 연결을 끊으면 발생한다(새로고침, 탭 종료 등).
+	// 이미 끊어진 커넥션이라 응답 바디를 쓸 수 없으므로(쓰면 HttpMessageNotWritableException이
+	// 이어서 발생한다) 별도 응답 없이 낮은 레벨로만 조용히 기록한다.
+	@ExceptionHandler(AsyncRequestNotUsableException.class)
+	public void handleAsyncRequestNotUsable(AsyncRequestNotUsableException ex, HttpServletRequest request) {
+		log.debug("[ASYNC_REQUEST_NOT_USABLE] client disconnected: method={}, path={}",
+				request.getMethod(), request.getRequestURI());
 	}
 
 	@ExceptionHandler(Exception.class)

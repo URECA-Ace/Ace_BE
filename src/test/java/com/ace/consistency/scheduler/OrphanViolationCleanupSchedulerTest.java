@@ -1,6 +1,7 @@
 package com.ace.consistency.scheduler;
 
 import com.ace.consistency.repository.VerificationViolationRepository;
+import com.ace.consistency.schedule.ConsistencySchedulerCoordinator;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -18,7 +19,8 @@ class OrphanViolationCleanupSchedulerTest {
 	void 설정된_threshold만큼_오래_갱신되지_않은_고아_행을_정리한다() {
 		VerificationViolationRepository repository = mock(VerificationViolationRepository.class);
 		ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
-		OrphanViolationCleanupScheduler scheduler = new OrphanViolationCleanupScheduler(repository, eventPublisher);
+		ConsistencySchedulerCoordinator coordinator = mock(ConsistencySchedulerCoordinator.class);
+		OrphanViolationCleanupScheduler scheduler = new OrphanViolationCleanupScheduler(repository, eventPublisher, coordinator);
 		ReflectionTestUtils.setField(scheduler, "orphanThresholdMinutes", 30L);
 		LocalDateTime before = LocalDateTime.now().minusMinutes(30);
 
