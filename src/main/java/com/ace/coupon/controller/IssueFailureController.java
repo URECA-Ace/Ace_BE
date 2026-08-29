@@ -42,12 +42,12 @@ public class IssueFailureController {
 
 	@GetMapping
 	public ResponseEntity<ApiResponse<IssueFailurePageResponse>> findFailures(
-			@RequestParam(required = false) Long eventId,
-			@RequestParam(required = false) IssueFailureStage stage,
-			@RequestParam(required = false) IssueFailureStatus status,
-			@RequestParam(required = false) String requestId,
-			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+			@RequestParam(name = "eventId", required = false) Long eventId,
+			@RequestParam(name = "stage", required = false) IssueFailureStage stage,
+			@RequestParam(name = "status", required = false) IssueFailureStatus status,
+			@RequestParam(name = "requestId", required = false) String requestId,
+			@RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+			@RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
 
 		return ResponseEntity.ok(ApiResponse.success(
 				queryService.findFailures(eventId, stage, status, requestId, page, size)));
