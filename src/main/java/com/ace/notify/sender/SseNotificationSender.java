@@ -28,11 +28,22 @@ public class SseNotificationSender implements NotificationSender {
 
 	@Override
 	public void send(NotificationType type, Long userId, Map<String, Object> payload) {
+		String message;
 		try {
-			String message = OBJECT_MAPPER.writeValueAsString(new NotificationMessage(type, userId, payload));
-			redisTemplate.convertAndSend(notificationTopic.getTopic(), message);
+			message = OBJECT_MAPPER.writeValueAsString(new NotificationMessage(type, userId, payload));
 		} catch (JsonProcessingException e) {
 			log.error("알림 메시지 직렬화 실패. type={}, userId={}", type, userId, e);
+			return;
+		}
+
+		try {
+			redisTemplate.convertAndSend(notificationTopic.getTopic(), message);
+		} catch (Exception e) {
+			// 알림은 유실돼도 되는 부가 기능이다. Redis 장애로 convertAndSend()가 던지는 예외를
+			// 여기서 격리하지 않으면, 동기 @EventListener를 쓰는 일부 호출부(스케줄러의 시작
+			// 알림 발행, ConsistencyJobExecutionListener.beforeJob() 등)까지 예외가 전파되어
+			// 만료 처리·정합성 검증 같은 핵심 로직 자체가 실행되지 못하는 문제가 생긴다.
+			log.error("알림 메시지 전송 실패. type={}, userId={}", type, userId, e);
 		}
 	}
 }
