@@ -82,6 +82,7 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 				2, Map.of(), List.of(), LocalDateTime.now(), 10L));
 		given(violationRepository.findByVerificationResultId(any()))
 				.willReturn(List.of(violationFor(1L), violationFor(2L)));
+		given(couponIssueRepository.findEventIdsByIds(List.of(1L, 2L))).willReturn(List.of(1L, 2L));
 
 		given(eventRecoveryExecutor.syncTimeHistory(1L))
 				.willReturn(RecoveryOutcome.success(Scope.ofEvent(1L), Map.of(), "성공"));
@@ -101,7 +102,7 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 	void 지원하지_않는_액션이면_executor를_호출하지_않고_FAIL_Outcome을_반환한다() {
 		VerificationResultEntity target = failResultFor(EVENT_ID);
 
-		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.DEFAULT); 
+		List<RecoveryOutcome> outcomes = policy.recover(target, RecoveryAction.DEFAULT);
 
 		assertThat(outcomes).hasSize(1);
 		assertThat(outcomes.get(0).getStatus()).isEqualTo(RecoveryResultStatus.FAIL);

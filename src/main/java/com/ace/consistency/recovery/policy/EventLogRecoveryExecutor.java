@@ -32,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * EventLog (StateMachine, TimeSync) 정합성 복구를 개별 이벤트 단위로 실행하는 Executor.
- * 
+ *
  * 여러 이벤트를 한 번에 복구할 때(ALL 스코프 등), 루프 안에서 한 이벤트의 복구 실패(예외)가
  * 이미 성공한 다른 이벤트의 복구 내역이나 바깥쪽 트랜잭션(RecoveryResult 기록)을 롤백시키지
  * 않도록, 각 이벤트별 복구를 REQUIRES_NEW 물리 트랜잭션으로 격리한다.
@@ -135,7 +135,7 @@ public class EventLogRecoveryExecutor {
 			}
 			int index = breakIndex.get();
 			if (index == 0) {
-				notEligibleIssueIds.add(issueId); 
+				notEligibleIssueIds.add(issueId);
 				continue;
 			}
 
@@ -227,6 +227,7 @@ public class EventLogRecoveryExecutor {
 
 		List<Long> patchedIssueIds = new ArrayList<>();
 		List<Long> notEligibleIssueIds = new ArrayList<>();
+		List<Long> failedIssueIds = new ArrayList<>();
 
 		// Chunk 단위로 분할하여 개별 트랜잭션 처리
 		for (int i = 0; i < candidateIds.size(); i += chunkSize) {
@@ -237,18 +238,21 @@ public class EventLogRecoveryExecutor {
 				notEligibleIssueIds.addAll(result.notEligible());
 			} catch (Exception ex) {
 				log.error("시간 동기화 복구 청크 처리 중 예외 발생. eventId={}, chunkIndex={}", eventId, i, ex);
+				failedIssueIds.addAll(chunk);
 			}
 		}
 
 		Map<String, Object> detail = Map.of(
 				"eventId", eventId,
 				"patchedIssueIds", patchedIssueIds,
-				"notEligibleIssueIds", notEligibleIssueIds);
+				"notEligibleIssueIds", notEligibleIssueIds,
+				"failedIssueIds", failedIssueIds);
 
-		if (!notEligibleIssueIds.isEmpty()) {
+		if (!notEligibleIssueIds.isEmpty() || !failedIssueIds.isEmpty()) {
 			return RecoveryOutcome.failure(Scope.ofEvent(eventId), detail,
-					String.format("이벤트 %d의 시간 불일치 중 %d건은 최초 발급이 아닌 재진입 케이스라 자동 복구하지 못했습니다. 관리자 확인이 필요합니다.",
-							eventId, notEligibleIssueIds.size()));
+					String.format("이벤트 %d의 시간 불일치 중 %d건은 최초 발급이 아닌 재진입 케이스라 자동 복구하지 못했고, "
+									+ "%d건은 처리 중 오류가 발생해 관리자 확인이 필요합니다.",
+							eventId, notEligibleIssueIds.size(), failedIssueIds.size()));
 		}
 		if (patchedIssueIds.isEmpty()) {
 			return RecoveryOutcome.success(Scope.ofEvent(eventId), detail,
@@ -276,7 +280,7 @@ public class EventLogRecoveryExecutor {
 			CouponHistory latest = chain.getLast();
 
 			if (lockedIssue.getStatus() == CouponIssueStatus.ISSUED && latest.getFromStatus() != null) {
-				notEligibleIssueIds.add(issueId); 
+				notEligibleIssueIds.add(issueId);
 				continue;
 			}
 
@@ -284,9 +288,10 @@ public class EventLogRecoveryExecutor {
 					? lockedIssue.getUsedAt() : lockedIssue.getIssuedAt();
 			LocalDateTime historyTime = latest.getOccurredAt();
 
+			// 더 늦은(최신) 시각을 가진 쪽이 이긴다 — issue가 history보다 이르든 늦든,
+			// 임계값을 넘겨 벌어져 있으면 항상 issue를 history 기준으로 맞춘다.
 			boolean needsPatch = issueTime == null
-					|| (issueTime.isBefore(historyTime)
-						&& Duration.between(issueTime, historyTime).abs().compareTo(THRESHOLD) > 0);
+					|| Duration.between(issueTime, historyTime).abs().compareTo(THRESHOLD) > 0;
 			if (!needsPatch) {
 				continue;
 			}

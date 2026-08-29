@@ -2,9 +2,9 @@ package com.ace.consistency.recovery.policy;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
@@ -45,9 +46,15 @@ class EventLogRecoveryExecutorTest {
 
 	private EventLogRecoveryExecutor executor;
 
+	// REQUIRES_NEW 트랜잭션 분리를 위해 프로덕션에서는 self가 프록시로 주입되지만,
+	// Mockito 단위 테스트에는 Spring 컨테이너가 없어 자기 자신으로 직접 채워준다.
+	// chunkSize도 @Value가 동작하지 않아 기본값(0)으로 남으면 청크 루프(i += chunkSize)가
+	// 절대 끝나지 않으므로 반드시 함께 채워줘야 한다.
 	@BeforeEach
 	void setUp() {
 		executor = new EventLogRecoveryExecutor(couponIssueRepository, couponHistoryRepository, couponEventRepository);
+		ReflectionTestUtils.setField(executor, "self", executor);
+		ReflectionTestUtils.setField(executor, "chunkSize", 500);
 	}
 
 	private CouponEvent existingEvent() {
@@ -182,10 +189,10 @@ class EventLogRecoveryExecutorTest {
 	}
 
 	@Test
-	@DisplayName("USED 건은 history 최신 시각과 1초 넘게 어긋나면 used_at을 history 기준으로 맞춘다")
-	void syncTimeHistory_USED건_임계값초과시_usedAt동기화() {
+	@DisplayName("USED 건은 issue가 history보다 이르고 1초 넘게 어긋나면 used_at을 history 기준으로 맞춘다")
+	void syncTimeHistory_issue가더이르고_임계값초과시_usedAt동기화() {
 		LocalDateTime issuedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
-		LocalDateTime historyTime = issuedAt.plusMinutes(1); // 1분 차이 -> 1초 임계값 초과
+		LocalDateTime historyTime = issuedAt.plusMinutes(1); // 1분 차이 -> 1초 임계값 초과, issue가 더 이르다
 		CouponIssue candidate = CouponIssue.builder()
 				.id(10L).status(CouponIssueStatus.USED).usedAt(issuedAt).build();
 		CouponHistory latest = history(1L, 10L, CouponIssueStatus.ISSUED, CouponIssueStatus.USED, historyTime);
@@ -196,6 +203,28 @@ class EventLogRecoveryExecutorTest {
 		given(couponIssueRepository.findByCouponEvent_IdAndStatusIn(eq(EVENT_ID), any())).willReturn(List.of(candidate));
 		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(10L)).willReturn(List.of(latest));
 		given(couponIssueRepository.findByIdForUpdate(10L)).willReturn(Optional.of(lockedIssue));
+
+		RecoveryOutcome outcome = executor.syncTimeHistory(EVENT_ID);
+
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(lockedIssue.getUsedAt()).isEqualTo(historyTime);
+	}
+
+	@Test
+	@DisplayName("USED 건은 issue가 history보다 늦어도 1초 넘게 어긋나면 used_at을 history 기준으로 맞춘다")
+	void syncTimeHistory_issue가더늦어도_임계값초과시_usedAt동기화() {
+		LocalDateTime historyTime = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+		LocalDateTime usedAt = historyTime.plusMinutes(1); // issue가 history보다 1분 늦다 — 예전 로직이면 스킵되던 방향
+		CouponIssue candidate = CouponIssue.builder()
+				.id(15L).status(CouponIssueStatus.USED).usedAt(usedAt).build();
+		CouponHistory latest = history(6L, 15L, CouponIssueStatus.ISSUED, CouponIssueStatus.USED, historyTime);
+		CouponIssue lockedIssue = CouponIssue.builder()
+				.id(15L).status(CouponIssueStatus.USED).usedAt(usedAt).build();
+
+		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
+		given(couponIssueRepository.findByCouponEvent_IdAndStatusIn(eq(EVENT_ID), any())).willReturn(List.of(candidate));
+		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(15L)).willReturn(List.of(latest));
+		given(couponIssueRepository.findByIdForUpdate(15L)).willReturn(Optional.of(lockedIssue));
 
 		RecoveryOutcome outcome = executor.syncTimeHistory(EVENT_ID);
 
@@ -236,13 +265,14 @@ class EventLogRecoveryExecutorTest {
 
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponIssueRepository.findByCouponEvent_IdAndStatusIn(eq(EVENT_ID), any())).willReturn(List.of(candidate));
+		// 락은 안전한 뷰 확보를 위해 먼저 잡고, 재조회한 history로 재진입 여부를 판단한다.
+		given(couponIssueRepository.findByIdForUpdate(12L)).willReturn(Optional.of(candidate));
 		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(12L)).willReturn(List.of(latest));
 
 		RecoveryOutcome outcome = executor.syncTimeHistory(EVENT_ID);
 
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("재진입");
-		verify(couponIssueRepository, never()).findByIdForUpdate(anyLong());
 	}
 
 	@Test
@@ -256,11 +286,33 @@ class EventLogRecoveryExecutorTest {
 
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponIssueRepository.findByCouponEvent_IdAndStatusIn(eq(EVENT_ID), any())).willReturn(List.of(candidate));
+		// 락은 안전한 뷰 확보를 위해 먼저 잡고, 재조회한 history로 임계값 이내임을 판단한다.
+		given(couponIssueRepository.findByIdForUpdate(13L)).willReturn(Optional.of(candidate));
 		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(13L)).willReturn(List.of(latest));
 
 		RecoveryOutcome outcome = executor.syncTimeHistory(EVENT_ID);
 
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
-		verify(couponIssueRepository, never()).findByIdForUpdate(anyLong());
+		assertThat(candidate.getUsedAt()).isEqualTo(issuedAt); // 임계값 이내라 수정되지 않아야 한다
+	}
+
+	@Test
+	@DisplayName("청크 처리 중 예외가 나면 로그만 남기고 삼키지 않고 FAIL로 남기며 실패한 issueId를 담는다")
+	void syncTimeHistory_청크예외발생_FAIL로남기고실패ID기록() {
+		LocalDateTime issuedAt = LocalDateTime.of(2026, 1, 1, 10, 0, 0);
+		CouponIssue candidate = CouponIssue.builder()
+				.id(16L).status(CouponIssueStatus.USED).usedAt(issuedAt).build();
+
+		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
+		given(couponIssueRepository.findByCouponEvent_IdAndStatusIn(eq(EVENT_ID), any())).willReturn(List.of(candidate));
+		given(couponIssueRepository.findByIdForUpdate(16L)).willReturn(Optional.of(candidate));
+		willThrow(new RuntimeException("DB 커넥션 오류"))
+				.given(couponHistoryRepository).findAllByCouponIssue_IdOrderByOccurredAtAsc(16L);
+
+		RecoveryOutcome outcome = executor.syncTimeHistory(EVENT_ID);
+
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		assertThat(outcome.getMessage()).contains("처리 중 오류가 발생");
+		assertThat(outcome.getDetail()).containsEntry("failedIssueIds", List.of(16L));
 	}
 }
