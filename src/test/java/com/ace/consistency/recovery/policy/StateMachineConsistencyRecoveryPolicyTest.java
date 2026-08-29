@@ -82,6 +82,7 @@ class StateMachineConsistencyRecoveryPolicyTest {
 				2, Map.of(), List.of(), LocalDateTime.now(), 10L));
 		given(violationRepository.findByVerificationResultId(any()))
 				.willReturn(List.of(violationFor(1L), violationFor(2L)));
+		given(couponIssueRepository.findEventIdsByIds(List.of(1L, 2L))).willReturn(List.of(1L, 2L));
 
 		given(eventRecoveryExecutor.restoreStateMachine(1L))
 				.willReturn(RecoveryOutcome.success(Scope.ofEvent(1L), Map.of(), "성공"));
