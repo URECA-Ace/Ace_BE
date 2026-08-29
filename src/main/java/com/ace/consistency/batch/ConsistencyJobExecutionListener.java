@@ -61,7 +61,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
     @Transactional
     public void afterJob(JobExecution jobExecution) {
         if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
-            log.info("Consistency verification batch completed. jobExecutionId={}, stepCount={}",
+            log.info("배치 정합성 검증 성공. jobExecutionId={}, stepCount={}",
                     jobExecution.getId(), jobExecution.getStepExecutions().size());
             publishBatchCompletedEvent(jobExecution);
             return;
@@ -72,7 +72,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
                 .findFirst()
                 .map(StepExecution::getStepName)
                 .orElse("unknown");
-        log.warn("Consistency verification batch finished with status={}. jobExecutionId={}, failedStep={}",
+        log.warn("배치 정합성 검증 실패 존재. status={}. jobExecutionId={}, failedStep={}",
                 jobExecution.getStatus(), jobExecution.getId(), failedStepName);
 
         failureLogRepository.save(BatchFailureLogEntity.from(jobExecution));

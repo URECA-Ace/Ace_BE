@@ -78,7 +78,7 @@ public class AsOfRangeScopeConsistencyScheduler {
 			// runner.run() 내부에서 Check별 예외는 이미 ERROR 결과로 변환되어 저장되므로,
 			// 여기서 잡는 예외는 그 이전 단계(EVENT 존재 검증 등 run() 자체의 사전 검증) 실패다.
 			// 한 Check의 사전 검증 실패가 다른 Check의 이번 틱 실행을 막지 않도록 격리한다.
-			log.error("AS_OF_RANGE scheduled run failed before check execution. checkName={}, to={}",
+			log.error("AS_OF_RANGE 스케쥴링이 실행에 실패했습니다. 실행 못한 checkName={}, to={}",
 					check.getName(), to, ex);
 		}
 	}

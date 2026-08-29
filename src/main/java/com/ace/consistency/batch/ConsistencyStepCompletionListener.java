@@ -59,7 +59,7 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
 
             return stepExecution.getExitStatus();
         } catch (RuntimeException ex) {
-            log.error("Failed to complete consistency Step. jobExecutionId={}, stepExecutionId={}, stepName={}",
+            log.error("배치 정합성 검증 에러 존재. jobExecutionId={}, stepExecutionId={}, stepName={}",
                     stepExecution.getJobExecution().getId(), stepExecution.getId(), stepExecution.getStepName(), ex);
             stepExecution.addFailureException(ex);
             stepExecution.upgradeStatus(BatchStatus.FAILED);

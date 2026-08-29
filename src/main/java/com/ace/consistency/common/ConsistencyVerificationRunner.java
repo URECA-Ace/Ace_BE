@@ -93,7 +93,7 @@ public class ConsistencyVerificationRunner {
 		Objects.requireNonNull(triggerType, "triggerType must not be null");
 
 		if (checks.isEmpty()) {
-			log.warn("run() called with empty check list. scope={}, trigger={}", scope, triggerType);
+			log.warn("빈 Check 배열로 정합성 검증 시도. 트리거={}, 범위={}", triggerType, scope);
 			return List.of();
 		}
 
@@ -108,7 +108,7 @@ public class ConsistencyVerificationRunner {
 			}
 		}
 
-		log.info("Starting consistency verification. trigger={}, scope={}, checkCount={}",
+		log.info("정합성 검증 시작. 트리거={}, 범위={}, checkCount={}",
 				triggerType, scope, checks.size());
 
 		List<VerificationResult> results = checks.stream()
@@ -119,10 +119,10 @@ public class ConsistencyVerificationRunner {
 
 		long failCount = results.stream().filter(r -> !r.isPass()).count();
 		if (failCount > 0) {
-			log.warn("Consistency verification finished with {} failing check(s) out of {}. trigger={}, scope={}",
-					failCount, results.size(), triggerType, scope);
+			log.warn("정합성 검증 실패 존재. 전체 {} 건 중 실패 {}건. 트리거={}, 범위={}",
+					results.size(), failCount, triggerType, scope);
 		} else {
-			log.info("Consistency verification finished. All {} check(s) passed. trigger={}, scope={}",
+			log.info("정합성 검증 성공. 전체 {} 건. 트리거={}, 범위={}",
 					results.size(), triggerType, scope);
 		}
 
@@ -155,7 +155,7 @@ public class ConsistencyVerificationRunner {
 			throw new IllegalArgumentException("runAsync() called with empty check list.");
 		}
 
-		log.info("Starting async consistency verification batch. trigger={}, scope={}, checkCount={}",
+		log.info("배치 정합성 검증 작업 접수. 트리거={}, 범위={}, 검증 갯수={}",
 				triggerType, scope, checks.size());
 
 		Job job = jobFactory.buildJob(checks, scope, triggerType);
@@ -167,7 +167,7 @@ public class ConsistencyVerificationRunner {
 
 		try {
 			JobExecution execution = asyncJobOperator.start(job, params);
-			log.info("Consistency verification batch launched. jobExecutionId={}, trigger={}, scope={}",
+			log.info("배치 정합성 검증 시작. jobExecutionId={}, 트리거={}, 범위={}",
 					execution.getId(), triggerType, scope);
 			return execution;
 		} catch (JobExecutionAlreadyRunningException | JobRestartException
@@ -207,7 +207,7 @@ public class ConsistencyVerificationRunner {
 		try {
 			jobRegistry.register(job);
 			JobExecution restarted = asyncJobOperator.restart(failedExecution);
-			log.info("Consistency verification batch restarted. previousExecutionId={}, newExecutionId={}",
+			log.info("배치 정합성 검증 재시작. previousExecutionId={}, newExecutionId={}",
 					jobExecutionId, restarted.getId());
 			return restarted;
 		} catch (DuplicateJobException | JobRestartException ex) {
