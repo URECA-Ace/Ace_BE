@@ -29,6 +29,7 @@ import com.ace.consistency.recovery.RecoveryOutcome;
 import com.ace.consistency.recovery.enums.RecoveryAction;
 import com.ace.consistency.recovery.enums.RecoveryResultStatus;
 import com.ace.consistency.repository.VerificationViolationRepository;
+import com.ace.coupon.repository.CouponIssueRepository;
 
 @ExtendWith(MockitoExtension.class)
 class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
@@ -41,11 +42,14 @@ class IssueHistoryTimeSyncConsistencyRecoveryPolicyTest {
 	@Mock
 	private VerificationViolationRepository violationRepository;
 
+	@Mock
+	private CouponIssueRepository couponIssueRepository;
+
 	private IssueHistoryTimeSyncConsistencyRecoveryPolicy policy;
 
 	@BeforeEach
 	void setUp() {
-		policy = new IssueHistoryTimeSyncConsistencyRecoveryPolicy(eventRecoveryExecutor, violationRepository);
+		policy = new IssueHistoryTimeSyncConsistencyRecoveryPolicy(eventRecoveryExecutor, violationRepository, couponIssueRepository);
 	}
 
 	private VerificationViolationEntity violationFor(Long targetId) {
