@@ -5,12 +5,14 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.common.VerificationResultPersister;
+import com.ace.event.consistency.ConsistencyStepStartedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.listener.StepExecutionListener;
 import org.springframework.batch.core.step.StepExecution;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -33,6 +35,16 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
     private final Scope scope;
     private final TriggerType triggerType;
     private final VerificationResultPersister resultPersister;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        eventPublisher.publishEvent(ConsistencyStepStartedEvent.builder()
+                .checkName(check.getName())
+                .triggerType(triggerType.name())
+                .startedAt(LocalDateTime.now())
+                .build());
+    }
 
     @Override
     public ExitStatus afterStep(StepExecution stepExecution) {

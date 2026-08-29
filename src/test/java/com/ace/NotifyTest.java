@@ -1,8 +1,10 @@
 package com.ace;
 
 import com.ace.event.consistency.ConsistencyBatchCompletedEvent;
+import com.ace.event.consistency.ConsistencyBatchStartedEvent;
 import com.ace.event.consistency.ConsistencyCheckFailedEvent;
 import com.ace.event.consistency.ConsistencyStepCompletedEvent;
+import com.ace.event.consistency.ConsistencyStepStartedEvent;
 import com.ace.event.coupon.CouponIssuanceCompletedEvent;
 import com.ace.event.coupon.CouponIssueFailedBatchEvent;
 import com.ace.event.coupon.CouponIssueFailedEvent;
@@ -11,8 +13,10 @@ import com.ace.event.scheduler.SchedulerCompletedEvent;
 import com.ace.event.scheduler.SchedulerStartedEvent;
 import com.ace.notify.NotificationType;
 import com.ace.notify.listener.ConsistencyBatchCompletedNotifyListener;
+import com.ace.notify.listener.ConsistencyBatchStartedNotifyListener;
 import com.ace.notify.listener.ConsistencyFailureNotifyListener;
 import com.ace.notify.listener.ConsistencyStepCompletedNotifyListener;
+import com.ace.notify.listener.ConsistencyStepStartedNotifyListener;
 import com.ace.notify.listener.CouponIssuanceCompletedNotifyListener;
 import com.ace.notify.listener.CouponIssueFailedBatchNotifyListener;
 import com.ace.notify.listener.IssueFailureNotifyListener;
@@ -152,6 +156,45 @@ class NotifyTest {
 				NotificationType.COUPON_ISSUANCE_ALL_COMPLETED,
 				null,
 				Map.of("eventId", 100L)
+		);
+	}
+
+	@Test
+	void ALL_배치_시작_이벤트를_받으면_userId_없이_CONSISTENCY_BATCH_STARTED_알림을_발송한다() {
+		ConsistencyBatchStartedNotifyListener listener = new ConsistencyBatchStartedNotifyListener(notificationSender);
+
+		ConsistencyBatchStartedEvent event = ConsistencyBatchStartedEvent.builder()
+				.jobExecutionId(500L)
+				.totalSteps(5)
+				.triggerType("SCHEDULED")
+				.startedAt(LocalDateTime.now())
+				.build();
+
+		listener.handle(event);
+
+		verify(notificationSender).send(
+				NotificationType.CONSISTENCY_BATCH_STARTED,
+				null,
+				Map.of("jobExecutionId", 500L, "totalSteps", 5, "triggerType", "SCHEDULED")
+		);
+	}
+
+	@Test
+	void ALL_배치_Step_시작_이벤트를_받으면_userId_없이_CONSISTENCY_STEP_STARTED_알림을_발송한다() {
+		ConsistencyStepStartedNotifyListener listener = new ConsistencyStepStartedNotifyListener(notificationSender);
+
+		ConsistencyStepStartedEvent event = ConsistencyStepStartedEvent.builder()
+				.checkName("StockConsistencyCheck")
+				.triggerType("SCHEDULED")
+				.startedAt(LocalDateTime.now())
+				.build();
+
+		listener.handle(event);
+
+		verify(notificationSender).send(
+				NotificationType.CONSISTENCY_STEP_STARTED,
+				null,
+				Map.of("checkName", "StockConsistencyCheck", "triggerType", "SCHEDULED")
 		);
 	}
 

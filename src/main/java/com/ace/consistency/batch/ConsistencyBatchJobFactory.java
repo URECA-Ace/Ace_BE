@@ -84,7 +84,7 @@ public class ConsistencyBatchJobFactory {
         ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(check, scope.getTo());
         CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(violationRepository);
         ConsistencyStepCompletionListener listener =
-                new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister);
+                new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister, eventPublisher);
 
         return new StepBuilder(check.getName() + "Step", jobRepository)
                 .<List<Long>, ConsistencyCheck.CheckOutcome>chunk(1)
