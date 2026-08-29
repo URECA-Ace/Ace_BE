@@ -33,7 +33,7 @@ public class ConsistencyExecutionController {
 
 	@GetMapping("/checks")
 	public ResponseEntity<ApiResponse<ConsistencyCheckCatalogResponse>> findSupportedChecks(
-			@RequestParam @NotNull Scope.ScopeType scopeType) {
+			@RequestParam(name = "scopeType") @NotNull Scope.ScopeType scopeType) {
 		return ResponseEntity.ok(ApiResponse.success(service.findSupportedChecks(scopeType)));
 	}
 
@@ -49,12 +49,13 @@ public class ConsistencyExecutionController {
 
 	@GetMapping("/verifications/{jobExecutionId}")
 	public ResponseEntity<ApiResponse<ConsistencyJobExecutionResponse>> findExecution(
-			@PathVariable long jobExecutionId) {
+			@PathVariable(name = "jobExecutionId") long jobExecutionId) {
 		return ResponseEntity.ok(ApiResponse.success(service.findExecution(jobExecutionId)));
 	}
 
 	@PostMapping("/verifications/{jobExecutionId}/stop")
-	public ResponseEntity<ApiResponse<Void>> stop(@PathVariable long jobExecutionId) {
+	public ResponseEntity<ApiResponse<Void>> stop(
+			@PathVariable(name = "jobExecutionId") long jobExecutionId) {
 		service.stop(jobExecutionId);
 		return ResponseEntity.ok(ApiResponse.success());
 	}

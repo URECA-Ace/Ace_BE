@@ -14,8 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-
+import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.common.ViolationTargetType;
+import com.ace.consistency.dto.response.ConsistencyResultPageResponse;
 import com.ace.consistency.dto.response.ConsistencyViolationPageResponse;
 import com.ace.consistency.dto.response.ConsistencyViolationResponse;
 import com.ace.consistency.service.ConsistencyReportService;
@@ -28,6 +29,31 @@ class ConsistencyReportControllerTest {
 
 	@MockitoBean
 	private ConsistencyReportService service;
+
+	@Test
+	void 결과_조회_query_parameter를_명시된_이름으로_바인딩한다() throws Exception {
+		given(service.findResults(null, 0, 8)).willReturn(
+				new ConsistencyResultPageResponse(List.of(), 0, 8, 0, 0, false));
+
+		mockMvc.perform(get("/api/v1/consistency/results").param("page", "0").param("size", "8"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.page").value(0))
+				.andExpect(jsonPath("$.data.size").value(8));
+
+		org.mockito.Mockito.verify(service).findResults(null, 0, 8);
+	}
+
+	@Test
+	void 결과_조회_status_query_parameter를_명시된_이름으로_바인딩한다() throws Exception {
+		given(service.findResults(VerificationResult.Status.FAIL, 0, 8)).willReturn(
+				new ConsistencyResultPageResponse(List.of(), 0, 8, 0, 0, false));
+
+		mockMvc.perform(get("/api/v1/consistency/results")
+					.param("page", "0").param("size", "8").param("status", "FAIL"))
+				.andExpect(status().isOk());
+
+		org.mockito.Mockito.verify(service).findResults(VerificationResult.Status.FAIL, 0, 8);
+	}
 
 	@Test
 	void 결과의_위반_목록을_페이징하여_조회한다() throws Exception {
