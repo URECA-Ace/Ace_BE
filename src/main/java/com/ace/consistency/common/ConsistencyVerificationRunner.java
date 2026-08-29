@@ -215,6 +215,30 @@ public class ConsistencyVerificationRunner {
 		}
 	}
 
+	/**
+	 * 실행 중인 ALL 스코프 배치에 중지 신호를 보낸다. Spring Batch의 stop은 비동기 신호라
+	 * 이 메서드가 반환돼도 즉시 멈춘 것은 아니고, 현재 처리 중인 청크가 끝나는 안전한 지점에서
+	 * STOPPED로 전이된다. 실제 중지 여부는 완료 알림({@code CONSISTENCY_BATCH_COMPLETED})이나
+	 * JobExecution 상태 조회로 확인해야 한다.
+	 * STOPPED로 끝난 Job은 {@link ConsistencyJobExecutionListener#afterJob}에서 FAILED와 동일하게
+	 * batch_failure_log에 기록되고, {@link #restartRunAsync}로 이어서 재시작할 수 있다.
+	 *
+	 * @param jobExecutionId 중지할 실행의 JobExecution id
+	 */
+	public void stop(long jobExecutionId) {
+		JobExecution execution = jobRepository.getJobExecution(jobExecutionId);
+		if (execution == null) {
+			throw new IllegalArgumentException("해당 jobExecutionId의 실행 기록이 없습니다. jobExecutionId=" + jobExecutionId);
+		}
+
+		try {
+			asyncJobOperator.stop(execution);
+			log.info("배치 정합성 검증 중지 요청. jobExecutionId={}", jobExecutionId);
+		} catch (JobExecutionNotRunningException ex) {
+			throw new IllegalStateException("실행 중이 아닌 배치는 중지할 수 없습니다. jobExecutionId=" + jobExecutionId, ex);
+		}
+	}
+
 	private void validateRestartWindow(JobExecution failedExecution) {
 		LocalDateTime lastUpdated = failedExecution.getStepExecutions().stream()
 				.filter(step -> step.getStatus() != BatchStatus.COMPLETED)
