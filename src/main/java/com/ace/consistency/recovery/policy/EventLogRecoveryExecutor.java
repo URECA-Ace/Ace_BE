@@ -84,6 +84,7 @@ public class EventLogRecoveryExecutor {
 
 		List<Long> recoveredIssueIds = new ArrayList<>();
 		List<Long> notEligibleIssueIds = new ArrayList<>();
+		List<Long> failedIssueIds = new ArrayList<>();
 
 		// 2. Chunk 단위로 분할하여 개별 트랜잭션 처리
 		for (int i = 0; i < allIssueIds.size(); i += chunkSize) {
@@ -94,19 +95,21 @@ public class EventLogRecoveryExecutor {
 				notEligibleIssueIds.addAll(result.notEligible());
 			} catch (Exception ex) {
 				log.error("상태 머신 복구 청크 처리 중 예외 발생. eventId={}, chunkIndex={}", eventId, i, ex);
+				failedIssueIds.addAll(chunk);
 			}
 		}
 
 		Map<String, Object> detail = Map.of(
 				"eventId", eventId,
 				"recoveredIssueIds", recoveredIssueIds,
-				"notEligibleIssueIds", notEligibleIssueIds);
+				"notEligibleIssueIds", notEligibleIssueIds,
+				"failedIssueIds", failedIssueIds);
 
-		if (!notEligibleIssueIds.isEmpty()) {
+		if (!notEligibleIssueIds.isEmpty() || !failedIssueIds.isEmpty()) {
 			return RecoveryOutcome.failure(Scope.ofEvent(eventId), detail,
 					String.format("이벤트 %d의 체인 붕괴 대상 중 %d건만 복구했습니다. %d건은 삭제 범위에 USED/EXPIRED가 포함되어 있거나 "
-									+ "최초 이력이 손상되어 자동 복구하지 못했으므로 관리자 확인이 필요합니다.",
-								eventId, recoveredIssueIds.size(), notEligibleIssueIds.size()));
+									+ "최초 이력이 손상되어 자동 복구하지 못했고, %d건은 처리 중 오류가 발생해 관리자 확인이 필요합니다.",
+								eventId, recoveredIssueIds.size(), notEligibleIssueIds.size(), failedIssueIds.size()));
 		}
 		if (recoveredIssueIds.isEmpty()) {
 			return RecoveryOutcome.success(Scope.ofEvent(eventId), detail,

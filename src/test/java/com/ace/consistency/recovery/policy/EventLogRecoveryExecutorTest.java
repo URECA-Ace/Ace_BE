@@ -98,6 +98,10 @@ class EventLogRecoveryExecutorTest {
 				history(2L, 10L, CouponIssueStatus.ISSUED, CouponIssueStatus.USED, t0.plusMinutes(1)));
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponHistoryRepository.findAllByCouponEventIdOrderByIssueAndTime(EVENT_ID)).willReturn(chain);
+		// 락을 먼저 잡고 그 아래에서 history를 재조회해 안전한 뷰를 확보하므로(동시성 경쟁 방지),
+		// 체인이 정상이어서 결국 아무것도 안 고치는 issue라도 findByIdForUpdate는 호출된다.
+		given(couponIssueRepository.findByIdForUpdate(10L)).willReturn(Optional.of(issue(10L, CouponIssueStatus.USED)));
+		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(10L)).willReturn(chain);
 
 		RecoveryOutcome outcome = executor.restoreStateMachine(EVENT_ID);
 
@@ -120,6 +124,8 @@ class EventLogRecoveryExecutorTest {
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponHistoryRepository.findAllByCouponEventIdOrderByIssueAndTime(EVENT_ID)).willReturn(chain);
 		given(couponIssueRepository.findByIdForUpdate(10L)).willReturn(Optional.of(lockedIssue));
+		// 락 획득 후 안전한 뷰를 위해 history를 다시 조회하므로, 재조회 응답도 함께 스텁해야 한다.
+		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(10L)).willReturn(chain);
 
 		RecoveryOutcome outcome = executor.restoreStateMachine(EVENT_ID);
 
@@ -139,13 +145,15 @@ class EventLogRecoveryExecutorTest {
 				history(3L, 10L, null, CouponIssueStatus.USED, t0.plusMinutes(2)));
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponHistoryRepository.findAllByCouponEventIdOrderByIssueAndTime(EVENT_ID)).willReturn(chain);
+		// 락은 안전한 뷰 확보를 위해 먼저 잡고, 재조회한 history로 삭제 불가를 판단한다.
+		given(couponIssueRepository.findByIdForUpdate(10L)).willReturn(Optional.of(issue(10L, CouponIssueStatus.USED)));
+		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(10L)).willReturn(chain);
 
 		RecoveryOutcome outcome = executor.restoreStateMachine(EVENT_ID);
 
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getMessage()).contains("관리자 확인이 필요");
 		verify(couponHistoryRepository, never()).deleteAllByIdInBatch(any());
-		verify(couponIssueRepository, never()).findByIdForUpdate(any());
 	}
 
 	@Test
@@ -156,10 +164,36 @@ class EventLogRecoveryExecutorTest {
 				history(1L, 10L, CouponIssueStatus.ISSUED, CouponIssueStatus.USED, t0)); // 첫 레코드가 null->ISSUED가 아님
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
 		given(couponHistoryRepository.findAllByCouponEventIdOrderByIssueAndTime(EVENT_ID)).willReturn(chain);
+		given(couponIssueRepository.findByIdForUpdate(10L)).willReturn(Optional.of(issue(10L, CouponIssueStatus.USED)));
+		given(couponHistoryRepository.findAllByCouponIssue_IdOrderByOccurredAtAsc(10L)).willReturn(chain);
 
 		RecoveryOutcome outcome = executor.restoreStateMachine(EVENT_ID);
 
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		verify(couponHistoryRepository, never()).deleteAllByIdInBatch(any());
+	}
+
+	@Test
+	@DisplayName("청크 처리 중 예외가 나면 로그만 남기고 삼키지 않고 FAIL로 남기며 실패한 issueId를 담는다")
+	void restoreStateMachine_청크예외발생_FAIL로남기고실패ID기록() {
+		LocalDateTime t0 = LocalDateTime.of(2026, 1, 1, 0, 0);
+		// 끊긴 체인이라 회수 가능한 대상이지만, 락 획득 단계에서 DB 오류(예: 커넥션 끊김)가 난 상황을 재현한다.
+		List<CouponHistory> chain = List.of(
+				history(1L, 10L, null, CouponIssueStatus.ISSUED, t0),
+				history(2L, 10L, CouponIssueStatus.ISSUED, CouponIssueStatus.USED, t0.plusMinutes(1)),
+				history(3L, 10L, CouponIssueStatus.ISSUED, CouponIssueStatus.ISSUED, t0.plusMinutes(2)));
+		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(existingEvent()));
+		given(couponHistoryRepository.findAllByCouponEventIdOrderByIssueAndTime(EVENT_ID)).willReturn(chain);
+		willThrow(new RuntimeException("DB 커넥션 오류"))
+				.given(couponIssueRepository).findByIdForUpdate(10L);
+
+		RecoveryOutcome outcome = executor.restoreStateMachine(EVENT_ID);
+
+		// 수정 전에는 예외가 로그로만 남고 recoveredIssueIds/notEligibleIssueIds가 둘 다 비어 있어
+		// "체인 붕괴 상태가 아닙니다"라는 잘못된 SUCCESS를 반환했다.
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
+		assertThat(outcome.getMessage()).contains("처리 중 오류가 발생");
+		assertThat(outcome.getDetail()).containsEntry("failedIssueIds", List.of(10L));
 		verify(couponHistoryRepository, never()).deleteAllByIdInBatch(any());
 	}
 
