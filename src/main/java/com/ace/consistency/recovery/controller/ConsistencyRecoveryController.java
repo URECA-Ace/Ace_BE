@@ -48,7 +48,8 @@ public class ConsistencyRecoveryController {
 	 * 없으면 오류 대신 빈 목록을 반환한다.
 	 */
 	@GetMapping({"/results/{resultId}/recovery-methods", "/results/{resultId}/actions"})
-	public ResponseEntity<ApiResponse<List<RecoveryActionResponse>>> availableActions(@PathVariable Long resultId) {
+	public ResponseEntity<ApiResponse<List<RecoveryActionResponse>>> availableActions(
+			@PathVariable(name = "resultId") Long resultId) {
 		List<RecoveryActionResponse> actions = dispatcher.availableActions(resultId).stream()
 				.map(RecoveryActionResponse::from)
 				.toList();
@@ -62,7 +63,7 @@ public class ConsistencyRecoveryController {
 	 */
 	@PostMapping({"/results/{resultId}/recoveries", "/results/{resultId}/recover"})
 	public ResponseEntity<ApiResponse<List<RecoveryResultResponse>>> recover(
-			@PathVariable Long resultId,
+			@PathVariable(name = "resultId") Long resultId,
 			@Valid @RequestBody RecoveryRequest request) {
 
 		RecoveryAction action = parseAction(request.getAction());
@@ -81,8 +82,8 @@ public class ConsistencyRecoveryController {
 	 */
 	@GetMapping("/recoveries")
 	public ResponseEntity<ApiResponse<RecoveryHistoryPageResponse>> recoveryHistory(
-			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
+			@RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+			@RequestParam(name = "size", defaultValue = "10") @Min(1) @Max(100) int size) {
 		return ResponseEntity.ok(ApiResponse.success(RecoveryHistoryPageResponse.from(
 				recoveryResultRepository.findAllByOrderByCreatedAtDesc(
 						org.springframework.data.domain.PageRequest.of(page, size)))));

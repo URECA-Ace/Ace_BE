@@ -28,22 +28,23 @@ public class ConsistencyReportController {
 
 	@GetMapping("/results")
 	public ResponseEntity<ApiResponse<ConsistencyResultPageResponse>> findResults(
-			@RequestParam(required = false) VerificationResult.Status status,
-			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "8") @Min(1) @Max(100) int size) {
+			@RequestParam(name = "status", required = false) VerificationResult.Status status,
+			@RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+			@RequestParam(name = "size", defaultValue = "8") @Min(1) @Max(100) int size) {
 		return ResponseEntity.ok(ApiResponse.success(service.findResults(status, page, size)));
 	}
 
 	@GetMapping("/results/{resultId}")
-	public ResponseEntity<ApiResponse<ConsistencyResultResponse>> findResult(@PathVariable long resultId) {
+	public ResponseEntity<ApiResponse<ConsistencyResultResponse>> findResult(
+			@PathVariable(name = "resultId") long resultId) {
 		return ResponseEntity.ok(ApiResponse.success(service.findResult(resultId)));
 	}
 
 	@GetMapping("/results/{resultId}/violations")
 	public ResponseEntity<ApiResponse<ConsistencyViolationPageResponse>> findViolations(
-			@PathVariable long resultId,
-			@RequestParam(defaultValue = "0") @Min(0) int page,
-			@RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+			@PathVariable(name = "resultId") long resultId,
+			@RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+			@RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
 		return ResponseEntity.ok(ApiResponse.success(service.findViolations(resultId, page, size)));
 	}
 
