@@ -4,6 +4,7 @@ import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.entity.VerificationViolationEntity;
 import com.ace.consistency.repository.VerificationResultRepository;
 import com.ace.common.transaction.AfterCommitExecutor;
+import com.ace.event.consistency.ConsistencyStepCompletedEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import com.ace.consistency.repository.VerificationViolationRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,6 @@ public class VerificationResultPersister {
 
 	private final VerificationResultRepository resultRepository;
 	private final VerificationViolationRepository violationRepository;
-	//todo: notify 도메인 머지 후 주석해제
 	private final ApplicationEventPublisher eventPublisher;
 	private final MeterRegistry meterRegistry;
 
@@ -60,6 +60,17 @@ public class VerificationResultPersister {
 		List<VerificationResultEntity> savedResults = saveResultsAndViolations(results);
 
 		AfterCommitExecutor.execute(() -> results.forEach(this::recordMetric));
+
+		// EVENT/AS_OF_RANGE 동기 검증도 ALL 배치 Step과 동일하게, 결과가 저장될 때마다
+		// CONSISTENCY_STEP_COMPLETED를 발행한다. 프론트의 "최근 검증 결과" 표가 폴링 대신
+		// 이 알림을 받을 때만 다시 조회하므로, 여기서 빠지면 그 목록이 실시간으로 갱신되지 않는다.
+		results.forEach(result -> eventPublisher.publishEvent(ConsistencyStepCompletedEvent.builder()
+				.checkName(result.getCheckName())
+				.triggerType(triggerType.name())
+				.status(result.getStatus().name())
+				.violationCount(result.getViolationCount())
+				.completedAt(LocalDateTime.now())
+				.build()));
 
 		//todo: notify 도메인 머지 후 주석해제
 		/*
@@ -110,6 +121,14 @@ public class VerificationResultPersister {
 		}
 
 		AfterCommitExecutor.execute(() -> recordMetric(result));
+
+		eventPublisher.publishEvent(ConsistencyStepCompletedEvent.builder()
+				.checkName(result.getCheckName())
+				.triggerType(result.getTriggerType().name())
+				.status(result.getStatus().name())
+				.violationCount(result.getViolationCount())
+				.completedAt(LocalDateTime.now())
+				.build());
 
 		return saved;
 	}

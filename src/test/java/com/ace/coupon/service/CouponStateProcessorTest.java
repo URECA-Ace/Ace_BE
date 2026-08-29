@@ -16,6 +16,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import com.ace.coupon.entity.CouponEvent;
 import com.ace.coupon.entity.CouponHistory;
 import com.ace.coupon.entity.CouponIssue;

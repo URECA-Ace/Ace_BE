@@ -52,4 +52,10 @@ public class ConsistencyExecutionController {
 			@PathVariable long jobExecutionId) {
 		return ResponseEntity.ok(ApiResponse.success(service.findExecution(jobExecutionId)));
 	}
+
+	@PostMapping("/verifications/{jobExecutionId}/stop")
+	public ResponseEntity<ApiResponse<Void>> stop(@PathVariable long jobExecutionId) {
+		service.stop(jobExecutionId);
+		return ResponseEntity.ok(ApiResponse.success());
+	}
 }

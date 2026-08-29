@@ -3,6 +3,7 @@ package com.ace.consistency.scheduler;
 import com.ace.consistency.repository.VerificationViolationRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -16,7 +17,8 @@ class OrphanViolationCleanupSchedulerTest {
 	@Test
 	void 설정된_threshold만큼_오래_갱신되지_않은_고아_행을_정리한다() {
 		VerificationViolationRepository repository = mock(VerificationViolationRepository.class);
-		OrphanViolationCleanupScheduler scheduler = new OrphanViolationCleanupScheduler(repository);
+		ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+		OrphanViolationCleanupScheduler scheduler = new OrphanViolationCleanupScheduler(repository, eventPublisher);
 		ReflectionTestUtils.setField(scheduler, "orphanThresholdMinutes", 30L);
 		LocalDateTime before = LocalDateTime.now().minusMinutes(30);
 

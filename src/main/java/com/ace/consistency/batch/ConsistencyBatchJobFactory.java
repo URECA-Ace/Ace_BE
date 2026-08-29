@@ -13,6 +13,7 @@ import org.springframework.batch.core.job.builder.SimpleJobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -44,6 +45,7 @@ public class ConsistencyBatchJobFactory {
     private final VerificationResultPersister resultPersister;
     private final BatchFailureLogRepository failureLogRepository;
     private final VerificationViolationRepository violationRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public Job buildJob(List<ConsistencyCheck> checks, Scope scope, TriggerType triggerType) {
         List<Step> steps = checks.stream()
@@ -56,7 +58,7 @@ public class ConsistencyBatchJobFactory {
         }
 
         ConsistencyJobExecutionListener jobExecutionListener =
-                new ConsistencyJobExecutionListener(failureLogRepository, jobRepository, checks, scope.getTo(), triggerType);
+                new ConsistencyJobExecutionListener(failureLogRepository, jobRepository, checks, scope.getTo(), triggerType, eventPublisher);
 
         // 첫 번째 step 등록 후 차례차례 simpleJobBuilder.next(steps.get(i))로 다음  step을 붙인다.
         // 이렇게 하면 한 step이 오류로 실패하면 그 다음 step들부터는 실행을 안한다.
@@ -82,7 +84,7 @@ public class ConsistencyBatchJobFactory {
         ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(check, scope.getTo());
         CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(violationRepository);
         ConsistencyStepCompletionListener listener =
-                new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister);
+                new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister, eventPublisher);
 
         return new StepBuilder(check.getName() + "Step", jobRepository)
                 .<List<Long>, ConsistencyCheck.CheckOutcome>chunk(1)
