@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import com.ace.coupon.entity.IssueFailureLog;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
@@ -124,6 +125,34 @@ class IssueFailureLogRepositoryTest {
 		// 되살릴 수 없는 건도 회차를 막으므로 재시도 가능 여부와 무관하게 잡혀야 한다
 		assertThat(blockedEventIds).contains(blocked);
 		assertThat(blockedEventIds).doesNotContain(cleared);
+	}
+
+	@Test
+	@DisplayName("운영 목록 조회는 필터가 없어도 마지막 시도 시각 순으로 페이징한다")
+	void findsOperationalFailurePageWithoutOptionalFilters() {
+		long eventId = uniqueEventId();
+		IssueFailureLog failure = persist(
+				eventId, IssueFailureStage.CONFIRM, "REQUEST_NOT_FOUND", null);
+		entityManager.flush();
+		entityManager.clear();
+
+		PageRequest page = PageRequest.of(
+				0,
+				20,
+				Sort.by(Sort.Order.asc("lastAttemptAt"), Sort.Order.asc("id")));
+
+		assertThat(repository.findFiltered(null, null, page).getContent())
+				.extracting(IssueFailureLog::getId)
+				.contains(failure.getId());
+		assertThat(repository.findUnrecoverable(
+				null,
+				null,
+				IssueFailureStage.CONFIRM,
+				Set.of("CALL_FAILED", "INTERNAL_WRITE_ERROR", "CONFIRMED_NOW", "ALREADY_CONFIRMED"),
+				Set.of("CALL_FAILED", "INTERNAL_WRITE_ERROR", "COMPENSATED", "ALREADY_COMPENSATED"),
+				page).getContent())
+				.extracting(IssueFailureLog::getId)
+				.contains(failure.getId());
 	}
 
 	private long uniqueEventId() {

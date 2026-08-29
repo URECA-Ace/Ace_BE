@@ -28,6 +28,8 @@ import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 import com.ace.user.entity.User;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 class CouponStateProcessorTest {
 
 	private CouponIssueRepository couponIssueRepository;

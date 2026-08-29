@@ -2,6 +2,7 @@ package com.ace.coupon.repository;
 
 import com.ace.coupon.entity.IssueFailureLog;
 import com.ace.coupon.persistence.failure.IssueFailureStage;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -63,4 +64,113 @@ public interface IssueFailureLogRepository extends JpaRepository<IssueFailureLog
 			@Param("stages") Collection<IssueFailureStage> stages,
 			@Param("settledResults") Collection<String> settledResults,
 			Pageable pageable);
+
+	// 운영 조회 (DLQ 관제)
+	// 상태(SETTLED / RETRYABLE / UNRECOVERABLE)마다 조건이 달라 쿼리를 나눈다
+	// 판정에 쓰는 결과값 집합은 그룹(저장 / 확정)마다 다르므로 호출부가 넘긴다
+
+	@Query("""
+			SELECT failure
+			FROM IssueFailureLog failure
+			WHERE (:eventId IS NULL OR failure.eventId = :eventId)
+				AND (:stage IS NULL OR failure.failureStage = :stage)
+			""")
+	Page<IssueFailureLog> findFiltered(
+			@Param("eventId") Long eventId,
+			@Param("stage") IssueFailureStage stage,
+			Pageable pageable);
+
+	@Query("""
+			SELECT failure
+			FROM IssueFailureLog failure
+			WHERE (:eventId IS NULL OR failure.eventId = :eventId)
+				AND (:stage IS NULL OR failure.failureStage = :stage)
+				AND (failure.resolvedAt IS NOT NULL
+					OR (failure.failureStage = :confirmStage
+						AND failure.compensationResult IN :confirmSettled)
+					OR (failure.failureStage <> :confirmStage
+						AND failure.compensationResult IN :persistSettled))
+			""")
+	Page<IssueFailureLog> findSettled(
+			@Param("eventId") Long eventId,
+			@Param("stage") IssueFailureStage stage,
+			@Param("confirmStage") IssueFailureStage confirmStage,
+			@Param("confirmSettled") Collection<String> confirmSettled,
+			@Param("persistSettled") Collection<String> persistSettled,
+			Pageable pageable);
+
+	@Query("""
+			SELECT failure
+			FROM IssueFailureLog failure
+			WHERE (:eventId IS NULL OR failure.eventId = :eventId)
+				AND (:stage IS NULL OR failure.failureStage = :stage)
+				AND failure.resolvedAt IS NULL
+				AND ((failure.failureStage = :confirmStage
+						AND failure.compensationResult IN :confirmRetryable)
+					OR (failure.failureStage <> :confirmStage
+						AND failure.compensationResult IN :persistRetryable))
+			""")
+	Page<IssueFailureLog> findRetryable(
+			@Param("eventId") Long eventId,
+			@Param("stage") IssueFailureStage stage,
+			@Param("confirmStage") IssueFailureStage confirmStage,
+			@Param("confirmRetryable") Collection<String> confirmRetryable,
+			@Param("persistRetryable") Collection<String> persistRetryable,
+			Pageable pageable);
+
+	// compensationResult 가 NULL 인 건도 사람이 봐야 하는 대상이다
+	@Query("""
+			SELECT failure
+			FROM IssueFailureLog failure
+			WHERE (:eventId IS NULL OR failure.eventId = :eventId)
+				AND (:stage IS NULL OR failure.failureStage = :stage)
+				AND failure.resolvedAt IS NULL
+				AND (failure.compensationResult IS NULL
+					OR (failure.failureStage = :confirmStage
+						AND failure.compensationResult NOT IN :confirmKnown)
+					OR (failure.failureStage <> :confirmStage
+						AND failure.compensationResult NOT IN :persistKnown))
+			""")
+	Page<IssueFailureLog> findUnrecoverable(
+			@Param("eventId") Long eventId,
+			@Param("stage") IssueFailureStage stage,
+			@Param("confirmStage") IssueFailureStage confirmStage,
+			@Param("confirmKnown") Collection<String> confirmKnown,
+			@Param("persistKnown") Collection<String> persistKnown,
+			Pageable pageable);
+
+	// 요약 집계 (그룹 단위)
+
+	@Query("""
+			SELECT COUNT(failure)
+			FROM IssueFailureLog failure
+			WHERE failure.failureStage IN :stages
+				AND (failure.resolvedAt IS NOT NULL OR failure.compensationResult IN :settledResults)
+			""")
+	long countSettledInGroup(
+			@Param("stages") Collection<IssueFailureStage> stages,
+			@Param("settledResults") Collection<String> settledResults);
+
+	@Query("""
+			SELECT COUNT(failure)
+			FROM IssueFailureLog failure
+			WHERE failure.failureStage IN :stages
+				AND failure.resolvedAt IS NULL
+				AND failure.compensationResult IN :retryableResults
+			""")
+	long countRetryableInGroup(
+			@Param("stages") Collection<IssueFailureStage> stages,
+			@Param("retryableResults") Collection<String> retryableResults);
+
+	@Query("""
+			SELECT COUNT(failure)
+			FROM IssueFailureLog failure
+			WHERE failure.failureStage IN :stages
+				AND failure.resolvedAt IS NULL
+				AND (failure.compensationResult IS NULL
+					OR failure.compensationResult NOT IN :knownResults)
+			""")
+	long countUnrecoverableInGroup(
+			@Param("stages") Collection<IssueFailureStage> stages,
+			@Param("knownResults") Collection<String> knownResults);
 }
