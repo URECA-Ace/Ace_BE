@@ -2,6 +2,8 @@ package com.ace.consistency.batch;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.TriggerType;
+import com.ace.event.consistency.ConsistencyBatchCompletedEvent;
+import com.ace.event.consistency.ConsistencyBatchStartedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
@@ -10,7 +12,7 @@ import org.springframework.batch.core.listener.JobExecutionListener;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -43,6 +45,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
     private final List<ConsistencyCheck> checks;
     private final LocalDateTime scopeTo;
     private final TriggerType triggerType;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public void beforeJob(JobExecution jobExecution) {
@@ -52,14 +55,29 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
         context.putString(RESTART_SCOPE_TO_KEY, scopeTo.toString());
         context.putString(RESTART_TRIGGER_TYPE_KEY, triggerType.name());
         jobRepository.updateExecutionContext(jobExecution);
+
+        // SCHEDULED/ON_DEMAND 트리거 종류와 무관하게 Job이 실제로 시작되는 지점이라,
+        // 프론트가 "지금 배치가 도는 중"인지 알 수 있는 유일하고 일관된 발행 지점이다.
+        eventPublisher.publishEvent(ConsistencyBatchStartedEvent.builder()
+                .jobExecutionId(jobExecution.getId())
+                .totalSteps(checks.size())
+                .triggerType(triggerType.name())
+                .startedAt(LocalDateTime.now())
+                .build());
     }
 
+    // 이 클래스는 ConsistencyBatchJobFactory에서 new로 직접 만드는 일반 객체라 Spring 빈이
+    // 아니다. 따라서 여기에 @Transactional을 붙여도 AOP 프록시를 타지 않아 아무 효과가 없고,
+    // publishBatchCompletedEvent()에서 발행하는 이벤트는 실제로는 어떤 트랜잭션 안에서도
+    // 실행되지 않는다 (VerificationResultPersister의 클래스 주석에 있는 것과 같은 함정).
+    // 그래서 완료 알림 리스너(ConsistencyBatchCompletedNotifyListener)도 AFTER_COMMIT을
+    // 기대하는 @TransactionalEventListener 대신 일반 @EventListener를 써야 한다.
     @Override
-    @Transactional
     public void afterJob(JobExecution jobExecution) {
         if (jobExecution.getStatus() == BatchStatus.COMPLETED) {
-            log.info("Consistency verification batch completed. jobExecutionId={}, stepCount={}",
+            log.info("배치 정합성 검증 성공. jobExecutionId={}, stepCount={}",
                     jobExecution.getId(), jobExecution.getStepExecutions().size());
+            publishBatchCompletedEvent(jobExecution);
             return;
         }
 
@@ -68,11 +86,20 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
                 .findFirst()
                 .map(StepExecution::getStepName)
                 .orElse("unknown");
-        log.warn("Consistency verification batch finished with status={}. jobExecutionId={}, failedStep={}",
+        log.warn("배치 정합성 검증 실패 존재. status={}. jobExecutionId={}, failedStep={}",
                 jobExecution.getStatus(), jobExecution.getId(), failedStepName);
 
         failureLogRepository.save(BatchFailureLogEntity.from(jobExecution));
 
-        // TODO: 알림 이벤트 등록 (notify 도메인 머지 후 반영)
+        publishBatchCompletedEvent(jobExecution);
+    }
+
+    private void publishBatchCompletedEvent(JobExecution jobExecution) {
+        eventPublisher.publishEvent(ConsistencyBatchCompletedEvent.builder()
+                .jobExecutionId(jobExecution.getId())
+                .status(jobExecution.getStatus().name())
+                .stepCount(jobExecution.getStepExecutions().size())
+                .completedAt(LocalDateTime.now())
+                .build());
     }
 }

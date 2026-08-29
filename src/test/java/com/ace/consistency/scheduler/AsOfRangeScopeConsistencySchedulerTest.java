@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
@@ -27,16 +28,18 @@ class AsOfRangeScopeConsistencySchedulerTest {
 
 	private ConsistencyVerificationRunner runner;
 	private VerificationResultRepository resultRepository;
+	private ApplicationEventPublisher eventPublisher;
 
 	@BeforeEach
 	void setUp() {
 		runner = mock(ConsistencyVerificationRunner.class);
 		resultRepository = mock(VerificationResultRepository.class);
+		eventPublisher = mock(ApplicationEventPublisher.class);
 	}
 
 	private AsOfRangeScopeConsistencyScheduler newScheduler(List<ConsistencyCheck> checks) {
 		AsOfRangeScopeConsistencyScheduler scheduler =
-				new AsOfRangeScopeConsistencyScheduler(checks, runner, resultRepository);
+				new AsOfRangeScopeConsistencyScheduler(checks, runner, resultRepository, eventPublisher);
 		ReflectionTestUtils.setField(scheduler, "safetyMarginSeconds", 10L);
 		ReflectionTestUtils.setField(scheduler, "initialLookbackHours", 24L);
 		return scheduler;

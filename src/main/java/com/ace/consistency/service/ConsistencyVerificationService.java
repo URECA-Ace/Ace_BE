@@ -56,6 +56,10 @@ public class ConsistencyVerificationService {
 				runner.run(selectedChecks, scope, TriggerType.ON_DEMAND));
 	}
 
+	public void stop(long jobExecutionId) {
+		runner.stop(jobExecutionId);
+	}
+
 	public ConsistencyJobExecutionResponse findExecution(long jobExecutionId) {
 		JobExecution execution = jobRepository.getJobExecution(jobExecutionId);
 		if (execution == null) {

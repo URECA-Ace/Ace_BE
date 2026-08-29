@@ -1,7 +1,9 @@
 package com.ace.coupon.service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -10,6 +12,7 @@ import com.ace.coupon.enums.CouponEventStatus;
 import com.ace.coupon.redis.CouponEventStatsSnapshot;
 import com.ace.coupon.redis.RedisCouponEventStatsReader;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.event.coupon.CouponIssuanceCompletedEvent;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +41,7 @@ public class CouponEventLifecycleService {
 	private final CouponEventRepository couponEventRepository;
 	private final RedisCouponEventStatsReader statsReader;
 	private final CouponEventAggregateSnapshotService snapshotService;
+	private final ApplicationEventPublisher eventPublisher;
 
 	public SweepResult sweep() {
 		return markDrainedEventsSoldOut()
@@ -80,6 +84,10 @@ public class CouponEventLifecycleService {
 				}
 				if (applyFinalSnapshot(eventId, read.snapshot()) && markSoldOut(eventId)) {
 					soldOut++;
+					eventPublisher.publishEvent(CouponIssuanceCompletedEvent.builder()
+							.couponEventId(eventId)
+							.completedAt(LocalDateTime.now())
+							.build());
 				}
 			}
 

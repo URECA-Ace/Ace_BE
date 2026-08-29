@@ -39,6 +39,7 @@ import com.ace.coupon.redis.CouponIssueRedisProperties;
 import com.ace.coupon.redis.CouponIssueRequestState;
 import com.ace.coupon.redis.RedisCouponIssueProcessor;
 import com.ace.coupon.repository.CouponEventRepository;
+import com.ace.event.coupon.CouponIssueFailedEvent;
 import com.ace.user.entity.User;
 import com.ace.user.repository.UserRepository;
 
@@ -48,6 +49,7 @@ class CouponIssueServiceImplTest {
 	private CouponEventRepository couponEventRepository;
 	private IssuePersistenceCoordinator coordinator;
 	private UserRepository userRepository;
+	private CouponIssueFailureAggregator failureAggregator;
 	private CouponIssueService service;
 
 	@BeforeEach
@@ -60,6 +62,7 @@ class CouponIssueServiceImplTest {
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		coordinator = Mockito.mock(IssuePersistenceCoordinator.class);
 		userRepository = Mockito.mock(UserRepository.class);
+		failureAggregator = Mockito.mock(CouponIssueFailureAggregator.class);
 		return new CouponIssueServiceImpl(
 				processor,
 				new CouponIssueRedisProperties(Duration.ofDays(7), ZoneId.of("Asia/Seoul")),
@@ -67,7 +70,8 @@ class CouponIssueServiceImplTest {
 				new CouponIssuePersistenceProperties(mode, null, null, null, null, null, null),
 				coordinator,
 				userRepository,
-				new SimpleMeterRegistry());
+				new SimpleMeterRegistry(),
+				failureAggregator);
 	}
 
 	@Test
@@ -98,6 +102,18 @@ class CouponIssueServiceImplTest {
 		assertThatThrownBy(() -> service.issue(1L, 2L, requestId))
 				.isInstanceOfSatisfying(CouponException.class,
 						exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.SOLD_OUT));
+	}
+
+	@Test
+	@DisplayName("발급 실패는 건마다 알림을 쏘지 않고 실패 집계기에만 기록한다")
+	void recordsFailureInAggregatorInsteadOfPublishingPerRequest() {
+		UUID requestId = UUID.randomUUID();
+		given(processor.issue(1L, 2L, requestId))
+				.willReturn(new CouponIssueDecision(CouponIssueLuaCode.SOLD_OUT, null, 0L, Instant.now()));
+
+		assertThatThrownBy(() -> service.issue(1L, 2L, requestId)).isInstanceOf(CouponException.class);
+
+		verify(failureAggregator).record(1L, CouponIssueFailedEvent.FailReason.SOLD_OUT);
 	}
 
 	@Test

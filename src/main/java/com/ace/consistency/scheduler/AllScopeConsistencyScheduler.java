@@ -5,11 +5,13 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
+import com.ace.event.scheduler.SchedulerStartedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +29,9 @@ public class AllScopeConsistencyScheduler {
 	private final List<ConsistencyCheck> allChecks;
 	private final ConsistencyVerificationRunner runner;
 	private final JobRepository jobRepository;
+	private final ApplicationEventPublisher eventPublisher;
+
+	private static final String SCHEDULER_NAME = "ALL_CONSISTENCY";
 
 	@Value("${consistency.all.safety-margin-seconds}")
 	private long safetyMarginSeconds;
@@ -57,6 +62,13 @@ public class AllScopeConsistencyScheduler {
 
 		try {
 			LocalDateTime to = LocalDateTime.now().minusSeconds(safetyMarginSeconds);
+			// 배치 완료 알림은 afterJob(ConsistencyJobExecutionListener)에서 별도로 쏜다. runAsync()는
+			// Job을 launch만 시키고 바로 반환하므로, 여기서 "종료"를 함께 알리면 실제 Step 실행이 끝나기도
+			// 전에 완료로 오인될 수 있다.
+			eventPublisher.publishEvent(SchedulerStartedEvent.builder()
+					.schedulerName(SCHEDULER_NAME)
+					.startedAt(LocalDateTime.now())
+					.build());
 			runner.runAsync(allChecks, Scope.all(to), TriggerType.SCHEDULED);
 		} catch (Exception ex) {
 			log.error("ALL 스코프 정합성 검증 배치 시작에 실패했습니다.", ex);

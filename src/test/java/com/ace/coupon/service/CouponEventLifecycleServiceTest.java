@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 import com.ace.coupon.enums.CouponEventStatus;
@@ -32,6 +33,7 @@ class CouponEventLifecycleServiceTest {
 	private CouponEventRepository couponEventRepository;
 	private RedisCouponEventStatsReader statsReader;
 	private CouponEventAggregateSnapshotService snapshotService;
+	private ApplicationEventPublisher eventPublisher;
 	private CouponEventLifecycleService service;
 
 	@BeforeEach
@@ -39,8 +41,9 @@ class CouponEventLifecycleServiceTest {
 		couponEventRepository = Mockito.mock(CouponEventRepository.class);
 		statsReader = Mockito.mock(RedisCouponEventStatsReader.class);
 		snapshotService = Mockito.mock(CouponEventAggregateSnapshotService.class);
+		eventPublisher = Mockito.mock(ApplicationEventPublisher.class);
 		service = new CouponEventLifecycleService(
-				couponEventRepository, statsReader, snapshotService);
+				couponEventRepository, statsReader, snapshotService, eventPublisher);
 
 		given(couponEventRepository.findSnapshotTargetEventIds(any(), anyLong(), any()))
 				.willReturn(List.of());

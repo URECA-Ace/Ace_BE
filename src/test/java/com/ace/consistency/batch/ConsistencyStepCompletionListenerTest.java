@@ -5,12 +5,14 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResultPersister;
 import com.ace.consistency.repository.VerificationViolationRepository;
+import com.ace.event.consistency.ConsistencyStepStartedEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.step.StepExecution;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 import java.util.Set;
@@ -31,7 +33,8 @@ class ConsistencyStepCompletionListenerTest {
 				.willThrow(new IllegalStateException("count mismatch"));
 		CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(mock(VerificationViolationRepository.class));
 		ConsistencyStepCompletionListener listener = new ConsistencyStepCompletionListener(
-				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister);
+				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister,
+				mock(ApplicationEventPublisher.class));
 		StepExecution step = stepExecution();
 
 		ExitStatus exitStatus = listener.afterStep(step);
@@ -43,11 +46,25 @@ class ConsistencyStepCompletionListenerTest {
 	}
 
 	@Test
+	void beforeStep은_Check_이름을_담아_ConsistencyStepStartedEvent를_발행한다() {
+		VerificationResultPersister persister = mock(VerificationResultPersister.class);
+		CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(mock(VerificationViolationRepository.class));
+		ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+		ConsistencyStepCompletionListener listener = new ConsistencyStepCompletionListener(
+				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister, eventPublisher);
+
+		listener.beforeStep(stepExecution());
+
+		verify(eventPublisher).publishEvent(any(ConsistencyStepStartedEvent.class));
+	}
+
+	@Test
 	void STOPPED_Step은_ERROR로_저장하고_임시_violation을_연결하지_않는다() {
 		VerificationResultPersister persister = mock(VerificationResultPersister.class);
 		CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(mock(VerificationViolationRepository.class));
 		ConsistencyStepCompletionListener listener = new ConsistencyStepCompletionListener(
-				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister);
+				passingCheck(), writer, Scope.all(LocalDateTime.now()), TriggerType.SCHEDULED, persister,
+				mock(ApplicationEventPublisher.class));
 		StepExecution step = stepExecution();
 		step.setStatus(BatchStatus.STOPPED);
 

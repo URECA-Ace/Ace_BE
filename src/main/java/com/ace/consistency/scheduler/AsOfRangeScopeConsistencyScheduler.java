@@ -2,15 +2,19 @@ package com.ace.consistency.scheduler;
 
 import com.ace.consistency.common.*;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.event.scheduler.SchedulerCompletedEvent;
+import com.ace.event.scheduler.SchedulerStartedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -23,6 +27,9 @@ public class AsOfRangeScopeConsistencyScheduler {
 	private final List<ConsistencyCheck> allChecks;
 	private final ConsistencyVerificationRunner runner;
 	private final VerificationResultRepository resultRepository;
+	private final ApplicationEventPublisher eventPublisher;
+
+	private static final String SCHEDULER_NAME = "AS_OF_RANGE_CONSISTENCY";
 
 	@Value("${consistency.as-of-range.safety-margin-seconds}")
 	private long safetyMarginSeconds;
@@ -34,14 +41,26 @@ public class AsOfRangeScopeConsistencyScheduler {
 			initialDelayString = "${consistency.as-of-range.fixed-delay-ms}",
 			fixedDelayString = "${consistency.as-of-range.fixed-delay-ms}")
 	public void run() {
-		LocalDateTime to = LocalDateTime.now().minusSeconds(safetyMarginSeconds);
+		eventPublisher.publishEvent(SchedulerStartedEvent.builder()
+				.schedulerName(SCHEDULER_NAME)
+				.startedAt(LocalDateTime.now())
+				.build());
 
+		LocalDateTime to = LocalDateTime.now().minusSeconds(safetyMarginSeconds);
+		int checksRun = 0;
 		for (ConsistencyCheck check : allChecks) {
 			if (!check.supportedScopeTypes().contains(Scope.ScopeType.AS_OF_RANGE)) {
 				continue;
 			}
 			runOne(check, to);
+			checksRun++;
 		}
+
+		eventPublisher.publishEvent(SchedulerCompletedEvent.builder()
+				.schedulerName(SCHEDULER_NAME)
+				.result(Map.of("checksRun", checksRun))
+				.completedAt(LocalDateTime.now())
+				.build());
 	}
 
 	private void runOne(ConsistencyCheck check, LocalDateTime to) {
@@ -59,7 +78,7 @@ public class AsOfRangeScopeConsistencyScheduler {
 			// runner.run() 내부에서 Check별 예외는 이미 ERROR 결과로 변환되어 저장되므로,
 			// 여기서 잡는 예외는 그 이전 단계(EVENT 존재 검증 등 run() 자체의 사전 검증) 실패다.
 			// 한 Check의 사전 검증 실패가 다른 Check의 이번 틱 실행을 막지 않도록 격리한다.
-			log.error("AS_OF_RANGE scheduled run failed before check execution. checkName={}, to={}",
+			log.error("AS_OF_RANGE 스케쥴링이 실행에 실패했습니다. 실행 못한 checkName={}, to={}",
 					check.getName(), to, ex);
 		}
 	}
