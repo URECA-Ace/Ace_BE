@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ public class SseNotificationSender implements NotificationSender {
 	private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
 	private final StringRedisTemplate redisTemplate;
+	@Qualifier("notificationTopic")
 	private final ChannelTopic notificationTopic;
 
 	@Override

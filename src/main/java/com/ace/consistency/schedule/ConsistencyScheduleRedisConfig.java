@@ -1,5 +1,6 @@
 package com.ace.consistency.schedule;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -18,7 +19,7 @@ public class ConsistencyScheduleRedisConfig {
 	public RedisMessageListenerContainer consistencyScheduleRedisMessageListenerContainer(
 			RedisConnectionFactory connectionFactory,
 			ConsistencyScheduleRedisSubscriber subscriber,
-			ChannelTopic consistencyScheduleChangedTopic) {
+			@Qualifier("consistencyScheduleChangedTopic") ChannelTopic consistencyScheduleChangedTopic) {
 		RedisMessageListenerContainer container = new RedisMessageListenerContainer();
 		container.setConnectionFactory(connectionFactory);
 		container.addMessageListener(subscriber, consistencyScheduleChangedTopic);
