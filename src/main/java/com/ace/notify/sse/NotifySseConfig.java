@@ -1,5 +1,6 @@
 package com.ace.notify.sse;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -18,7 +19,7 @@ public class NotifySseConfig {
 	public RedisMessageListenerContainer redisMessageListenerContainer(
 			RedisConnectionFactory connectionFactory,
 			NotificationRedisSubscriber subscriber,
-			ChannelTopic notificationTopic) {
+			@Qualifier("notificationTopic") ChannelTopic notificationTopic) {
 		RedisMessageListenerContainer container = new RedisMessageListenerContainer();
 		container.setConnectionFactory(connectionFactory);
 		container.addMessageListener(subscriber, notificationTopic);
