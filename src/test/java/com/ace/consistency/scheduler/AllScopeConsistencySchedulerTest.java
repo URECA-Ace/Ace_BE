@@ -16,6 +16,8 @@ import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.ace.consistency.schedule.ConsistencySchedulerCoordinator;
+
 import java.util.List;
 import java.util.Set;
 
@@ -31,6 +33,7 @@ class AllScopeConsistencySchedulerTest {
 	private ConsistencyVerificationRunner runner;
 	private JobRepository jobRepository;
 	private ApplicationEventPublisher eventPublisher;
+	private ConsistencySchedulerCoordinator coordinator;
 	private AllScopeConsistencyScheduler scheduler;
 
 	@BeforeEach
@@ -39,8 +42,9 @@ class AllScopeConsistencySchedulerTest {
 		runner = mock(ConsistencyVerificationRunner.class);
 		jobRepository = mock(JobRepository.class);
 		eventPublisher = mock(ApplicationEventPublisher.class);
+		coordinator = mock(ConsistencySchedulerCoordinator.class);
 
-		scheduler = new AllScopeConsistencyScheduler(List.of(check), runner, jobRepository, eventPublisher);
+		scheduler = new AllScopeConsistencyScheduler(List.of(check), runner, jobRepository, eventPublisher, coordinator);
 		ReflectionTestUtils.setField(scheduler, "safetyMarginSeconds", 10L);
 	}
 

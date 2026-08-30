@@ -6,6 +6,7 @@ import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
 import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.repository.VerificationResultRepository;
+import com.ace.consistency.schedule.ConsistencySchedulerCoordinator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,17 +30,19 @@ class AsOfRangeScopeConsistencySchedulerTest {
 	private ConsistencyVerificationRunner runner;
 	private VerificationResultRepository resultRepository;
 	private ApplicationEventPublisher eventPublisher;
+	private ConsistencySchedulerCoordinator coordinator;
 
 	@BeforeEach
 	void setUp() {
 		runner = mock(ConsistencyVerificationRunner.class);
 		resultRepository = mock(VerificationResultRepository.class);
 		eventPublisher = mock(ApplicationEventPublisher.class);
+		coordinator = mock(ConsistencySchedulerCoordinator.class);
 	}
 
 	private AsOfRangeScopeConsistencyScheduler newScheduler(List<ConsistencyCheck> checks) {
 		AsOfRangeScopeConsistencyScheduler scheduler =
-				new AsOfRangeScopeConsistencyScheduler(checks, runner, resultRepository, eventPublisher);
+				new AsOfRangeScopeConsistencyScheduler(checks, runner, resultRepository, eventPublisher, coordinator);
 		ReflectionTestUtils.setField(scheduler, "safetyMarginSeconds", 10L);
 		ReflectionTestUtils.setField(scheduler, "initialLookbackHours", 24L);
 		return scheduler;

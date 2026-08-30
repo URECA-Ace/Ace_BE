@@ -1,14 +1,16 @@
 package com.ace.consistency.scheduler;
 
 import com.ace.consistency.repository.VerificationViolationRepository;
+import com.ace.consistency.schedule.ConsistencySchedulerCoordinator;
+import com.ace.consistency.schedule.ConsistencySchedulerNames;
 import com.ace.event.scheduler.SchedulerCompletedEvent;
 import com.ace.event.scheduler.SchedulerStartedEvent;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -39,15 +41,21 @@ public class OrphanViolationCleanupScheduler {
 
 	private final VerificationViolationRepository violationRepository;
 	private final ApplicationEventPublisher eventPublisher;
+	private final ConsistencySchedulerCoordinator coordinator;
 
-	private static final String SCHEDULER_NAME = "ORPHAN_VIOLATION_CLEANUP";
+	private static final String SCHEDULER_NAME = ConsistencySchedulerNames.ORPHAN_VIOLATION_CLEANUP;
 
 	@Value("${consistency.violation-cleanup.orphan-threshold-minutes}")
 	private long orphanThresholdMinutes;
 
-	@Scheduled(
-			initialDelayString = "${consistency.violation-cleanup.fixed-delay-ms}",
-			fixedDelayString = "${consistency.violation-cleanup.fixed-delay-ms}")
+	@Value("${consistency.violation-cleanup.fixed-delay-ms}")
+	private long defaultIntervalMs;
+
+	@PostConstruct
+	void register() {
+		coordinator.register(SCHEDULER_NAME, defaultIntervalMs, this::run);
+	}
+
 	public void run() {
 		eventPublisher.publishEvent(SchedulerStartedEvent.builder()
 				.schedulerName(SCHEDULER_NAME)
