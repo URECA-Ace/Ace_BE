@@ -8,9 +8,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
@@ -40,10 +37,6 @@ public class ConsistencySchedulerCoordinator {
 
 	private final TaskScheduler taskScheduler;
 	private final ConsistencyScheduleStore store;
-	private final StringRedisTemplate redisTemplate;
-	@Qualifier("consistencyScheduleChangedTopic")
-	private final ChannelTopic consistencyScheduleChangedTopic;
-
 	private final Map<String, RegisteredTask> tasks = new ConcurrentHashMap<>();
 
 	private record RegisteredTask(long defaultIntervalMs, Runnable runnable, AtomicReference<ScheduledFuture<?>> future) {
@@ -70,7 +63,6 @@ public class ConsistencySchedulerCoordinator {
 		}
 		store.saveIntervalMs(schedulerName, newIntervalMs);
 		applyIntervalChange(schedulerName, newIntervalMs);
-		redisTemplate.convertAndSend(consistencyScheduleChangedTopic.getTopic(), schedulerName + ":" + newIntervalMs);
 	}
 
 	/**

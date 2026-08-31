@@ -173,14 +173,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_total{event_id=\"$event_id\", result=~\"$result_issue\", result_label=~\".+\"})",
+          "expr": "sum by (result_label) (increase(coupon_issue_total{event_id=\"$event_id\", result=~\"$result_issue\", result_label=~\".+\"}[$interval]))",
           "legendFormat": "발급 판정 - {{result_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=~\"$result_relay\", result_label=~\".+\"})",
+          "expr": "sum by (result_label) (increase(coupon_issue_relay_total{event_id=\"$event_id\", result=~\"$result_relay\", result_label=~\".+\"}[$interval]))",
           "legendFormat": "비동기 저장 확정 - {{result_label}}"
         }
       ]
@@ -197,14 +197,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"})",
+          "expr": "sum by (reason_label) (increase(coupon_issue_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "발급 판정 실패 - {{reason_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"})",
+          "expr": "sum by (reason_label) (increase(coupon_issue_relay_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "비동기 저장 실패 - {{reason_label}}"
         }
       ]
@@ -249,7 +249,19 @@
       "title": "정합성 검증 현황 (체크/상태/대상)",
       "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
       "datasource": { "type": "mysql", "uid": "ace-mysql" },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "points",
+            "lineWidth": 0,
+            "showPoints": "always",
+            "pointSize": 8
+          }
+        },
+        "overrides": []
+      },
       "options": {
         "legend": {
           "showLegend": true,
