@@ -45,7 +45,15 @@ public enum RecoveryAction {
 	RESTORE_INITIAL_ISSUE_HISTORY("최초 발급 이력 복원"),
 
 	/** CouponExpirationLagConsistencyCheck 전용: 지연된 만료 처리를 수행한다. */
-	EXPIRE_DELAYED_ISSUE("지연 만료 처리");
+	EXPIRE_DELAYED_ISSUE("지연 만료 처리"),
+
+	/**
+	 * RedisMysqlLossConsistencyCheck 전용: 정지된 발급 Stream 릴레이(IssueStreamRelay)를 재시작한다.
+	 * 릴레이 빈이 존재하는데 멈춰 있는(isRunning()==false) 경우에만 실제로 재시작을 수행하며,
+	 * 그 외(빈 자체가 없음/이미 정상 동작 중)에는 원인이 다르다고 보고 아무 것도 바꾸지 않고
+	 * 실패로 응답한다 - 확실히 회복 가능하다고 판별되는 경우로만 실행 범위를 좁힌 액션이다.
+	 */
+	RESTART_RELAY_CONSUMER("발급 Stream 릴레이 재시작");
 
 	private final String label;
 

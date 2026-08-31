@@ -38,6 +38,15 @@ public abstract class ConsistencyCheckIntegrationTestBase {
         registry.add("spring.datasource.driver-class-name", mysql::getDriverClassName);
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "update");
         registry.add("consistency.expiration.allowed-delay-ms", () -> "1800000");
+
+        // 로컬 application.properties(gitignored)는 세 스케줄러를 모두 enabled=true로 켜둔다.
+        // 이 스케줄러들은 @PostConstruct에서 ConsistencySchedulerCoordinator.register()를 호출해
+        // Redis(StringRedisTemplate)를 곧바로 사용하는데, 이 테스트들은 체크 로직만 검증하면 되고
+        // Redis를 mock으로 대체하는 서브클래스도 있어(@BeforeEach 시점은 컨텍스트 로딩보다 늦음)
+        // 여기서 끄지 않으면 mock의 opsForHash()가 null을 반환해 컨텍스트 초기화 자체가 NPE로 깨진다.
+        registry.add("consistency.all.enabled", () -> "false");
+        registry.add("consistency.as-of-range.enabled", () -> "false");
+        registry.add("consistency.violation-cleanup.enabled", () -> "false");
     }
 
     @Autowired

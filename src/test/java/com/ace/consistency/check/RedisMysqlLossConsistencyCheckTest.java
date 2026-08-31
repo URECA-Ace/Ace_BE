@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.stream.StreamInfo;
+import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StreamOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -39,7 +40,13 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 		streamOperations = mock(StreamOperations.class);
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 		when(redisTemplate.opsForStream()).thenReturn(streamOperations);
-		
+
+		// @SpringBootTest는 전체 컨텍스트를 띄우므로 ConsistencySchedulerCoordinator에 자기 자신을
+		// 등록하는 각 스케줄러(@PostConstruct)가 이 mock redisTemplate으로 ConsistencyScheduleStore를
+		// 거쳐 opsForHash()를 호출한다. 스텁이 없으면 null을 반환해 NPE로 컨텍스트 로딩 자체가 실패한다.
+		HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
+		when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+
 		// 기본적으로 스트림 키가 없을 때 던지는 예외를 모킹하여 Pending=0 상태를 시뮬레이션
 		org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroups emptyGroups = mock(org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroups.class);
 		when(emptyGroups.stream()).thenReturn(java.util.stream.Stream.empty());
@@ -127,6 +134,30 @@ class RedisMysqlLossConsistencyCheckTest extends ConsistencyCheckIntegrationTest
 				.hasMessageContaining("PENDING")
 				.satisfies(ex -> assertThat(((ConsistencyCheckException) ex).getErrorCode())
 						.isEqualTo(ErrorCode.CHECK_POSTPONED));
+	}
+
+	@Test
+	@DisplayName("RELAY 컨슈머 미기동 시나리오: Redis만 승인되고 MySQL 미적재 상태를 위반으로 잡아내지만, issue_failure_log 에는 아무 기록도 없다")
+	void detectsViolationWhileDlqStaysEmptyWhenRelayConsumerNeverPersists() {
+		long eventId = generateUniqueId();
+		// IssueStreamRelay 가 죽어있는 상태를 흉내낸다: coupon-issue.lua 가 Redis 재고만 3건 차감하고
+		// MySQL coupon_issue 에는 아무 것도 안 쌓인 채로 방치된다. 이 경로는 예외를 던지지 않으므로
+		// IssuePersistenceCoordinator 의 실패 기록 로직(JpaIssueFailureRecorder)이 아예 호출되지 않는다.
+		insertDummyEvent(eventId, 10L);
+		when(valueOperations.get(anyString())).thenReturn("7"); // expected = 10 - 7 = 3, actual = 0
+
+		CheckOutcome outcome = check.check(Scope.ofEvent(eventId));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolationCount()).isEqualTo(1);
+
+		long dlqCount = jdbcTemplate.queryForObject(
+				"SELECT COUNT(*) FROM issue_failure_log WHERE event_id = :eventId",
+				new MapSqlParameterSource("eventId", eventId),
+				Long.class);
+		assertThat(dlqCount)
+				.as("DLQ 는 예외가 발생한 적이 없으므로 이 드리프트를 전혀 모른다")
+				.isZero();
 	}
 
 	@Test
