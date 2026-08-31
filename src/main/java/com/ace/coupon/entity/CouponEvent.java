@@ -95,14 +95,4 @@ public class CouponEvent {
 		this.remainingStock = this.totalStock - actualActiveCount;
 		this.updatedAt = reconciledAt;
 	}
-
-	/**
-	 * 재고 초과발급 회수 전용. 회수된 건수만큼 issued_quantity를 줄인다.
-	 * 초과발급 상황에서는 remaining_stock이 "남은 자리"를 의미하지 않으므로 건드리지 않는다
-	 * (remaining_stock을 포함한 전체 재계산은 초과분 회수가 끝난 뒤 {@link #reconcileStock}의 책임).
-	 */
-	public void releaseSlots(int releasedCount, LocalDateTime releasedAt) {
-		this.issuedQuantity -= releasedCount;
-		this.updatedAt = releasedAt;
-	}
 }
