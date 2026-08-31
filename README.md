@@ -585,7 +585,7 @@ tolerance는 설정값으로 분리해 운영 환경의 측정 결과에 따라 
 
 ## 테스트
 
-JUnit 5로 **571개**가 돌아갑니다(`./gradlew test`, 1건 실패).
+JUnit 5로 **571개가 전부 통과**합니다(`./gradlew test`).
 실제 Redis와 MySQL이 필요한 정확성 검증은 태그로 분리해 별도 태스크로 돌립니다.
 
 | 구분 | 개수 | 대상 |
@@ -679,12 +679,24 @@ JUnit 5로 **571개**가 돌아갑니다(`./gradlew test`, 1건 실패).
 
 | 항목 | 상태 | 조치 |
 |---|---|---|
+| `src/main/resources/application.properties` | **저장소에 없음** (`.gitignore`) | `application-example.properties`를 복사해 만들어야 합니다. **없으면 기동도 테스트도 실패합니다** |
 | `.env` | 저장소에 없음 (`.gitignore`) | 기본값으로 기동되므로 없어도 됩니다. 포트나 비밀번호를 바꿀 때만 만듭니다 |
 | MySQL 포트 | 호스트 **3307** | 로컬에 설치된 MySQL(3306)과 충돌하지 않도록 옮겨 뒀습니다 |
 | 발급 저장 경로 | 기본 `RELAY` | 1차와 2차를 비교 측정할 때만 `SYNC`로 바꿉니다 |
 | 관리자 엔드포인트 | 기본 **비활성** | `/internal/campaigns/**`는 Redis 상태를 바꾸므로 명시해야 켜집니다 |
 
-**1. 인프라 기동**
+**1. 설정 파일 생성**
+
+```bash
+cp src/main/resources/application-example.properties src/main/resources/application.properties
+```
+
+이 단계를 건너뛰면 `spring.autoconfigure.exclude`가 적용되지 않아
+`jobRepository` 빈이 중복 등록되고 `BeanDefinitionOverrideException`으로 컨텍스트 로드가 실패합니다.
+기동뿐 아니라 `./gradlew test`도 같은 이유로 무너집니다.
+DB 접속 정보를 바꿔 쓴다면 복사한 파일에서 수정합니다.
+
+**2. 인프라 기동**
 
 ```bash
 docker compose up -d          # MySQL 8.4, Redis 8.2, Prometheus, Grafana
@@ -693,7 +705,7 @@ docker compose up -d          # MySQL 8.4, Redis 8.2, Prometheus, Grafana
 `docker/mysql/init`의 SQL이 최초 기동 시 자동 실행됩니다.
 덤프에서 복원하려면 `docker compose --profile restore up restore`를 씁니다.
 
-**2. 애플리케이션 기동**
+**3. 애플리케이션 기동**
 
 ```bash
 ./gradlew bootRun
@@ -705,7 +717,7 @@ docker compose up -d          # MySQL 8.4, Redis 8.2, Prometheus, Grafana
 ./gradlew bootRun -Dgenerate.dummy=true
 ```
 
-**3. 확인**
+**4. 확인**
 
 | 대상 | 주소 |
 |---|---|
