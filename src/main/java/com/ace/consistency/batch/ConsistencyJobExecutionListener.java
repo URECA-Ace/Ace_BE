@@ -38,6 +38,7 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
     public static final String RESTART_CHECK_NAMES_KEY = "consistency.restart.checkNames";
     public static final String RESTART_SCOPE_TO_KEY = "consistency.restart.scopeTo";
     public static final String RESTART_TRIGGER_TYPE_KEY = "consistency.restart.triggerType";
+    public static final String RESTART_COMPLETED_CHECKS_KEY = "consistency.restart.completedChecks";
     public static final String CHECK_NAME_DELIMITER = ",";
 
     private final BatchFailureLogRepository failureLogRepository;
@@ -56,11 +57,16 @@ public class ConsistencyJobExecutionListener implements JobExecutionListener {
         context.putString(RESTART_TRIGGER_TYPE_KEY, triggerType.name());
         jobRepository.updateExecutionContext(jobExecution);
 
+        List<String> completedChecks = context.containsKey(RESTART_COMPLETED_CHECKS_KEY)
+                ? List.of(context.getString(RESTART_COMPLETED_CHECKS_KEY).split(CHECK_NAME_DELIMITER))
+                : List.of();
+
         // SCHEDULED/ON_DEMAND 트리거 종류와 무관하게 Job이 실제로 시작되는 지점이라,
         // 프론트가 "지금 배치가 도는 중"인지 알 수 있는 유일하고 일관된 발행 지점이다.
         eventPublisher.publishEvent(ConsistencyBatchStartedEvent.builder()
                 .jobExecutionId(jobExecution.getId())
                 .totalSteps(checks.size())
+                .completedChecks(completedChecks)
                 .triggerType(triggerType.name())
                 .startedAt(LocalDateTime.now())
                 .build());

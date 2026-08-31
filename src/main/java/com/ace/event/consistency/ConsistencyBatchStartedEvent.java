@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.ToString;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 // ALL 스코프 정합성 검증 배치(Spring Batch Job)가 시작될 때 한 번 발행된다. SCHEDULED든
 // ON_DEMAND든 트리거 종류와 무관하게 Job이 실제로 시작되는 지점(beforeJob)에서 발행하므로,
@@ -17,6 +18,7 @@ import java.time.LocalDateTime;
 public class ConsistencyBatchStartedEvent {
 	private final long jobExecutionId;
 	private final int totalSteps;
+	private final List<String> completedChecks;
 	private final String triggerType;
 	private final LocalDateTime startedAt;
 }

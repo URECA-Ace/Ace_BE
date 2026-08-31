@@ -59,4 +59,11 @@ public class ConsistencyExecutionController {
 		service.stop(jobExecutionId);
 		return ResponseEntity.ok(ApiResponse.success());
 	}
+
+	@PostMapping("/verifications/results/{resultId}/restart")
+	public ResponseEntity<ApiResponse<ConsistencyJobExecutionResponse>> restart(
+			@PathVariable(name = "resultId") long resultId) {
+		return ResponseEntity.accepted().body(ApiResponse.success(
+				ConsistencyJobExecutionResponse.from(service.restartInterruptedResult(resultId))));
+	}
 }
