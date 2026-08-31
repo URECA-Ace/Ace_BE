@@ -122,8 +122,8 @@ public class StockEventRecoveryExecutor {
 
 		int excessCount = activeIssues.size() - couponEvent.getTotalStock();
 		if (excessCount <= 0) {
-			return RecoveryOutcome.alreadyResolved(Scope.ofEvent(eventId), Map.of("eventId", eventId, "excessCount", 0),
-					String.format("이벤트 %d는 이미 초과발급이 해소된 상태입니다. 이전 시도에서 이미 처리됐을 수 있습니다(이력 저장 유실 가능성).", eventId));
+			return RecoveryOutcome.failure(Scope.ofEvent(eventId), Map.of("eventId", eventId, "excessCount", 0, "catchUp", true),
+					String.format("이벤트 %d는 실제 초과발급 상태가 아니므로 초과발급 회수를 수행할 수 없습니다. 재고 카운터 불일치라면 STOCK_RECONCILE_COUNTER를 사용하세요.", eventId));
 		}
 
 		List<CouponIssue> excessIssues = activeIssues.subList(0, excessCount);
