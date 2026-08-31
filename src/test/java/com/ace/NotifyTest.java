@@ -32,6 +32,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -166,6 +167,7 @@ class NotifyTest {
 		ConsistencyBatchStartedEvent event = ConsistencyBatchStartedEvent.builder()
 				.jobExecutionId(500L)
 				.totalSteps(5)
+				.completedChecks(List.of())
 				.triggerType("SCHEDULED")
 				.startedAt(LocalDateTime.now())
 				.build();
@@ -175,7 +177,7 @@ class NotifyTest {
 		verify(notificationSender).send(
 				NotificationType.CONSISTENCY_BATCH_STARTED,
 				null,
-				Map.of("jobExecutionId", 500L, "totalSteps", 5, "triggerType", "SCHEDULED")
+				Map.of("jobExecutionId", 500L, "totalSteps", 5, "completedChecks", List.of(), "triggerType", "SCHEDULED")
 		);
 	}
 
