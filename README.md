@@ -36,12 +36,7 @@ AWS 실측에서 응답 p99는 4,311ms에서 1,038ms로, 커넥션 풀 대기 �
 
 ## 시연 영상
 
-<!--
-영상 넣는 법: 이 저장소에 이슈를 열고 코멘트 입력창에 mp4 를 드래그 앤 드롭하면
-https://github.com/user-attachments/assets/... URL 이 생성됩니다.
-그 URL 을 마크다운 문법 없이 "맨 URL 한 줄"로 아래에 붙이면 GitHub 이 플레이어로 렌더합니다.
-![](...) 로 감싸면 재생되지 않습니다.
--->
+https://github.com/user-attachments/assets/cd82fedc-eebe-47ab-b180-ffa4b06e614c
 
 ## 팀 구성 및 담당 역할
 
