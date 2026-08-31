@@ -35,10 +35,15 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
 
+	// NOTE(성능): 이 조건은 반드시 서브쿼리 안(LAG/ROW_NUMBER 계산 이전)에 있어야 한다.
+	// event_id/created_at은 coupon_issue 컬럼이라 파티션(issue_id) 하나당 값이 고정이므로
+	// 여기서 걸러도 파티션 전체가 빠질 뿐 결과는 동일하다 — 대신 윈도우 함수가 이벤트 스코프
+	// 밖의 수백만 행까지 조인·정렬하는 것을 막아준다. 바깥 WHERE로 옮기면(과거 구조) MySQL이
+	// window function 뒤로 필터를 push-down하지 못해 EVENT 스코프도 사실상 풀스캔이 된다.
 	private static final String SCOPE_CONDITION = """
 			(
-				(:scopeMode = 'EVENT' AND sub.event_id = :eventId)
-				OR (:scopeMode = 'ALL' AND sub.event_id IN (:eventIds) AND sub.created_at < :to)
+				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR (:scopeMode = 'ALL' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
 			)
 			""";
 
@@ -46,8 +51,8 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
             SELECT sub.issue_id, sub.event_id AS eventId, sub.prev_to_status, sub.from_status, sub.to_status,
                    COUNT(*) OVER() AS total_violation_count
             FROM (
-                SELECT ch.issue_id, 
-                       ch.from_status, 
+                SELECT ch.issue_id,
+                       ch.from_status,
                        ch.to_status,
                        LAG(ch.to_status) OVER (PARTITION BY ch.issue_id ORDER BY ch.occurred_at, ch.history_id) as prev_to_status,
                        ROW_NUMBER() OVER (PARTITION BY ch.issue_id ORDER BY ch.occurred_at, ch.history_id) as rn,
@@ -55,16 +60,15 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
                        ci.created_at
                 FROM coupon_history ch
                 JOIN coupon_issue ci ON ci.issue_id = ch.issue_id
+                WHERE %s
             ) sub
-            WHERE %s
-              AND (
+            WHERE
                   -- 1. 첫 번째 이력은 반드시 NULL -> ISSUED 여야 함 (체인의 시작점 검증)
                   (sub.rn = 1 AND NOT (sub.from_status IS NULL AND sub.to_status = 'ISSUED'))
                   OR
                   -- 2. 두 번째 이력부터는 직전 이력과 연속성이 이어지는지만 검증한다
                   --    (from/to 쌍 자체의 유효성은 CouponHistoryStructuralConsistencyCheck의 책임)
                   (sub.rn > 1 AND NOT (sub.from_status <=> sub.prev_to_status))
-              )
             ORDER BY sub.issue_id
             """.formatted(SCOPE_CONDITION);
 
