@@ -89,6 +89,77 @@ class RowLevelConsistencyCheckJdbcTest {
 	}
 
 	@Test
+	void 발급_시각이_기록_시각보다_5초_이내_늦어도_구조_위반이_아니다() {
+		LocalDateTime issuedAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5);
+		insertIssueWithTimes(issuedAt, issuedAt.minusSeconds(4), 1L);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 발급_시각이_기록_시각보다_정확히_5초_늦으면_구조_위반이_아니다() {
+		LocalDateTime issuedAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5);
+		insertIssueWithTimes(issuedAt, issuedAt.minusSeconds(5), 1L);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 발급_시각이_기록_시각보다_5초를_초과해_늦으면_구조_위반이다() {
+		LocalDateTime issuedAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5, 1_000);
+		insertIssueWithTimes(issuedAt, issuedAt.minusSeconds(5).minusNanos(1_000), 1L);
+
+		CheckOutcome outcome = new CouponIssueStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolations().toString()).contains("INVALID_TIMESTAMP_ORDER");
+	}
+
+	@Test
+	void 이력_기록_시각이_발생_시각보다_5초_이내_늦어도_구조_위반이_아니다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		LocalDateTime occurredAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5);
+		insertHistory(issueId, null, "ISSUED", occurredAt, occurredAt.minusSeconds(4));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 이력_기록_시각이_발생_시각보다_정확히_5초_늦으면_구조_위반이_아니다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		LocalDateTime occurredAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5);
+		insertHistory(issueId, null, "ISSUED", occurredAt, occurredAt.minusSeconds(5));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isTrue();
+	}
+
+	@Test
+	void 이력_기록_시각이_발생_시각보다_5초를_초과해_늦으면_구조_위반이다() {
+		long issueId = insertIssue("ISSUED", null, 1L);
+		LocalDateTime occurredAt = LocalDateTime.of(2026, 8, 18, 9, 0, 5, 1_000);
+		insertHistory(issueId, null, "ISSUED", occurredAt, occurredAt.minusSeconds(5).minusNanos(1_000));
+
+		CheckOutcome outcome = new CouponHistoryStructuralConsistencyCheck(namedJdbcTemplate)
+				.check(Scope.all(TEST_CHECKED_AT));
+
+		assertThat(outcome.isPass()).isFalse();
+		assertThat(outcome.getViolations().toString()).contains("INVALID_TIMESTAMP_ORDER");
+	}
+
+	@Test
 	void 발급_구조_ALL_검증은_현재_페이지의_이벤트만_검사한다() {
 		insertIssue("ISSUED", null, 1L);
 		insertIssue(null, null, 2L);
@@ -623,6 +694,22 @@ class RowLevelConsistencyCheckJdbcTest {
 				usedAt == null ? null : Timestamp.valueOf(usedAt),
 				Timestamp.valueOf(issuedAt),
 				messageId);
+		return jdbcTemplate.queryForObject("SELECT MAX(issue_id) FROM coupon_issue", Long.class);
+	}
+
+	private long insertIssueWithTimes(LocalDateTime issuedAt, LocalDateTime createdAt, long eventId) {
+		LocalDateTime validTo = issuedAt.plusHours(1);
+		jdbcTemplate.update("""
+				INSERT INTO coupon_issue (
+				  event_id, user_id, issue_sequence, request_id, status,
+				  issued_at, valid_from, valid_to, used_at, created_at, message_id
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				""",
+				eventId, eventId, 1,
+				"00000000-0000-0000-0000-00000000000" + eventId,
+				"ISSUED",
+				Timestamp.valueOf(issuedAt), Timestamp.valueOf(issuedAt), Timestamp.valueOf(validTo),
+				null, Timestamp.valueOf(createdAt), IssueRecord.messageId(eventId, "1755000000000-0"));
 		return jdbcTemplate.queryForObject("SELECT MAX(issue_id) FROM coupon_issue", Long.class);
 	}
 

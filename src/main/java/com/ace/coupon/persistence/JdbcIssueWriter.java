@@ -67,6 +67,8 @@ public class JdbcIssueWriter implements IssueWriter {
 		// 판정 시각은 Redis 서버 시각
 		// 여기서 now() 를 쓰면 인스턴스 2대의 시계 편차가 섞인다
 		LocalDateTime decidedAt = LocalDateTime.ofInstant(record.decidedAt(), zoneId);
+		// 기록 시각은 저장을 수행한 Backend 인스턴스의 시각이다.
+		// 판정 시각과 달라도 두 시각의 의미를 보존해야 저장 지연과 clock skew를 관찰할 수 있다.
 		LocalDateTime recordedAt = LocalDateTime.now(zoneId);
 
 		long issueId = insertIssue(record, metadata, decidedAt, recordedAt);

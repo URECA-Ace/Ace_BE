@@ -197,6 +197,13 @@ public class ConsistencyVerificationRunner {
 		validateRestartWindow(failedExecution);
 
 		ExecutionContext context = failedExecution.getExecutionContext();
+		String completedChecks = failedExecution.getStepExecutions().stream()
+				.filter(step -> step.getStatus() == BatchStatus.COMPLETED)
+				.map(StepExecution::getStepName)
+				.map(name -> name.endsWith("Step") ? name.substring(0, name.length() - 4) : name)
+				.collect(java.util.stream.Collectors.joining(ConsistencyJobExecutionListener.CHECK_NAME_DELIMITER));
+		context.putString(ConsistencyJobExecutionListener.RESTART_COMPLETED_CHECKS_KEY, completedChecks);
+		jobRepository.updateExecutionContext(failedExecution);
 		List<ConsistencyCheck> checks = resolveChecks(context.getString(ConsistencyJobExecutionListener.RESTART_CHECK_NAMES_KEY));
 		LocalDateTime scopeTo = LocalDateTime.parse(context.getString(ConsistencyJobExecutionListener.RESTART_SCOPE_TO_KEY));
 		TriggerType triggerType = TriggerType.valueOf(context.getString(ConsistencyJobExecutionListener.RESTART_TRIGGER_TYPE_KEY));

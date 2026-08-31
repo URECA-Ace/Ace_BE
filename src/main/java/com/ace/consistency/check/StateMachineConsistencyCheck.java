@@ -37,12 +37,13 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
 	// NOTE(성능): 이 조건은 반드시 서브쿼리 안(LAG/ROW_NUMBER 계산 이전)에 있어야 한다.
 	// event_id/created_at은 coupon_issue 컬럼이라 파티션(issue_id) 하나당 값이 고정이므로
-	// 여기서 걸러도 파티션 전체가 빠질 뿐 결과는 동일하다 — 대신 윈도우 함수가 이벤트 스코프
+	// 여기서 걸러도 파티션 전체가 빠질 뿐 결과는 동일하다 — 대신 윈도우 함수가 이벤트/기간 스코프
 	// 밖의 수백만 행까지 조인·정렬하는 것을 막아준다. 바깥 WHERE로 옮기면(과거 구조) MySQL이
-	// window function 뒤로 필터를 push-down하지 못해 EVENT 스코프도 사실상 풀스캔이 된다.
+	// window function 뒤로 필터를 push-down하지 못해 EVENT/RANGE 스코프도 사실상 풀스캔이 된다.
 	private static final String SCOPE_CONDITION = """
 			(
 				(:scopeMode = 'EVENT' AND ci.event_id = :eventId)
+				OR (:scopeMode = 'AS_OF_RANGE' AND ci.created_at >= :from AND ci.created_at < :to)
 				OR (:scopeMode = 'ALL' AND ci.event_id IN (:eventIds) AND ci.created_at < :to)
 			)
 			""";
@@ -74,7 +75,7 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
-		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.AS_OF_RANGE, Scope.ScopeType.ALL);
 	}
 
 	@Override
@@ -102,11 +103,14 @@ public class StateMachineConsistencyCheck implements ConsistencyCheck {
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {
 		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean rangeScope = scope.getType() == Scope.ScopeType.AS_OF_RANGE;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
 		return new MapSqlParameterSource()
-				.addValue("scopeMode", eventScope ? "EVENT" : "ALL")
+				.addValue("scopeMode", eventScope ? "EVENT" : (rangeScope ? "AS_OF_RANGE" : "ALL"))
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				// eventIds가 빈 리스트일 경우 IN 절 SQL 문법 에러 방지를 위해 의미 없는 값(-1) 세팅
-				.addValue("eventIds", eventScope ? null : (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()))
-				.addValue("to", eventScope ? null : scope.getTo());
+				.addValue("eventIds", pagedAll ? (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()) : List.of(-1L))
+				.addValue("from", rangeScope ? scope.getFrom() : null)
+				.addValue("to", (rangeScope || scope.getType() == Scope.ScopeType.ALL) ? scope.getTo() : null);
 	}
 }

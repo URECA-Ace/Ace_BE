@@ -123,7 +123,7 @@ class StockEventRecoveryExecutorTest {
 	}
 
 	@Test
-	void 초과발급이_아니면_아무것도_회수하지_않고_SUCCESS를_반환한다() {
+	void 초과발급이_아니면_아무것도_회수하지_않고_FAIL을_반환한다() {
 		CouponEvent couponEvent = couponEventWithCounters(10, 1, 9);
 		given(couponEventRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(couponEvent));
 		given(couponIssueRepository.findByCouponEvent_IdAndStatusInOrderByIssueSequenceDesc(eq(EVENT_ID), anyList()))
@@ -131,7 +131,7 @@ class StockEventRecoveryExecutorTest {
 
 		RecoveryOutcome outcome = executor.recoverEvent(EVENT_ID, RecoveryAction.STOCK_REVOKE_EXCESS_ISSUANCE);
 
-		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.FAIL);
 		assertThat(outcome.getDetail()).containsEntry("catchUp", true); // 저장 유실 후 재시도로 들어온 경우와 구분하기 위한 표식
 		verify(couponIssueRepository, never()).findByIdForUpdate(any());
 	}

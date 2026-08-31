@@ -22,7 +22,8 @@ public class ConsistencyBatchStartedNotifyListener {
 				null,   // 관리자 대상 알림이라 특정 유저 없음
 				Map.of(
 						"jobExecutionId", event.getJobExecutionId(),
-						"totalSteps", event.getTotalSteps(),
+					"totalSteps", event.getTotalSteps(),
+					"completedChecks", event.getCompletedChecks(),
 						"triggerType", event.getTriggerType()
 				)
 		);

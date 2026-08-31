@@ -62,13 +62,9 @@ public class CouponStateProcessor {
 	}
 
 	private void registerSuccessMetric(CouponIssueStatus from, CouponIssueStatus to) {
-		meterRegistry.counter("coupon.state.change",
-				"result", "success",
-				"result_label", "성공",
-				"from", from.name(),
-				"from_label", STATE_LABELS.get(from),
-				"to", to.name(),
-				"to_label", STATE_LABELS.get(to));
+		meterRegistry.counter("coupon.state.change", "result", "success",
+				"result_label", "성공", "from", from.name(), "from_label", STATE_LABELS.get(from),
+				"to", to.name(), "to_label", STATE_LABELS.get(to));
 	}
 
 	@Transactional

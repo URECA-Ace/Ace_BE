@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -18,22 +19,43 @@ import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.ConsistencyVerificationRunner;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.TriggerType;
+import com.ace.consistency.batch.BatchFailureLogEntity;
+import com.ace.consistency.batch.BatchFailureLogRepository;
+import com.ace.consistency.entity.VerificationResultEntity;
 import com.ace.consistency.dto.request.ConsistencyVerificationRequest;
 import com.ace.consistency.dto.request.ConsistencyVerificationRequest.ScopeRequest;
 import com.ace.consistency.dto.response.ConsistencyCheckCatalogResponse;
 import com.ace.consistency.dto.response.ConsistencyVerificationResponse;
 import com.ace.consistency.dto.response.ConsistencyJobExecutionResponse;
 
-import lombok.RequiredArgsConstructor;
-
 @Service
-@RequiredArgsConstructor
 public class ConsistencyVerificationService {
 
 	private final ConsistencyVerificationRunner runner;
 	private final List<ConsistencyCheck> checks;
 	private final Clock clock;
 	private final JobRepository jobRepository;
+	private final com.ace.consistency.repository.VerificationResultRepository resultRepository;
+	private final BatchFailureLogRepository failureLogRepository;
+
+	@Autowired
+	public ConsistencyVerificationService(ConsistencyVerificationRunner runner,
+			List<ConsistencyCheck> checks, Clock clock, JobRepository jobRepository,
+			com.ace.consistency.repository.VerificationResultRepository resultRepository,
+			BatchFailureLogRepository failureLogRepository) {
+		this.runner = runner;
+		this.checks = checks;
+		this.clock = clock;
+		this.jobRepository = jobRepository;
+		this.resultRepository = resultRepository;
+		this.failureLogRepository = failureLogRepository;
+	}
+
+	/** 기존 단위 테스트와 서비스 직접 생성 호출의 호환성을 유지한다. */
+	public ConsistencyVerificationService(ConsistencyVerificationRunner runner,
+			List<ConsistencyCheck> checks, Clock clock, JobRepository jobRepository) {
+		this(runner, checks, clock, jobRepository, null, null);
+	}
 
 	public ConsistencyCheckCatalogResponse findSupportedChecks(Scope.ScopeType scopeType) {
 		List<ConsistencyCheck> supportedChecks = checks.stream()
@@ -58,6 +80,21 @@ public class ConsistencyVerificationService {
 
 	public void stop(long jobExecutionId) {
 		runner.stop(jobExecutionId);
+	}
+
+	public JobExecution restartInterruptedResult(long resultId) {
+		VerificationResultEntity result = resultRepository.findById(resultId)
+				.orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,
+					"정합성 검증 결과를 찾을 수 없습니다."));
+		if (result.getScopeType() != Scope.ScopeType.ALL || result.getStatus() != com.ace.consistency.common.VerificationResult.Status.ERROR
+				|| result.getErrorMessage() == null || !result.getErrorMessage().toLowerCase().contains("interrupted")) {
+			throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+					"중단된 ALL 검증 결과만 이어서 검사할 수 있습니다.");
+		}
+		BatchFailureLogEntity failure = failureLogRepository.findTopByStatusOrderByOccurredAtDesc("STOPPED")
+				.orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+					"재시작할 중단 배치 실행을 찾을 수 없습니다."));
+		return runner.restartRunAsync(failure.getJobExecutionId());
 	}
 
 	public ConsistencyJobExecutionResponse findExecution(long jobExecutionId) {

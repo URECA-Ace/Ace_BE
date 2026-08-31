@@ -3,7 +3,8 @@ package com.ace.consistency.check;
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
 import com.ace.consistency.common.ViolationTargetType;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -13,10 +14,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.Duration;
 
 /** coupon_history 자체의 필수값, 시각 순서와 허용된 상태 전이 형태를 검사한다. */
 @Component
-@RequiredArgsConstructor
 public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public String getLabel() {
@@ -24,6 +25,22 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
+	private final long clockSkewToleranceMicros;
+
+	@Autowired
+	public CouponHistoryStructuralConsistencyCheck(
+			NamedParameterJdbcTemplate jdbcTemplate,
+			@Value("${consistency.clock-skew-tolerance:5s}") Duration clockSkewTolerance) {
+		if (clockSkewTolerance.isNegative()) {
+			throw new IllegalArgumentException("clock skew 허용 시간은 음수일 수 없습니다.");
+		}
+		this.jdbcTemplate = jdbcTemplate;
+		this.clockSkewToleranceMicros = clockSkewTolerance.toNanos() / 1_000L;
+	}
+
+	CouponHistoryStructuralConsistencyCheck(NamedParameterJdbcTemplate jdbcTemplate) {
+		this(jdbcTemplate, Duration.ofSeconds(5));
+	}
 
 	private static final String SCOPE_CONDITION = """
 			(
@@ -39,7 +56,7 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 	private static final String BASE_CONDITION = """
 			(
 				h.to_status IS NULL OR h.occurred_at IS NULL OR h.recorded_at IS NULL
-				OR h.recorded_at < h.occurred_at
+				OR TIMESTAMPDIFF(MICROSECOND, h.recorded_at, h.occurred_at) > :clockSkewToleranceMicros
 				OR h.to_status NOT IN ('ISSUED','USED','EXPIRED','CANCELED')
 				OR (h.from_status IS NULL AND h.to_status <> 'ISSUED')
 				OR (h.from_status IS NOT NULL AND NOT (
@@ -57,7 +74,8 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 			       CASE
 			         WHEN h.to_status IS NULL THEN 'MISSING_TO_STATUS'
 			         WHEN h.occurred_at IS NULL OR h.recorded_at IS NULL THEN 'MISSING_TIMESTAMP'
-			         WHEN h.recorded_at < h.occurred_at THEN 'INVALID_TIMESTAMP_ORDER'
+			         WHEN TIMESTAMPDIFF(MICROSECOND, h.recorded_at, h.occurred_at) > :clockSkewToleranceMicros
+			              THEN 'INVALID_TIMESTAMP_ORDER'
 			         WHEN h.to_status NOT IN ('ISSUED','USED','EXPIRED','CANCELED') THEN 'INVALID_TO_STATUS'
 			         WHEN h.from_status IS NULL AND h.to_status <> 'ISSUED' THEN 'INVALID_INITIAL_TRANSITION'
 			         ELSE 'INVALID_STATUS_TRANSITION'
@@ -101,6 +119,7 @@ public class CouponHistoryStructuralConsistencyCheck implements ConsistencyCheck
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				.addValue("eventIds", pagedAll ? scope.getEventIds() : List.of(-1L))
 				.addValue("from", rangeScope ? scope.getFrom() : null)
-				.addValue("to", rangeScope || scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null);
+				.addValue("to", rangeScope || scope.getType() == Scope.ScopeType.ALL ? scope.getTo() : null)
+				.addValue("clockSkewToleranceMicros", clockSkewToleranceMicros);
 	}
 }
