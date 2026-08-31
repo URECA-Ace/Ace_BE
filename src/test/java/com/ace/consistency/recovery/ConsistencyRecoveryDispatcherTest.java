@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.time.LocalDateTime;
@@ -263,6 +264,83 @@ class ConsistencyRecoveryDispatcherTest {
 		List<RecoveryAction> actions = dispatcher.availableActions(1L);
 
 		assertThat(actions).containsExactly(RecoveryAction.DEFAULT);
+	}
+
+	@Test
+	void 재검증이_postpone이었다가_다음_시도에_PASS면_RECOVERED로_갱신한다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity target = failResult();
+		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
+
+		Scope revalidationScope = Scope.ofEvent(1L);
+		given(policy.recover(target, RecoveryAction.DEFAULT))
+				.willReturn(List.of(RecoveryOutcome.success(revalidationScope, Map.of(), "복구완료")));
+		VerificationResult postponed = VerificationResult.error(
+				CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope,
+				new ConsistencyCheckException(ErrorCode.CHECK_POSTPONED, "PENDING 큐에 남은 메시지가 있어..."),
+				LocalDateTime.now(), 10L);
+		VerificationResult pass = VerificationResult.pass(
+				CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope, LocalDateTime.now(), 10L);
+		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
+				.willReturn(List.of(postponed), List.of(pass));
+
+		List<RecoveryResult> results = dispatcher.recover(1L, RecoveryAction.DEFAULT);
+
+		assertThat(results.get(0).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERED);
+		verify(verificationRunner, times(2))
+				.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
+	}
+
+	@Test
+	void 재검증이_계속_postpone이면_정해진_횟수만_재시도하고_RECOVERY_FAILED로_갱신한다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity target = failResult();
+		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
+
+		Scope revalidationScope = Scope.ofEvent(1L);
+		given(policy.recover(target, RecoveryAction.DEFAULT))
+				.willReturn(List.of(RecoveryOutcome.success(revalidationScope, Map.of(), "복구완료")));
+		VerificationResult postponed = VerificationResult.error(
+				CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope,
+				new ConsistencyCheckException(ErrorCode.CHECK_POSTPONED, "PENDING 큐에 남은 메시지가 있어..."),
+				LocalDateTime.now(), 10L);
+		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
+				.willReturn(List.of(postponed));
+
+		List<RecoveryResult> results = dispatcher.recover(1L, RecoveryAction.DEFAULT);
+
+		// 복구 액션 자체(릴레이 재시작 등)는 성공했지만, 근본 문제가 실제로 해소됐는지는
+		// 재검증이 계속 postpone이라 끝내 확인하지 못했다는 뜻이다.
+		assertThat(results.get(0).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
+		// 무한 재시도가 아니라 정해진 횟수(3번)에서 멈춘다.
+		verify(verificationRunner, times(3))
+				.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
+	}
+
+	@Test
+	void 재검증이_postpone이_아닌_진짜_FAIL이면_재시도_없이_바로_RECOVERY_FAILED로_갱신한다() {
+		stubSaveReturnsInput();
+		VerificationResultEntity target = failResult();
+		given(verificationResultRepository.findById(1L)).willReturn(Optional.of(target));
+
+		Scope revalidationScope = Scope.ofEvent(1L);
+		given(policy.recover(target, RecoveryAction.DEFAULT))
+				.willReturn(List.of(RecoveryOutcome.success(revalidationScope, Map.of(), "복구완료")));
+		VerificationResult stillFailing = VerificationResult.fail(
+				CHECK_NAME, TriggerType.RECOVERY_REVALIDATION, revalidationScope,
+				1, Map.of(), List.of(), LocalDateTime.now(), 10L);
+		given(verificationRunner.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION))
+				.willReturn(List.of(stillFailing));
+
+		List<RecoveryResult> results = dispatcher.recover(1L, RecoveryAction.DEFAULT);
+
+		assertThat(results.get(0).getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
+		assertThat(target.getRecoveryStatus()).isEqualTo(VerificationResultEntity.RecoveryStatus.RECOVERY_FAILED);
+		// 진짜 위반은 재시도해도 어차피 실패이므로 딱 한 번만 호출한다.
+		verify(verificationRunner, times(1))
+				.run(List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
 	}
 
 	@Test

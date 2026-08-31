@@ -118,6 +118,16 @@ public class ConsistencyRecoveryDispatcher {
 		return policy;
 	}
 
+	// 복구 직후 재검증이 하필 postpone 타이밍(예: 릴레이가 막 재시작해 밀린 메시지를 아직
+	// 처리 중인 순간)과 겹치면, 진짜 복구 실패가 아닌데도 CHECK_POSTPONED가 ERROR로 기록되어
+	// RECOVERY_FAILED로 잘못 남는다. 아주 짧게(최대 1초) 몇 번 더 확인해서 이 오탐을 줄인다.
+	private static final int REVERIFY_MAX_ATTEMPTS = 3;
+	private static final long REVERIFY_RETRY_DELAY_MS = 500;
+	// 복구 액션 직후엔 릴레이가 아직 메시지를 한 번도 못 읽어 pendingCount=0인 채로 "진짜 실패"처럼
+	// 보일 수 있다(컨슈머가 막 재시작해서 아직 클레임 전인 순간). 첫 확인 전에 짧게 기다려서
+	// 이 케이스도 대부분 postpone 상태로 넘어가게 한 뒤, 위 재시도 로직이 이어서 처리하게 한다.
+	private static final long REVERIFY_INITIAL_DELAY_MS = 300;
+
 	/** @return 재검증이 통과했으면 true. */
 	private boolean reverifyPassed(VerificationResultEntity target, Scope revalidationScope) {
 		// Runner.run()은 ALL 스코프를 지원하지 않는다(ALL은 Spring Batch 비동기 전용).
@@ -126,10 +136,36 @@ public class ConsistencyRecoveryDispatcher {
 			throw new ConsistencyCheckException(ErrorCode.RECOVERY_NOT_SUPPORTED_FOR_ALL_SCOPE);
 		}
 
-		ConsistencyCheck check = checksByName.get(target.getCheckName());
-		List<VerificationResult> results = verificationRunner.run(
-				List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
+		sleepFor(REVERIFY_INITIAL_DELAY_MS);
 
-		return results.get(0).isPass();
+		ConsistencyCheck check = checksByName.get(target.getCheckName());
+		for (int attempt = 1; attempt <= REVERIFY_MAX_ATTEMPTS; attempt++) {
+			List<VerificationResult> results = verificationRunner.run(
+					List.of(check), revalidationScope, TriggerType.RECOVERY_REVALIDATION);
+			VerificationResult result = results.get(0);
+
+			if (result.isPass()) {
+				return true;
+			}
+			if (!isPostponed(result) || attempt == REVERIFY_MAX_ATTEMPTS) {
+				return false;
+			}
+			sleepFor(REVERIFY_RETRY_DELAY_MS);
+		}
+		return false;
+	}
+
+	private boolean isPostponed(VerificationResult result) {
+		return result.getStatus() == VerificationResult.Status.ERROR
+				&& result.getErrorMessage() != null
+				&& result.getErrorMessage().startsWith(ErrorCode.CHECK_POSTPONED.name());
+	}
+
+	private void sleepFor(long millis) {
+		try {
+			Thread.sleep(millis);
+		} catch (InterruptedException interruptedException) {
+			Thread.currentThread().interrupt();
+		}
 	}
 }
