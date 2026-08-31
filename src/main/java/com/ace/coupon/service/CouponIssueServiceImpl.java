@@ -5,8 +5,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.dao.DataAccessException;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import com.ace.common.ErrorCode;
@@ -65,27 +63,6 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 		} catch (IllegalArgumentException exception) {
 			return CouponIssueFailedEvent.FailReason.UNKNOWN;
 		}
-	}
-
-	/**
-	 * 첫 발급과 첫 Prometheus 수집이 동시에 일어나도 increase()가 기준값 0을 관측할 수 있도록
-	 * 서버 기동 시 기존 회차의 발급 지표 시계열을 미리 등록한다.
-	 */
-	@EventListener(ApplicationReadyEvent.class)
-	void initializeIssueMetrics() {
-		couponEventRepository.findAll().forEach(event -> {
-			String eventId = event.getId().toString();
-			meterRegistry.counter("coupon.issue",
-					"event_id", eventId,
-					"result", "success",
-					"result_label", "성공");
-			ISSUE_REASON_LABELS.forEach((reason, reasonLabel) -> meterRegistry.counter("coupon.issue",
-					"event_id", eventId,
-					"result", "fail",
-					"result_label", "실패",
-					"reason", reason,
-					"reason_label", reasonLabel));
-		});
 	}
 
 	@Override
