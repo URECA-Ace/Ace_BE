@@ -41,6 +41,7 @@ public class ConsistencyStepCompletionListener implements StepExecutionListener 
     public void beforeStep(StepExecution stepExecution) {
         eventPublisher.publishEvent(ConsistencyStepStartedEvent.builder()
                 .checkName(check.getName())
+				.checkLabel(check.getLabel())
                 .triggerType(triggerType.name())
                 .startedAt(LocalDateTime.now())
                 .build());

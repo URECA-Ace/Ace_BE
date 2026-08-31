@@ -53,7 +53,7 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 
 1. [http://localhost:3000](http://localhost:3000) 접속 (초기 계정: `admin` / `admin`)
 2. 좌측 메뉴(≡) -> **Dashboards** 이동 -> **Ace Coupon Metrics** 대시보드가 이미 등록되어 있습니다.
-3. 데이터소스도 **Connections** -> **Data sources**에 `Prometheus`가 이미 연결되어 있습니다. (연결이 안 되어 있다면 위 1절의 컨테이너 재생성을 먼저 확인하세요)
+3. 데이터소스도 **Connections** -> **Data sources**에 `Prometheus`와 `Ace MySQL`이 연결되어 있습니다. (연결이 안 되어 있다면 위 1절의 컨테이너 재생성을 먼저 확인하세요)
 
 **Ace Coupon Metrics 대시보드 패널 구성** (`docker/grafana/dashboards/ace-coupon-metrics.json`, 10초 자동 새로고침)
 
@@ -63,7 +63,7 @@ IDE(IntelliJ 등)에서 `AceBeApplication`을 실행합니다.
 | 쿠폰 발급 실패 사유별 (발급 판정/비동기 저장) | 위와 같은 이유로 `coupon_issue_total{result="fail"}`과 `coupon_issue_relay_total{result="fail"}`을 `reason_label`(한글)별로 분리해 한 패널에 같이 표시. 상단 `reason_issue`/`reason_relay` 변수로 원하는 사유만 골라볼 수 있음 |
 | 쿠폰 상태 변경 현황 (전이별) | `coupon_state_change_total` 성공 건을 `from_label`→`to_label`(한글)별로 분리 |
 | 쿠폰 상태 변경 실패 사유별 | 실패를 `reason_label`(한글)별로 분리. 상단 `reason_state` 변수로 원하는 사유만 골라볼 수 있음 |
-| 정합성 검증 현황 (체크/상태/대상) | `consistency_verification_total`을 `check_label`, `status_label`, `scope_label`별로 분리해 한글 범례로 표시. 필터링은 상단 `check`/`status`/`scope` 변수(영문 원본 값 기준)로 원하는 조합만 골라볼 수 있음 |
+| 정합성 검증 현황 (체크/상태/대상) | MySQL의 `verification_result`를 조회해 `executed_at + duration_millis`를 완료 시각으로 계산하고, 검사·상태·대상별 완료 건수를 한글 범례로 표시. 애플리케이션 재시작과 무관하게 저장된 검증 이력을 조회함 |
 
 **대시보드 상단 변수(토글/필터)**
 

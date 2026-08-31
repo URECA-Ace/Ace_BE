@@ -185,6 +185,7 @@ class NotifyTest {
 
 		ConsistencyStepStartedEvent event = ConsistencyStepStartedEvent.builder()
 				.checkName("StockConsistencyCheck")
+				.checkLabel("재고 검사")
 				.triggerType("SCHEDULED")
 				.startedAt(LocalDateTime.now())
 				.build();
@@ -194,7 +195,10 @@ class NotifyTest {
 		verify(notificationSender).send(
 				NotificationType.CONSISTENCY_STEP_STARTED,
 				null,
-				Map.of("checkName", "StockConsistencyCheck", "triggerType", "SCHEDULED")
+				Map.of(
+						"checkName", "StockConsistencyCheck",
+						"checkLabel", "재고 검사",
+						"triggerType", "SCHEDULED")
 		);
 	}
 
