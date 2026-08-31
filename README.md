@@ -101,7 +101,7 @@ https://github.com/user-attachments/assets/... URL 이 생성됩니다.
 
 ## 아키텍처
 
-![아키텍처](docs/%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98.png)
+![아키텍처](docs/아키텍처.png)
 
 판정은 Redis에서, 저장은 요청 밖에서, 검증은 사후 배치에서 일어납니다.
 
