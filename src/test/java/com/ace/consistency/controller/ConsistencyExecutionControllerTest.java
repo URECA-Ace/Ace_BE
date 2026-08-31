@@ -17,6 +17,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.ace.consistency.common.Scope;
+import com.ace.consistency.common.VerificationResult;
 import com.ace.consistency.dto.request.ConsistencyVerificationRequest;
 import com.ace.consistency.dto.response.ConsistencyCheckCatalogResponse;
 import com.ace.consistency.dto.response.ConsistencyCheckCatalogResponse.CheckResponse;
@@ -64,6 +65,36 @@ class ConsistencyExecutionControllerTest {
 				.andExpect(jsonPath("$.data.executionType").value("ASYNC"))
 				.andExpect(jsonPath("$.data.jobExecutionId").value(55))
 				.andExpect(jsonPath("$.data.results").doesNotExist());
+	}
+
+	@Test
+	void AS_OF_RANGE_검증은_동기_실행_결과와_200을_반환한다() throws Exception {
+		VerificationResult result = VerificationResult.pass(
+				"StateMachineConsistencyCheck",
+				com.ace.consistency.common.TriggerType.ON_DEMAND,
+				Scope.ofAsOfRange(java.time.LocalDateTime.parse("2026-08-31T10:00:00"), java.time.LocalDateTime.parse("2026-08-31T12:00:00")),
+				java.time.LocalDateTime.parse("2026-08-31T12:00:01"),
+				10L);
+
+		given(service.verify(any(ConsistencyVerificationRequest.class)))
+				.willReturn(ConsistencyVerificationResponse.sync(List.of(result)));
+
+		mockMvc.perform(post("/api/v1/consistency/verifications")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "scope": {
+								    "type": "AS_OF_RANGE",
+								    "from": "2026-08-31T10:00:00",
+								    "to": "2026-08-31T12:00:00"
+								  },
+								  "checkNames": ["StateMachineConsistencyCheck", "IssueHistoryTimeSyncConsistencyCheck"]
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.executionType").value("SYNC"))
+				.andExpect(jsonPath("$.data.results[0].checkName").value("StateMachineConsistencyCheck"))
+				.andExpect(jsonPath("$.data.results[0].status").value("PASS"));
 	}
 
 	@Test
