@@ -109,6 +109,9 @@ public class StockEventRecoveryExecutor {
 	 * 초과발급 자동 회수. 총 재고를 초과한 만큼, 가장 최근에 발급된 건부터 ISSUED 상태인 것만
 	 * CANCELED로 전이시켜 슬롯을 반납한다. 이미 USED/EXPIRED로 전이된 건은 되돌리지 않고
 	 * 회수 불가 목록으로 남겨 사후에 관리자가 확인하도록 한다.
+	 * 회수 후에는 실제 활성 발급 건수를 기준으로 issued_quantity/remaining_stock을 함께
+	 * 재계산해, 이 액션 한 번만으로 STOCK_RECONCILE_COUNTER를 별도로 호출하지 않아도
+	 * remaining_stock까지 정합성이 맞춰지도록 한다.
 	 */
 	private RecoveryOutcome revokeExcessIssuance(Long eventId) {
 		CouponEvent couponEvent = couponEventRepository.findByIdForUpdate(eventId)
@@ -156,7 +159,8 @@ public class StockEventRecoveryExecutor {
 		}
 
 		if (!revokedIssueIds.isEmpty()) {
-			couponEvent.releaseSlots(revokedIssueIds.size(), now);
+			int actualActiveCountAfterRevoke = activeIssues.size() - revokedIssueIds.size();
+			couponEvent.reconcileStock(actualActiveCountAfterRevoke, now);
 		}
 
 		Map<String, Object> detail = Map.of(

@@ -157,7 +157,7 @@ class StockEventRecoveryExecutorTest {
 		assertThat(oldest.getStatus()).isEqualTo(CouponIssueStatus.ISSUED);
 		verify(couponHistoryRepository, times(1)).save(any());
 		assertThat(couponEvent.getIssuedQuantity()).isEqualTo(2);
-		assertThat(couponEvent.getRemainingStock()).isEqualTo(-2); // releaseSlots는 remainingStock을 건드리지 않는다
+		assertThat(couponEvent.getRemainingStock()).isEqualTo(-1); // totalStock(1) - 회수 후 실제 활성 건수(2)로 재계산됨
 	}
 
 	@Test
@@ -176,5 +176,6 @@ class StockEventRecoveryExecutorTest {
 		assertThat(outcome.getStatus()).isEqualTo(RecoveryResultStatus.SUCCESS);
 		assertThat(mostRecent.getStatus()).isEqualTo(CouponIssueStatus.CANCELED);
 		assertThat(couponEvent.getIssuedQuantity()).isEqualTo(1);
+		assertThat(couponEvent.getRemainingStock()).isEqualTo(0); // totalStock(1) - 회수 후 실제 활성 건수(1)로 재계산됨
 	}
 }
