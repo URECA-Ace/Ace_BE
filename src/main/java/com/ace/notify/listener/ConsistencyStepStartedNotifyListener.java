@@ -22,6 +22,7 @@ public class ConsistencyStepStartedNotifyListener {
 				null,   // 관리자 대상 알림이라 특정 유저 없음
 				Map.of(
 						"checkName", event.getCheckName(),
+						"checkLabel", event.getCheckLabel() == null ? event.getCheckName() : event.getCheckLabel(),
 						"triggerType", event.getTriggerType()
 				)
 		);

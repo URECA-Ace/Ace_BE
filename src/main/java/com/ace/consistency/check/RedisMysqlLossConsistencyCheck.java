@@ -31,7 +31,7 @@ import java.util.Set;
 public class RedisMysqlLossConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public String getLabel() {
-		return "Redis·MySQL 유실 정합성 검사";
+		return "Redis·MySQL 유실 검사";
 	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;

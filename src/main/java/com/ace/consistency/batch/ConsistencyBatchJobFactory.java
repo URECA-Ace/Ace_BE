@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
 /**
  * {@code ALL} 스코프 정합성 검증을 위한 Spring Batch {@link Job}을 동적으로 조립하는 팩토리.
@@ -48,14 +49,20 @@ public class ConsistencyBatchJobFactory {
     private final ApplicationEventPublisher eventPublisher;
 
     public Job buildJob(List<ConsistencyCheck> checks, Scope scope, TriggerType triggerType) {
-        List<Step> steps = checks.stream()
-                .filter(check -> supportsAll(check))
-                .map(check -> buildStep(check, scope, triggerType))
+        List<ConsistencyCheck> supportedChecks = checks.stream()
+                .filter(this::supportsAll)
                 .toList();
 
-        if (steps.isEmpty()) {
+        if (supportedChecks.isEmpty()) {
             throw new IllegalArgumentException("ALL 스코프를 지원하는 Check가 하나도 없습니다.");
         }
+
+        long totalEventCount = countEvents(scope);
+        List<Step> steps = java.util.stream.IntStream.range(0, supportedChecks.size())
+                .mapToObj(index -> buildStep(
+                        supportedChecks.get(index), scope, triggerType,
+                        index + 1, supportedChecks.size(), totalEventCount))
+                .toList();
 
         ConsistencyJobExecutionListener jobExecutionListener =
                 new ConsistencyJobExecutionListener(failureLogRepository, jobRepository, checks, scope.getTo(), triggerType, eventPublisher);
@@ -71,6 +78,15 @@ public class ConsistencyBatchJobFactory {
         return simpleJobBuilder.build();
     }
 
+    private long countEvents(Scope scope) {
+        String query = "SELECT COUNT(*) FROM coupon_event WHERE created_at < :to";
+        Long count = jdbcTemplate.queryForObject(
+                query,
+                new MapSqlParameterSource("to", scope.getTo()),
+                Long.class);
+        return count == null ? 0 : count;
+    }
+
     private boolean supportsAll(ConsistencyCheck check) {
         if (check.supportedScopeTypes().contains(Scope.ScopeType.ALL)) {
             return true;
@@ -79,9 +95,16 @@ public class ConsistencyBatchJobFactory {
         return false;
     }
 
-    private Step buildStep(ConsistencyCheck check, Scope scope, TriggerType triggerType) {
+    private Step buildStep(
+            ConsistencyCheck check,
+            Scope scope,
+            TriggerType triggerType,
+            int stepIndex,
+            int totalSteps,
+            long totalEventCount) {
         EventIdPageReader reader = new EventIdPageReader(jdbcTemplate, PAGE_SIZE, scope.getTo());
-        ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(check, scope.getTo());
+        ConsistencyCheckItemProcessor processor = new ConsistencyCheckItemProcessor(
+                check, scope.getTo(), stepIndex, totalSteps, totalEventCount, eventPublisher);
         CheckResultAccumulatorWriter writer = new CheckResultAccumulatorWriter(violationRepository);
         ConsistencyStepCompletionListener listener =
                 new ConsistencyStepCompletionListener(check, writer, scope, triggerType, resultPersister, eventPublisher);
@@ -93,6 +116,7 @@ public class ConsistencyBatchJobFactory {
                 .writer(writer)
                 .transactionManager(transactionManager)
                 .listener(writer)
+                .listener(processor)
                 .listener(listener)
                 .build();
     }

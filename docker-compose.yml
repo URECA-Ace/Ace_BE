@@ -120,6 +120,8 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-1234}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-ace}
       # 프론트(Ace_FE)에서 iframe으로 대시보드를 그대로 띄우기 위한 설정.
       # 익명 사용자는 Viewer 권한만 가지므로 조회만 가능하고 수정/삭제는 못한다.
       - GF_AUTH_ANONYMOUS_ENABLED=true

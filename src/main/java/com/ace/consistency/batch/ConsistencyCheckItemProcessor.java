@@ -2,8 +2,12 @@ package com.ace.consistency.batch;
 
 import com.ace.consistency.common.ConsistencyCheck;
 import com.ace.consistency.common.Scope;
+import com.ace.event.consistency.ConsistencyStepProgressEvent;
 import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.listener.StepExecutionListener;
+import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,14 +20,43 @@ import java.util.List;
  * {@link CheckResultAccumulatorWriter}가 담당한다.
  */
 @RequiredArgsConstructor
-public class ConsistencyCheckItemProcessor implements ItemProcessor<List<Long>, ConsistencyCheck.CheckOutcome> {
+public class ConsistencyCheckItemProcessor implements ItemProcessor<List<Long>, ConsistencyCheck.CheckOutcome>, StepExecutionListener {
 
     private final ConsistencyCheck check;
     private final LocalDateTime to;
+    private final int stepIndex;
+    private final int totalSteps;
+    private final long totalEventCount;
+    private final ApplicationEventPublisher eventPublisher;
+
+    private long jobExecutionId;
+    private long processedEventCount;
+    private long violationCount;
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        jobExecutionId = stepExecution.getJobExecution().getId();
+        processedEventCount = 0;
+        violationCount = 0;
+    }
 
     @Override
     public ConsistencyCheck.CheckOutcome process(List<Long> eventIds) {
         Scope scope = Scope.all(eventIds, to);
-        return check.check(scope);
+        ConsistencyCheck.CheckOutcome outcome = check.check(scope);
+        processedEventCount += eventIds.size();
+        violationCount += outcome.getViolationCount();
+        eventPublisher.publishEvent(ConsistencyStepProgressEvent.builder()
+                .jobExecutionId(jobExecutionId)
+                .checkName(check.getName())
+                .checkLabel(check.getLabel())
+                .stepIndex(stepIndex)
+                .totalSteps(totalSteps)
+                .eventIds(List.copyOf(eventIds))
+                .processedEventCount(processedEventCount)
+                .totalEventCount(totalEventCount)
+                .violationCount(violationCount)
+                .build());
+        return outcome;
     }
 }

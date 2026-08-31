@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 @ToString
 public class ConsistencyStepStartedEvent {
 	private final String checkName;
+	private final String checkLabel;
 	private final String triggerType;
 	private final LocalDateTime startedAt;
 }

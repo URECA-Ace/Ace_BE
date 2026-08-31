@@ -13,6 +13,7 @@ import com.ace.coupon.repository.CouponHistoryRepository;
 import com.ace.coupon.repository.CouponIssueRepository;
 import com.ace.coupon.repository.CouponStateIdempotencyRepository;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +53,23 @@ public class CouponStateProcessor {
 			"NOT_YET_USED", "미사용",
 			"INVALID_STATE_TRANSITION", "상태 전이 불가"
 	);
+
+	@PostConstruct
+	void initializeSuccessMetrics() {
+		registerSuccessMetric(CouponIssueStatus.ISSUED, CouponIssueStatus.USED);
+		registerSuccessMetric(CouponIssueStatus.USED, CouponIssueStatus.ISSUED);
+		registerSuccessMetric(CouponIssueStatus.ISSUED, CouponIssueStatus.EXPIRED);
+	}
+
+	private void registerSuccessMetric(CouponIssueStatus from, CouponIssueStatus to) {
+		meterRegistry.counter("coupon.state.change",
+				"result", "success",
+				"result_label", "성공",
+				"from", from.name(),
+				"from_label", STATE_LABELS.get(from),
+				"to", to.name(),
+				"to_label", STATE_LABELS.get(to));
+	}
 
 	@Transactional
 	public CouponStateChangeResponse processStateChange(
