@@ -248,15 +248,28 @@
       "type": "timeseries",
       "title": "정합성 검증 현황 (체크/상태/대상)",
       "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "datasource": { "type": "mysql", "uid": "ace-mysql" },
       "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "right",
+          "width": 360,
+          "calcs": ["lastNotNull"],
+          "sortBy": "Name",
+          "sortDesc": false
+        },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "interval": "$interval",
-          "expr": "sum by (check_label, status_label, scope_label) (increase(consistency_verification_total{check=~\"$check\", status=~\"$status\", scope=~\"$scope\", check_label=~\".+\"}[$interval]))",
-          "legendFormat": "{{check_label}} - {{status_label}} ({{scope_label}})"
+          "datasource": { "type": "mysql", "uid": "ace-mysql" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(completed_at, $interval), CONCAT(CASE check_name WHEN 'StockConsistencyCheck' THEN '재고 정합성' WHEN 'RedisMysqlLossConsistencyCheck' THEN 'Redis-MySQL 유실' WHEN 'DuplicateConsistencyCheck' THEN '중복 발급' WHEN 'DuplicateSequenceConsistencyCheck' THEN '발급 순번 중복' WHEN 'StateMachineConsistencyCheck' THEN '상태 전이' WHEN 'CouponIssueStructuralConsistencyCheck' THEN '발급 구조 정합성' WHEN 'CouponIssueHistoryStateConsistencyCheck' THEN '발급 이력 상태 정합성' WHEN 'CouponHistoryStructuralConsistencyCheck' THEN '쿠폰 이력 구조 정합성' WHEN 'CouponExpirationLagConsistencyCheck' THEN '쿠폰 만료 지연' WHEN 'IssueHistoryTimeSyncConsistencyCheck' THEN '이력 시간 동기화' ELSE check_name END, ' - ', CASE status WHEN 'PASS' THEN '정상' WHEN 'FAIL' THEN '실패' WHEN 'ERROR' THEN '에러' ELSE status END, ' (', CASE scope_type WHEN 'EVENT' THEN '이벤트 지정' WHEN 'AS_OF_RANGE' THEN '기간 지정' WHEN 'ALL' THEN '전체' ELSE scope_type END, ')') AS metric, COUNT(*) AS value FROM (SELECT DATE_ADD(executed_at, INTERVAL duration_millis * 1000 MICROSECOND) AS completed_at, check_name, status, scope_type FROM verification_result) vr WHERE $__timeFilter(completed_at) GROUP BY 1, 2 ORDER BY 1, 2",
+          "table": "verification_result"
         }
       ]
     }

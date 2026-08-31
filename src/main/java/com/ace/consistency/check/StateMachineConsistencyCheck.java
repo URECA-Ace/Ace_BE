@@ -30,7 +30,7 @@ import java.util.Set;
 public class StateMachineConsistencyCheck implements ConsistencyCheck {
 	@Override
 	public String getLabel() {
-		return "상태 전이 정합성 검사";
+		return "상태 전이 연속성 검사";
 	}
 
 	private final NamedParameterJdbcTemplate jdbcTemplate;
