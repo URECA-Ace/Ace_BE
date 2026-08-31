@@ -115,11 +115,57 @@ class ConsistencyVerificationServiceTest {
 	}
 
 	@Test
+	void AS_OF_RANGE는_선택한_검사를_동기로_실행하고_전체_결과를_반환한다() {
+		LocalDateTime from = LocalDateTime.now(clock).minusHours(2);
+		LocalDateTime to = LocalDateTime.now(clock);
+		Scope expectedScope = Scope.ofAsOfRange(from, to);
+		VerificationResult result = VerificationResult.pass(
+				"RangeCheck", TriggerType.ON_DEMAND, expectedScope, LocalDateTime.now(clock), 5L);
+		given(runner.run(org.mockito.ArgumentMatchers.eq(List.of(rangeCheck)), any(Scope.class),
+				org.mockito.ArgumentMatchers.eq(TriggerType.ON_DEMAND)))
+				.willReturn(List.of(result));
+
+		var response = service.verify(request(
+				new ScopeRequest(Scope.ScopeType.AS_OF_RANGE, null, from, to),
+				List.of("RangeCheck")));
+
+		assertThat(response.executionType()).isEqualTo(ConsistencyVerificationResponse.ExecutionType.SYNC);
+		assertThat(response.results()).hasSize(1);
+		assertThat(response.results().getFirst().status()).isEqualTo(VerificationResult.Status.PASS);
+	}
+
+	@Test
 	void AS_OF_RANGE는_from보다_to가_뒤여야_한다() {
 		LocalDateTime time = LocalDateTime.now(clock);
 
 		assertThatThrownBy(() -> service.verify(request(
 				new ScopeRequest(Scope.ScopeType.AS_OF_RANGE, null, time, time),
+				List.of("RangeCheck"))))
+				.isInstanceOf(ConsistencyCheckException.class);
+	}
+
+	@Test
+	void AS_OF_RANGE_요청에_eventId가_포함되면_거부한다() {
+		LocalDateTime from = LocalDateTime.now(clock).minusHours(2);
+		LocalDateTime to = LocalDateTime.now(clock);
+
+		assertThatThrownBy(() -> service.verify(request(
+				new ScopeRequest(Scope.ScopeType.AS_OF_RANGE, 10L, from, to),
+				List.of("RangeCheck"))))
+				.isInstanceOf(ConsistencyCheckException.class);
+	}
+
+	@Test
+	void AS_OF_RANGE_요청에_from이나_to가_null이면_거부한다() {
+		LocalDateTime time = LocalDateTime.now(clock);
+
+		assertThatThrownBy(() -> service.verify(request(
+				new ScopeRequest(Scope.ScopeType.AS_OF_RANGE, null, null, time),
+				List.of("RangeCheck"))))
+				.isInstanceOf(ConsistencyCheckException.class);
+
+		assertThatThrownBy(() -> service.verify(request(
+				new ScopeRequest(Scope.ScopeType.AS_OF_RANGE, null, time, null),
 				List.of("RangeCheck"))))
 				.isInstanceOf(ConsistencyCheckException.class);
 	}
