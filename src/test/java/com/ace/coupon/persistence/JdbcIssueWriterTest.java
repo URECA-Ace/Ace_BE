@@ -180,6 +180,28 @@ class JdbcIssueWriterTest {
 	}
 
 	@Test
+	@DisplayName("Redis 판정 시각이 미래여도 Backend 기록 시각은 별도로 저장한다")
+	void preservesBackendRecordedAtWhenClockIsBehind() {
+		Instant futureDecidedAt = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS);
+		IssueRecord futureRecord = new IssueRecord(
+				UUID.randomUUID(), metadata.eventId(), userId, 0L, userId - 1,
+				1L, futureDecidedAt, null);
+
+		long issueId = writer.write(futureRecord, metadata);
+
+		Map<String, Object> issue = issueRow(issueId);
+		Map<String, Object> history = jdbcTemplate.queryForMap(
+				"SELECT * FROM coupon_history WHERE issue_id = ?", issueId);
+		LocalDateTime issuedAt = dateTime(issue.get("issued_at"));
+		LocalDateTime createdAt = dateTime(issue.get("created_at"));
+		LocalDateTime occurredAt = dateTime(history.get("occurred_at"));
+		LocalDateTime recordedAt = dateTime(history.get("recorded_at"));
+
+		assertThat(createdAt).isBefore(issuedAt);
+		assertThat(recordedAt).isBefore(occurredAt);
+	}
+
+	@Test
 	@DisplayName("Stream 엔트리 식별자를 message_id로 저장한다")
 	void storesMessageId() {
 		long issueId = writer.write(record(UUID.randomUUID(), 1L, "1755000000000-0"), metadata);
