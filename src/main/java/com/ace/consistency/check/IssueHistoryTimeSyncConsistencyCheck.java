@@ -63,6 +63,17 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
             FROM coupon_issue ci
             """;
 
+	private static final String RANGE_JOIN_CLAUSE = """
+            JOIN LATERAL (
+                SELECT from_status, to_status, reason, occurred_at
+                FROM coupon_history ch
+                WHERE ch.issue_id = ci.issue_id
+                ORDER BY occurred_at DESC, history_id DESC
+                LIMIT 1
+            ) latest_history ON TRUE
+            WHERE ci.created_at >= :from AND ci.created_at < :to
+            """;
+
 	private static final String ALL_JOIN_CLAUSE = """
             JOIN (
                 SELECT issue_id, from_status, to_status, reason, occurred_at,
@@ -131,10 +142,11 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private static final String ALL_SQL = SELECT_CLAUSE + ALL_JOIN_CLAUSE + FILTER_CLAUSE;
 	private static final String EVENT_SQL = SELECT_CLAUSE + EVENT_JOIN_CLAUSE + FILTER_CLAUSE;
+	private static final String RANGE_SQL = SELECT_CLAUSE + RANGE_JOIN_CLAUSE + FILTER_CLAUSE;
 
 	@Override
 	public Set<Scope.ScopeType> supportedScopeTypes() {
-		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.ALL);
+		return Set.of(Scope.ScopeType.EVENT, Scope.ScopeType.AS_OF_RANGE, Scope.ScopeType.ALL);
 	}
 
 	@Override
@@ -143,7 +155,11 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 				.addValue("maxBatchLagSeconds", this.maxBatchLagSeconds)
 				.addValue("manualExpiredReason", MANUAL_EXPIRED_REASON);
 
-		String sql = scope.getType() == Scope.ScopeType.EVENT ? EVENT_SQL : ALL_SQL;
+		String sql = switch (scope.getType()) {
+			case EVENT -> EVENT_SQL;
+			case AS_OF_RANGE -> RANGE_SQL;
+			case ALL -> ALL_SQL;
+		};
 		List<Map<String, Object>> violations = jdbcTemplate.queryForList(sql, params);
 
 		if (violations.isEmpty()) {
@@ -166,10 +182,13 @@ public class IssueHistoryTimeSyncConsistencyCheck implements ConsistencyCheck {
 
 	private MapSqlParameterSource scopeParameters(Scope scope) {
 		boolean eventScope = scope.getType() == Scope.ScopeType.EVENT;
+		boolean rangeScope = scope.getType() == Scope.ScopeType.AS_OF_RANGE;
+		boolean pagedAll = scope.getType() == Scope.ScopeType.ALL && scope.getEventIds() != null;
 		return new MapSqlParameterSource()
 				.addValue("eventId", eventScope ? scope.getEventId() : null)
 				// eventIds가 빈 리스트일 경우 IN 절 SQL 문법 에러 방지를 위해 의미 없는 값(-1) 세팅
-				.addValue("eventIds", eventScope ? null : (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()))
-				.addValue("to", eventScope ? null : scope.getTo());
+				.addValue("eventIds", pagedAll ? (scope.getEventIds().isEmpty() ? List.of(-1L) : scope.getEventIds()) : List.of(-1L))
+				.addValue("from", rangeScope ? scope.getFrom() : null)
+				.addValue("to", (rangeScope || scope.getType() == Scope.ScopeType.ALL) ? scope.getTo() : null);
 	}
 }
