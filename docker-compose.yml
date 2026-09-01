@@ -1,0 +1,146 @@
+name: ace
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ace-mysql
+    restart: unless-stopped
+    ports:
+      # 로컬에 설치된 MySQL(3306)과 충돌하지 않도록 호스트 포트는 3307 을 씁니다.
+      - "${MYSQL_PORT:-3307}:3306"
+    environment:
+      # root 계정으로 접속합니다. mysql 이미지는 MYSQL_USER=root 를 허용하지 않으므로
+      # 별도 계정 없이 MYSQL_ROOT_PASSWORD 만 지정합니다.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-1234}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ace}
+      TZ: Asia/Seoul
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+09:00
+      - --skip-name-resolve
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 최초 기동(볼륨이 비어 있을 때) 시 이 디렉터리의 .sql 이 사전순으로 실행됩니다.
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - ace-net
+
+  redis:
+    image: redis:8.2
+    container_name: ace-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - "60"
+      - "1"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ace-net
+
+  redis-benchmark:
+    image: redis:8.2
+    container_name: ace-redis-benchmark
+    profiles: ["benchmark"]
+    ports:
+      - "${REDIS_BENCHMARK_PORT:-6380}:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory-policy
+      - noeviction
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks:
+      - ace-net
+  restore:
+    image: alpine
+    volumes:
+      - mysql-data:/volume
+      - ./dump:/backup
+    profiles: ["restore"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        FILE=$$(ls -t /backup/*.tar.gz | head -n1)
+        if [ -z "$$FILE" ]; then
+          echo "복원할 tar.gz 파일이 dump 폴더에 없습니다."
+          exit 1
+        fi
+        echo "복원 파일: $$FILE"
+        rm -rf /volume/*
+        tar xzf "$$FILE" -C /volume
+        echo "복원 완료"
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: ace-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - ace-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ace-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-1234}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-ace}
+      # 프론트(Ace_FE)에서 iframe으로 대시보드를 그대로 띄우기 위한 설정.
+      # 익명 사용자는 Viewer 권한만 가지므로 조회만 가능하고 수정/삭제는 못한다.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SAMESITE=disabled
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards
+    networks:
+      - ace-net
+
+volumes:
+  mysql-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  ace-net:
+    driver: bridge

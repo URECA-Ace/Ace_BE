@@ -40,3 +40,17 @@ out/
 .settings/
 .project
 .classpath
+src/main/resources/application.properties
+src/main/resources/application-load.properties
+
+### Docker ###
+.env
+dump/*
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Logs ###
+*.log
+logs/
