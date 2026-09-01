@@ -123,14 +123,6 @@ tasks.named('bootRun') {
 	systemProperty 'generate.dummy', System.getProperty('generate.dummy')
 }
 
-// 1. Git Hook 파일을 복사하는 Task 등록
-tasks.register('installGitHooks', Copy) {
-    from new File(rootProject.rootDir, '.githooks')
-    into { new File(rootProject.rootDir, '.git/hooks') }
-    // 파일에 실행 권한(chmod +x) 부여
-    fileMode 0775 
-}
-
 // 2. Java 컴파일이 실행될 때마다 installGitHooks Task를 먼저 실행하도록 의존성 설정
 tasks.named('compileJava') {
     dependsOn 'installGitHooks'
