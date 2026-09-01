@@ -9,4 +9,5 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface BatchFailureLogRepository extends JpaRepository<BatchFailureLogEntity, Long> {
 	java.util.Optional<BatchFailureLogEntity> findTopByStatusOrderByOccurredAtDesc(String status);
+	java.util.Optional<BatchFailureLogEntity> findTopByStatusInOrderByOccurredAtDesc(java.util.Collection<String> statuses);
 }

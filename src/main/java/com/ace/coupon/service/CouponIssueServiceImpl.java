@@ -6,6 +6,8 @@ import java.util.UUID;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import com.ace.common.ErrorCode;
 import com.ace.common.exception.CouponException;
@@ -67,16 +69,21 @@ public class CouponIssueServiceImpl implements CouponIssueService {
 
 	@Override
 	public CouponIssueAcceptedResponse issue(Long eventId, Long userId, UUID idempotencyKey) {
+		String runId = "untracked";
+		if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+			String header = attributes.getRequest().getHeader("X-Test-Run-Id");
+			if (header != null && !header.isBlank()) runId = header;
+		}
 		try {
 			CouponIssueAcceptedResponse response = doIssue(eventId, userId, idempotencyKey);
-			meterRegistry.counter("coupon.issue",
+			meterRegistry.counter("coupon.issue", "run_id", runId,
 					"event_id", eventId.toString(),
 					"result", "success",
 					"result_label", "성공").increment();
 			return response;
 		} catch (CouponException exception) {
 			String reason = exception.getErrorCode().name();
-			meterRegistry.counter("coupon.issue",
+			meterRegistry.counter("coupon.issue", "run_id", runId,
 					"event_id", eventId.toString(),
 					"result", "fail",
 					"result_label", "실패",

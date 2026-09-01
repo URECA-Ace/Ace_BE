@@ -86,12 +86,16 @@ public class ConsistencyVerificationService {
 		VerificationResultEntity result = resultRepository.findById(resultId)
 				.orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND,
 					"정합성 검증 결과를 찾을 수 없습니다."));
+		String errorMessage = result.getErrorMessage() == null ? "" : result.getErrorMessage().toLowerCase();
+		boolean restartable = errorMessage.contains("interrupted")
+				|| errorMessage.contains("optimisticlockingfailureexception")
+				|| errorMessage.contains("wrong version");
 		if (result.getScopeType() != Scope.ScopeType.ALL || result.getStatus() != com.ace.consistency.common.VerificationResult.Status.ERROR
-				|| result.getErrorMessage() == null || !result.getErrorMessage().toLowerCase().contains("interrupted")) {
+				|| !restartable) {
 			throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
 					"중단된 ALL 검증 결과만 이어서 검사할 수 있습니다.");
 		}
-		BatchFailureLogEntity failure = failureLogRepository.findTopByStatusOrderByOccurredAtDesc("STOPPED")
+		BatchFailureLogEntity failure = failureLogRepository.findTopByStatusInOrderByOccurredAtDesc(java.util.List.of("STOPPED", "FAILED"))
 				.orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
 					"재시작할 중단 배치 실행을 찾을 수 없습니다."));
 		return runner.restartRunAsync(failure.getJobExecutionId());

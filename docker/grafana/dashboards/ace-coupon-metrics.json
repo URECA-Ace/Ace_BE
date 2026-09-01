@@ -48,9 +48,10 @@
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(coupon_issue_total, event_id)", "refId": "StandardVariableQuery" },
         "refresh": 2,
-        "multi": false,
-        "includeAll": false,
-        "current": {},
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
         "sort": 3,
         "hide": 2
       },
@@ -173,14 +174,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_total{event_id=\"$event_id\", result=~\"$result_issue\", result_label=~\".+\"}) > 0",
-          "legendFormat": "발급 판정 - {{result_label}}"
+          "expr": "sum by (result_label, run_id) (increase(coupon_issue_total{result=~\"$result_issue\", result_label=~\".+\"}[$interval]))",
+          "legendFormat": "발급 판정 - {{result_label}} ({{run_id}})"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (result_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=~\"$result_relay\", result_label=~\".+\"}) > 0",
+          "expr": "sum by (result_label) (increase(coupon_issue_relay_total{result=~\"$result_relay\", result_label=~\".+\"}[$interval]))",
           "legendFormat": "비동기 저장 확정 - {{result_label}}"
         }
       ]
@@ -197,14 +198,14 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"}) > 0",
+          "expr": "sum by (reason_label) (increase(coupon_issue_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_issue\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "발급 판정 실패 - {{reason_label}}"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (coupon_issue_relay_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"}) > 0",
+          "expr": "sum by (reason_label) (increase(coupon_issue_relay_total{event_id=\"$event_id\", result=\"fail\", reason=~\"$reason_relay\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "비동기 저장 실패 - {{reason_label}}"
         }
       ]
@@ -221,7 +222,7 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (from_label, to_label) (increase(coupon_state_change_total{result=\"success\", from_label=~\".+\", to_label=~\".+\"}[$interval])) > 0",
+          "expr": "sum by (from_label, to_label) (increase(coupon_state_change_total{result=\"success\", from_label=~\".+\", to_label=~\".+\"}[$interval]))",
           "legendFormat": "{{from_label}} -> {{to_label}}"
         }
       ]
@@ -238,7 +239,7 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "interval": "$interval",
-          "expr": "sum by (reason_label) (increase(coupon_state_change_total{result=\"fail\", reason=~\"$reason_state\", reason_label=~\".+\"}[$interval])) > 0",
+          "expr": "sum by (reason_label) (increase(coupon_state_change_total{result=\"fail\", reason=~\"$reason_state\", reason_label=~\".+\"}[$interval]))",
           "legendFormat": "{{reason_label}}"
         }
       ]
@@ -249,7 +250,7 @@
       "title": "정합성 검증 현황 (체크/상태/대상)",
       "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
       "datasource": { "type": "mysql", "uid": "ace-mysql" },
-      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "drawStyle": "points", "lineWidth": 0, "fillOpacity": 0, "showPoints": "always", "pointSize": 8 }, "overrides": [] },
       "options": {
         "legend": {
           "showLegend": true,
