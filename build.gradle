@@ -6,7 +6,7 @@ plugins {
 
 // build 시 기본 생성되는 jar 이름 대신 myapp.jar 로 만들어지도록
 bootJar {
-	archiveFileName = 'myapp.jar'
+	archiveFileName = 'Ace.jar'
 }
 
 
