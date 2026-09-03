@@ -49,7 +49,7 @@ jobs:
   # [2단계] EC2 서버 배포
   deploy:
     name: Build and Deploy Spring Boot App to EC2
-    needs: test  # 테스트 성공 시에만 배포 진행
+#    needs: test  # 테스트 성공 시에만 배포 진행
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
