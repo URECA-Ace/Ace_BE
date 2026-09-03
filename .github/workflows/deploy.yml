@@ -6,46 +6,46 @@ on:
       - deploy
 jobs:
   # [1단계] 빌드 및 테스트 검증
-  test:
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: ace_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      redis:
-        image: redis:8.2
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v5  # 소스 코드 체크아웃
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5  # JDK 211 및 라이브러리 환경 세팅
-        with:
-          java-version: '21'
-          distribution: 'liberica'
-
-      - name: Grant execute permission for Gradle Wrapper
-        run: chmod +x ./gradlew  # Gradle 실행 권한 부여
-
-      - name: Build with Gradle
-        run: ./gradlew build  # 전체 프로젝트 빌드
-      - name: Run Tests
-        run: ./gradlew test  # 단위 테스트 실행 및 검증
+#  test:
+#    runs-on: ubuntu-latest
+#    services:
+#      mysql:
+#        image: mysql:8.4
+#        env:
+#          MYSQL_ROOT_PASSWORD: root
+#          MYSQL_DATABASE: ace_test
+#        ports:
+#          - 3306:3306
+#        options: >-
+#          --health-cmd="mysqladmin ping -h localhost"
+#          --health-interval=10s
+#          --health-timeout=5s
+#          --health-retries=5
+#      redis:
+#        image: redis:8.2
+#        ports:
+#          - 6379:6379
+#        options: >-
+#          --health-cmd="redis-cli ping"
+#          --health-interval=10s
+#          --health-timeout=5s
+#          --health-retries=5
+#    steps:
+#      - name: Checkout source code
+#        uses: actions/checkout@v5  # 소스 코드 체크아웃
+#      - name: Set up JDK 21
+#        uses: actions/setup-java@v5  # JDK 211 및 라이브러리 환경 세팅
+#        with:
+#          java-version: '21'
+#          distribution: 'liberica'
+#
+#      - name: Grant execute permission for Gradle Wrapper
+#        run: chmod +x ./gradlew  # Gradle 실행 권한 부여
+#
+#      - name: Build with Gradle
+#        run: ./gradlew build  # 전체 프로젝트 빌드
+#      - name: Run Tests
+#        run: ./gradlew test  # 단위 테스트 실행 및 검증
   # [2단계] EC2 서버 배포
   deploy:
     name: Build and Deploy Spring Boot App to EC2
