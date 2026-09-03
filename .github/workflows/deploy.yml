@@ -3,7 +3,7 @@ name: CI/CD to EC2
 on:
   push:
     branches:
-      - main  # main 브랜치 푸시 시 자동 실행
+      - deploy
 jobs:
   # [1단계] 빌드 및 테스트 검증
   test:
